@@ -115,7 +115,7 @@ def test_process_incoming_instance_actor(engine, tmp_path):
     expected_key_id = f"{expected_actor}#main-key"
 
     assert result is not None
-    mock_storage.assert_called_once_with(config.database.url)
+    mock_storage.assert_called_once_with(config.database)
     call_args = mock_processor.call_args
     assert call_args.kwargs["actor_id"] == expected_actor
     assert call_args.kwargs["key_id"] == expected_key_id
@@ -165,7 +165,7 @@ def test_process_incoming_user_actor(engine, tmp_path, monkeypatch):
     expected_key_id = f"{expected_actor}#main-key"
 
     assert result is not None
-    mock_storage.assert_called_once_with(config.database.url)
+    mock_storage.assert_called_once_with(config.database)
     call_args = mock_processor.call_args
     assert call_args.kwargs["actor_id"] == expected_actor
     assert call_args.kwargs["key_id"] == expected_key_id

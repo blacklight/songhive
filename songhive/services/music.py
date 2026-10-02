@@ -10,6 +10,7 @@ from sqlalchemy import Select, and_, exists, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ..federation import doc_cache
 from ..models.album import Album
 from ..models.artist import Artist
 from ..models.external_item import ExternalItem
@@ -1193,6 +1194,35 @@ async def propagate_external_library_visibility(
         track.visibility = library.visibility
     if changed:
         await session.flush()
+    return changed
+
+
+async def set_library_visibility(
+    session: AsyncSession,
+    library: Library,
+    visibility: str,
+    user: User,
+) -> List[Tuple[Track, str]]:
+    """Set ``library.visibility`` and propagate it to externally synced tracks.
+
+    The single writer of ``Library.visibility`` for the update routes
+    (internal library, user-scoped external library, admin external
+    library): propagation and cache invalidation live here so a new call
+    site cannot forget them.  Cached federation documents for the library
+    and every track whose visibility changed are dropped, deferred to the
+    caller's commit so a racing render cannot re-cache the pre-change
+    payloads.  Returns the ``(track, previous_visibility)`` pairs from the
+    propagation.
+    """
+    library.visibility = visibility
+    ext_result = await session.execute(select(ExternalLibrary).where(ExternalLibrary.library_id == str(library.id)))
+    external_library = ext_result.scalar_one_or_none()
+    changed: List[Tuple[Track, str]] = []
+    if external_library is not None:
+        changed = await propagate_external_library_visibility(session, external_library, user)
+    doc_cache.invalidate_prefix(("lib", str(library.id)), session=session)
+    for track, _ in changed:
+        doc_cache.invalidate_track(str(track.id), object_id=track.federation_object_id, session=session)
     return changed
 
 

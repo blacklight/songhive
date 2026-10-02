@@ -7,7 +7,7 @@ import logging
 
 from sqlalchemy import select
 
-from ..config import load_config
+from ..config import database_task_engine_kwargs, load_config
 from ..models.base import dispose_and_reset, get_session, init_db
 from ..models.notification import Notification
 from ..models.user import User
@@ -72,7 +72,7 @@ async def _send_notification_email(config, notification_id: str) -> bool:
 def send_notification_email(notification_id: str) -> bool:
     """Send the individual email for a single notification."""
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     try:
         return asyncio.run(_send_notification_email(config, notification_id))
     except EmailNotConfiguredError as exc:

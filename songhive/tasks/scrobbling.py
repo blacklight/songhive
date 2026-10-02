@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ..config import load_config
+from ..config import database_task_engine_kwargs, load_config
 from ..config.schema import SonghiveConfig
 from ..models.album import Album
 from ..models.base import dispose_and_reset, get_session, init_db
@@ -140,7 +140,7 @@ def scrobble_now_playing(self, user_id: str, entity_id: str, entity_kind: str = 
     config = load_config([])
     if not config.scrobbling.enabled:
         return None
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     async def _run() -> str:
         try:
@@ -203,7 +203,7 @@ def scrobble_track(self, user_id: str, entity_id: str, played_at: int, entity_ki
     config = load_config([])
     if not config.scrobbling.enabled:
         return None
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     async def _run() -> str:
         try:

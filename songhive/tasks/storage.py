@@ -80,14 +80,14 @@ def cleanup_orphaned_files() -> int:
     Loads the runtime configuration, initializes the database, and runs the
     async cleanup helper inside ``asyncio.run``.
     """
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
     from ..models.base import dispose_and_reset, get_session, init_db
     from ..storage import get_storage
 
     logger.info("Starting orphaned file cleanup task")
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     storage = get_storage(config.storage)
 
     async def _run() -> int:
@@ -108,14 +108,14 @@ def rehash_audio_files(dry_run: bool = False) -> dict[str, int]:
     Loads the runtime configuration, initializes the database, and runs the
     async rehash helper inside ``asyncio.run``.
     """
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
     from ..models.base import dispose_and_reset, get_session, init_db
     from ..storage import get_storage
 
     logger.info("Starting audio rehash task (dry_run=%s)", dry_run)
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     storage = get_storage(config.storage)
     storage_service = StorageService(storage, config.storage)
 

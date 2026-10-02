@@ -140,7 +140,7 @@ async def _user_section(
         try:
             # Refresh the policy snapshot so defederated domains are excluded.
             await moderation_service.load_instance_policies(db)
-            fed_storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+            fed_storage = await asyncio.to_thread(get_federation_storage, config.database)
             remote_matches = await asyncio.to_thread(federation_service.search_remote_actors, fed_storage, term, config)
         except Exception:
             # The users section must not fail when the federation storage is

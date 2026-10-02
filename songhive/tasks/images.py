@@ -23,7 +23,7 @@ def enrich_images(track_id: str, force: bool = False) -> bool:
     :param force: Re-enrich even if the artist/album has already been processed.
     :returns: ``True`` if an image or cover was updated.
     """
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
     from ..models.base import dispose_and_reset, get_session, init_db
     from ..services.musicbrainz import MusicBrainzService
     from ..services.storage import StorageService
@@ -33,7 +33,7 @@ def enrich_images(track_id: str, force: bool = False) -> bool:
     if not config.musicbrainz.enabled or not config.musicbrainz.fetch_artist_images:
         return False
 
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     storage = get_storage(config.storage)
     storage_service = StorageService(storage, config.storage)
     mb_service = MusicBrainzService(config.musicbrainz)
@@ -65,7 +65,7 @@ def bulk_enrich_images(
 
     Enqueues image enrichment for the requested scope of artists and albums.
     """
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
     from ..models.base import dispose_and_reset, get_session, init_db
     from ..services.admin_tasks import bulk_enrich_images as _bulk_enrich_images
     from ..services.musicbrainz import MusicBrainzService
@@ -76,7 +76,7 @@ def bulk_enrich_images(
     if not config.musicbrainz.enabled or not config.musicbrainz.fetch_artist_images:
         return {"artists": 0, "albums": 0, "updated": 0, "failed": 0}
 
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     storage = get_storage(config.storage)
     storage_service = StorageService(storage, config.storage)
     mb_service = MusicBrainzService(config.musicbrainz)

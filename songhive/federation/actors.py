@@ -14,21 +14,15 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from pubby.content import property_value_attachment, render_bio_html
-from pubby.storage.adapters.db import DbActivityPubStorage
 
 from ..config.schema import SonghiveConfig
 from ..models.user import FollowersApproval, User
 from ..services.federation import ensure_user_actor, publish_actor_update
+from . import doc_cache
 from ._common import get_actor_url, get_inbox_url, get_outbox_url
-from .storage import create_activitypub_storage
+from .storage import get_federation_storage  # noqa: F401  (re-exported)
 
 logger = logging.getLogger(__name__)
-
-# Mapping of database URL to a shared pubby storage instance.  Storage is
-# created lazily and cached for the lifetime of the process so that profile
-# updates can reuse the same backend across calls.  Instances are keyed by
-# database URL; tests that need a fresh backend should reset this cache.
-_federation_storage_cache: dict[str, DbActivityPubStorage] = {}
 
 
 def _build_attachment(user: User) -> Optional[list[dict[str, Any]]]:
@@ -88,13 +82,6 @@ def user_to_actor_document(user: User, domain: str) -> dict:
     return document
 
 
-def get_federation_storage(database_url: str) -> DbActivityPubStorage:
-    """Return a cached pubby storage instance for the configured database URL."""
-    if database_url not in _federation_storage_cache:
-        _federation_storage_cache[database_url] = create_activitypub_storage(database_url)
-    return _federation_storage_cache[database_url]
-
-
 async def sync_user_actor(user: User, config: SonghiveConfig) -> bool:
     """
     Refresh the cached ActivityPub actor document for a user.
@@ -111,9 +98,12 @@ async def sync_user_actor(user: User, config: SonghiveConfig) -> bool:
         return False
 
     ensure_user_actor(user, config)
+    # Drop the stale actor/WebFinger/collection documents so the next
+    # dereference renders the updated profile.
+    doc_cache.invalidate_actor(user.username)
 
     try:
-        storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+        storage = await asyncio.to_thread(get_federation_storage, config.database)
     except Exception:
         # Broad catch is intentional: actor sync is a non-critical federation
         # operation and must not block profile updates.  BaseException

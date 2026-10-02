@@ -520,7 +520,7 @@ def _federation_storage(config: SonghiveConfig):
     """Return the shared pubby storage for the configured database."""
     from ..federation.actors import get_federation_storage
 
-    return get_federation_storage(config.database.url)
+    return get_federation_storage(config.database)
 
 
 def _cached_actor_entry(storage, actor_url: str) -> Optional[tuple]:

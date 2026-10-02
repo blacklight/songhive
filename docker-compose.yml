@@ -182,6 +182,11 @@ services:
     image: postgres:16-alpine
     container_name: songhive-postgres
     user: ${PUID:-1000}:${PGID:-1000}
+    # Headroom above the default 100 connections: the app, the Celery
+    # worker, the stream worker and the watcher each keep bounded pools
+    # (database.pool_size + database.max_overflow per event loop), and the
+    # surplus absorbs bursts that queue on pooled connections.
+    command: postgres -c max_connections=200
     environment:
       POSTGRES_USER: songhive
       POSTGRES_PASSWORD: songhive

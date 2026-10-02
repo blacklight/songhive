@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.types import Receive, Send
 
-from ..config import SonghiveConfig, get_default_user_agent
+from ..config import SonghiveConfig, database_engine_kwargs, get_default_user_agent
 from ..models.base import dispose_engine, get_session, init_db
 from ..services.acl import audit_ownerless_private
 from ..services.redis import close_redis_client, get_redis_client
@@ -200,7 +200,7 @@ def create_app(config: SonghiveConfig) -> FastAPI:
     :param config: The application configuration.
     :returns: A configured FastAPI instance.
     """
-    init_db(config.database.url)
+    init_db(config.database.url, **database_engine_kwargs(config.database))
 
     @asynccontextmanager
     async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
@@ -370,7 +370,7 @@ def _setup_federation(app: FastAPI, config: SonghiveConfig):
         from pubby.server.adapters.fastapi_mastodon import bind_mastodon_api
 
         from ..federation.storage import (
-            create_activitypub_storage,
+            get_federation_storage,
             get_or_create_private_key,
         )
 
@@ -383,8 +383,16 @@ def _setup_federation(app: FastAPI, config: SonghiveConfig):
             type="Application",
         )
 
-        storage = create_activitypub_storage(config.database.url)
+        storage = get_federation_storage(config.database)
         private_key_path = get_or_create_private_key(config.federation.private_key_path)
+        # Share the dereference document cache between Songhive's own
+        # federation routes and pubby's adapter routes: concurrent fetches
+        # coalesce, and handler-side mutations invalidate both.
+        from ..federation import doc_cache
+
+        document_cache = doc_cache.document_cache(
+            default_ttl=config.federation.document_cache_ttl_seconds,
+        )
 
         handler = ActivityPubHandler(
             storage=storage,
@@ -395,9 +403,10 @@ def _setup_federation(app: FastAPI, config: SonghiveConfig):
             user_agent=get_default_user_agent(),
             software_name="Songhive",
             software_version=__version__,
+            document_cache=document_cache,
         )
         app.state.federation_handler = handler
-        bind_activitypub(app, handler, prefix="/ap")
+        bind_activitypub(app, handler, prefix="/ap", document_cache=document_cache)
         bind_mastodon_api(
             app,
             handler,

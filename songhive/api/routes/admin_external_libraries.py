@@ -212,9 +212,11 @@ async def update_admin_external_library(
     if body.visibility is not None:
         library = await db.get(Library, external_library.library_id)
         if library is not None:
-            library.visibility = body.visibility.value
             changes["visibility"] = body.visibility.value
-            await music.propagate_external_library_visibility(db, external_library, admin)
+            # Sets the visibility, propagates it to the library's synced
+            # tracks and drops their cached dereference documents (deferred
+            # to this route's commit).
+            await music.set_library_visibility(db, library, body.visibility.value, admin)
 
     if body.config is not None:
         merged_config = _merge_config_preserving_redacted(

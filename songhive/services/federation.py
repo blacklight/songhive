@@ -29,8 +29,8 @@ from pubby.moderation import normalize_domain as _pubby_normalize_domain
 from sqlalchemy import and_, or_
 
 from ..config import SonghiveConfig, get_default_user_agent
-from ..federation import get_actor_url
-from ..federation.storage import create_activitypub_storage
+from ..federation import doc_cache, get_actor_url
+from ..federation.storage import get_federation_storage
 from ..models import User
 from ._common import ilike_contains
 
@@ -130,17 +130,17 @@ def ensure_user_actor(user: User, config: SonghiveConfig) -> bool:
     return provision_federation_keys(user, config.federation.instance_domain)
 
 
-def get_follower_inboxes(actor_url: str, database_url: str) -> list[str]:
+def get_follower_inboxes(actor_url: str, database) -> list[str]:
     """
     Return unique follower inboxes for ``actor_url``.
 
     Reads pubby's follower storage, prefers shared inboxes, and deduplicates.
     """
-    storage = create_activitypub_storage(database_url)
+    storage = get_federation_storage(database)
     return collect_inboxes(storage.get_followers(actor_id=actor_url))
 
 
-def get_object_follower_inboxes(object_ids: Iterable[str], database_url: str) -> list[str]:
+def get_object_follower_inboxes(object_ids: Iterable[str], database) -> list[str]:
     """
     Return unique follower inboxes for any of the given local objects.
 
@@ -155,7 +155,7 @@ def get_object_follower_inboxes(object_ids: Iterable[str], database_url: str) ->
     wanted = {oid for oid in object_ids if oid}
     if not wanted:
         return []
-    storage = create_activitypub_storage(database_url)
+    storage = get_federation_storage(database)
     return collect_inboxes(storage.get_followers_of_targets(wanted))
 
 
@@ -253,6 +253,12 @@ def resolve_follow_request(
             request,
             actor_id=user.actor_url,
             deliver=_deliver,
+            # Covers the pubby-side ("pubby", "followers") key — only
+            # relevant if the instance actor itself is ever the request
+            # target. The per-user ("coll", username, "followers")
+            # collection is invalidated by the caller, deferred to the
+            # route's commit.
+            document_cache=doc_cache.document_cache(),
         )
     return _pubby_reject_follow_request(
         storage,
@@ -522,7 +528,7 @@ def resolve_actor_inbox(
         return None
     if db_domain_policy(extract_domain(actor_url)) == "defederate":
         return None
-    storage = create_activitypub_storage(config.database.url)
+    storage = get_federation_storage(config.database)
     return _pubby_resolve_actor_inbox(
         actor_url,
         storage,
@@ -575,7 +581,7 @@ def unpublish_track_activity(
     if not activity:
         return 0
 
-    inboxes = get_follower_inboxes(user.actor_url, config.database.url)
+    inboxes = get_follower_inboxes(user.actor_url, config.database)
     actor_key_id = f"{user.actor_url}#main-key"
     for inbox in inboxes:
         deliver_activity.delay(activity, inbox, actor_key_id, user.private_key_pem)  # type: ignore
@@ -621,7 +627,7 @@ def publish_actor_update(
         document = user_to_actor_document(user, config.federation.instance_domain)
 
     activity = create_update_actor_activity(user.actor_url, document)
-    inboxes = get_follower_inboxes(user.actor_url, config.database.url)
+    inboxes = get_follower_inboxes(user.actor_url, config.database)
     actor_key_id = f"{user.actor_url}#main-key"
     for inbox in inboxes:
         try:

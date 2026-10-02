@@ -12,7 +12,7 @@ import logging
 from datetime import timedelta
 from typing import Optional
 
-from ..config import load_config
+from ..config import database_task_engine_kwargs, load_config
 from ..models.base import dispose_and_reset, get_session, init_db
 from ..models.podcast import Podcast
 from ..models.user import User
@@ -40,7 +40,7 @@ def refresh_podcast(self, podcast_id: str) -> Optional[str]:
     from ..services.podcasts import FeedFetchError
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     async def _run() -> str:
         try:
@@ -84,7 +84,7 @@ def scan_due_podcasts() -> int:
     config = load_config([])
     if not config.podcasts.enabled:
         return 0
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     async def _run() -> list[str]:
         try:
@@ -123,7 +123,7 @@ def sync_gpodder_account(self, user_id: str) -> Optional[str]:
     from ..services.gpodder import GPodderError
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     async def _run() -> str:
         try:
@@ -177,7 +177,7 @@ def scan_due_gpodder_syncs() -> int:
     config = load_config([])
     if not config.podcasts.enabled:
         return 0
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     async def _run() -> list[str]:
         try:

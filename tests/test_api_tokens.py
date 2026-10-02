@@ -81,7 +81,7 @@ def _patch_task_env(monkeypatch, db_url, media_dir):
     )
 
     monkeypatch.setattr(api_tokens_module, "load_config", lambda *_: config)
-    monkeypatch.setattr(api_tokens_module, "init_db", lambda url: None)
+    monkeypatch.setattr(api_tokens_module, "init_db", lambda *a, **k: None)
 
     @asynccontextmanager
     async def _get_session():

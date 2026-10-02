@@ -194,11 +194,12 @@ def _run_async(coro) -> None:
 
 def _fail_archive_sync(archive_id: str, message: str) -> None:
     """Mark an archive failed from sync task context."""
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
     from ..models.base import init_db
 
     try:
-        init_db(load_config([]).database.url)
+        config = load_config([])
+        init_db(config.database.url, **database_task_engine_kwargs(config.database))
         _run_async(_mark_failed(archive_id, message))
     except Exception:
         logger.exception("Could not mark download archive %s as failed", archive_id)
@@ -216,7 +217,7 @@ def build_download_archive(self, archive_id: str) -> None:
     Waits for an instance-wide build slot (bounded retries), materializes all
     items, stores the archive, and notifies the owner.
     """
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
     from ..models.base import init_db
     from ..storage import get_storage
 
@@ -231,7 +232,7 @@ def build_download_archive(self, archive_id: str) -> None:
             return
 
     try:
-        init_db(config.database.url)
+        init_db(config.database.url, **database_task_engine_kwargs(config.database))
         storage_service = StorageService(get_storage(config.storage), config.storage)
         _run_async(_build_archive(archive_id, config, storage_service))
     except Exception:
@@ -294,13 +295,13 @@ def cleanup_completed_downloads() -> int:
 
     Returns the number of archives removed.
     """
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
     from ..models.base import get_session, init_db
     from ..storage import get_storage
 
     logger.info("Starting completed download archive cleanup")
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     storage_service = StorageService(get_storage(config.storage), config.storage)
 
     async def _run() -> int:

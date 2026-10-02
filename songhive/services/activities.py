@@ -28,8 +28,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm.attributes import flag_modified
 
 from ..config.schema import SonghiveConfig
-from ..federation import get_track_url
-from ..federation.storage import create_activitypub_storage
+from ..federation import doc_cache, get_track_url
+from ..federation.storage import get_federation_storage
 from ..models import Visibility
 from ..models.activity import (
     ACTIVITY_ENTITY_TYPES,
@@ -679,7 +679,7 @@ async def resolve_source_actor_profiles(
     }
     if remote_actors:
         try:
-            storage = await asyncio.to_thread(create_activitypub_storage, config.database.url)
+            storage = await asyncio.to_thread(get_federation_storage, config.database)
             unique_actors = list(set(remote_actors.values()))
             docs_by_actor = await asyncio.to_thread(federation_service.cached_actor_docs, storage, unique_actors)
             # Storage adapters without model access (file storage, test
@@ -729,7 +729,7 @@ def _fetch_remote_interactions(
     ``asyncio.to_thread`` from async code. Failures (e.g. the table not
     existing yet) surface as exceptions for the caller to swallow.
     """
-    storage = create_activitypub_storage(config.database.url)
+    storage = get_federation_storage(config.database)
     result: Dict[str, List[Any]] = {}
     for source_id in source_ids:
         try:
@@ -2156,7 +2156,7 @@ async def _resolve_remote_actor_handle(config: SonghiveConfig, actor_url: str) -
     ``preferredUsername``. Falls back to the URL tail on a cache miss.
     """
     try:
-        storage = await asyncio.to_thread(create_activitypub_storage, config.database.url)
+        storage = await asyncio.to_thread(get_federation_storage, config.database)
         handle = await asyncio.to_thread(federation_service.cached_actor_handle, storage, actor_url)
     except Exception:
         logger.debug("Could not resolve cached handle for actor %s", actor_url, exc_info=True)
@@ -2685,7 +2685,7 @@ def _store_quote_authorization(config: SonghiveConfig, authorization: dict) -> N
     federation route can serve it to servers verifying the quote.
     Synchronous; invoke through ``asyncio.to_thread``.
     """
-    storage = create_activitypub_storage(config.database.url)
+    storage = get_federation_storage(config.database)
     storage.store_quote_authorization(authorization["id"], authorization)
 
 
@@ -3147,7 +3147,7 @@ async def resolve_audience(
             await asyncio.to_thread(
                 federation_service.get_follower_inboxes,
                 activity.source_actor,
-                config.database.url,
+                config.database,
             )
         )
 
@@ -3170,7 +3170,7 @@ async def resolve_audience(
             await asyncio.to_thread(
                 federation_service.get_object_follower_inboxes,
                 object_ids,
-                config.database.url,
+                config.database,
             )
         )
 
@@ -4172,7 +4172,6 @@ async def sync_track_publications(
     or no live local ``create`` activities exist. Flushes without
     committing; the caller owns the transaction.
     """
-    from ..federation import get_track_url
     from ..federation.activities import activity_audience
     from ..federation.serializers import (
         set_post_content,
@@ -4206,6 +4205,17 @@ async def sync_track_publications(
     artist = await session.get(Artist, track.artist_id)
     if artist is None:
         return 0
+
+    # The stored payloads are about to be rebuilt: drop the cached
+    # dereference documents for the track, its object and each re-synced
+    # activity, deferred to the caller's commit so a racing render cannot
+    # re-cache the pre-edit payloads.
+    doc_cache.invalidate_track(str(track.id), object_id=track.federation_object_id, session=session)
+    doc_cache.invalidate_activity(
+        None,
+        object_ids=[str(a.id) for a in rows] + [a.source_id for a in rows if a.source_id],
+        session=session,
+    )
 
     domain = config.federation.instance_domain
     now = datetime.now(timezone.utc).isoformat()
@@ -4339,6 +4349,18 @@ async def retract_activity(session: AsyncSession, activity: Activity) -> None:
 
     if activity.deleted_at is not None:
         return
+
+    # Drop cached dereference documents so remote fetches see the
+    # tombstone/404 promptly rather than the stale payload. Deferred to
+    # after-commit: the flush below is not durable until the caller commits,
+    # and an early invalidation lets a concurrent render re-cache the old row.
+    doc_cache.invalidate_activity(
+        str(activity.id),
+        object_ids=(activity.local_object_id, activity.source_id),
+        session=session,
+    )
+    if activity.entity_type == "track" and activity.entity_id:
+        doc_cache.invalidate_track(str(activity.entity_id), session=session)
 
     # Notifications that point at this activity (likes/boosts on it,
     # replies and quotes targeting it) are no longer applicable.

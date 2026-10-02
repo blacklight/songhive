@@ -132,6 +132,25 @@ def _fake_sync_redis(monkeypatch, fake_redis_server):
 
 
 @pytest.fixture(autouse=True)
+def _clear_federation_caches():
+    """Reset the process-global federation caches between tests.
+
+    ``federation.doc_cache`` holds dereference responses in a single
+    process-wide instance (with in-flight tracking), and
+    ``federation.storage`` caches pubby storage per database URL — without
+    a reset, documents/engines would leak across tests sharing keys.
+    """
+    from songhive.federation import doc_cache
+    from songhive.federation.storage import reset_federation_storage
+
+    doc_cache.clear()
+    reset_federation_storage()
+    yield
+    doc_cache.clear()
+    reset_federation_storage()
+
+
+@pytest.fixture(autouse=True)
 def _no_real_celery_broker(monkeypatch):
     """
     Keep tests from publishing messages to the configured Celery broker.
@@ -259,6 +278,11 @@ def make_user(db_session):
         if email_verified is not None:
             user.email_verified = email_verified
         await db_session.flush()
+        # Federation dereference routes render through ``get_session()`` on a
+        # *separate* session (a single-flight render must not borrow the
+        # request-scoped session), so fixture rows must be committed to be
+        # visible to them.
+        await db_session.commit()
         return user
 
     return _make_user

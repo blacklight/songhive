@@ -18,8 +18,23 @@ cors_origins = []
 url = "postgresql+asyncpg://songhive:songhive@localhost:5432/songhive"
 # Or, for SQLite (only recommended for development purposes or small instances):
 # url = "sqlite+aiosqlite:///./volumes/db/songhive.db"
+# The total connection budget is processes x event-loops x (pool_size +
+# max_overflow). The synchronous federation-storage engine has fixed small
+# bounds of its own (pool_size=2, max_overflow=3 — pubby calls are short),
+# and short-lived Celery/CLI task loops cap their async pool at 1+2. Keep
+# max_connections in Postgres comfortably above the sum across all
+# app/Celery/worker processes.
 pool_size = 5
 max_overflow = 10
+# Seconds a request may wait for a pooled connection before failing fast
+# with 503. Bounds queueing during traffic spikes instead of exhausting the
+# database's connection limit. Kept below typical remote fetch timeouts —
+# work nobody receives is shed early as a retryable 503.
+# pool_timeout = 5
+# Seconds after which a pooled connection is recycled.
+# pool_recycle = 1800
+# Test pooled connections for liveness on checkout.
+# pool_pre_ping = true
 
 [redis]
 url = "redis://localhost:6379/0"
@@ -86,6 +101,24 @@ blocked_instances = []
 # runs manually via `songhive admin prune-remote-activities`, the admin API,
 # or the admin Tasks page.
 # remote_activity_prune_schedule = "0 4 * * *"
+
+# Seconds a served ActivityPub document (actor, WebFinger, object,
+# collection or nodeinfo dereference) may be reused from the in-process
+# cache. A boosted post makes hundreds of remote instances dereference the
+# same URLs at once; the cache collapses that stampede into a single render
+# and emits a matching Cache-Control header (the entry's remaining
+# freshness). 0 disables caching; misses (404s) are cached for at most 15
+# seconds regardless.
+# document_cache_ttl_seconds = 60
+
+# Cap on how long the reverse proxy's edge cache (nginx proxy_cache) may
+# serve a dereference document. The app emits X-Accel-Expires bounded by
+# both the document's remaining in-process freshness and this cap, so the
+# edge TTL can never outlive the app's freshness policy — app-side
+# invalidation cannot reach the edge cache, which is why the cap is kept
+# short. Must match docker/nginx.conf's proxy_cache_valid fallback.
+# 0 disables edge caching entirely.
+# edge_cache_ttl_seconds = 15
 
 # Examples:
 # allowed_instances = ["good.example", "friend.example"]

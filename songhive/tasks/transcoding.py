@@ -10,7 +10,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from ..config import load_config
+from ..config import database_task_engine_kwargs, load_config
 from ..models.base import dispose_and_reset, get_session, init_db
 from ..models.upload import Upload
 from ..services.storage import StorageService
@@ -29,7 +29,7 @@ async def _transcode_upload(upload_id: str, target_format: str, bitrate: str) ->
     :returns: The ``StoredFile.id`` of the cached transcode.
     """
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     storage_backend = get_storage(config.storage)
     storage_service = StorageService(storage_backend, config.storage)

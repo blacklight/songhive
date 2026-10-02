@@ -43,7 +43,7 @@ musicbrainzngs>=0.7.1
 tidalapi==0.8.10
 
 # Federation
-pubby>=0.3.10
+pubby>=0.3.11
 webmentions>=0.1.27
 beautifulsoup4>=4.12
 

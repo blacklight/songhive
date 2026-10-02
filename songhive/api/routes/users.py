@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
+from ...federation import doc_cache
 from ...federation.actors import get_federation_storage, sync_user_actor
 from ...models.audit_log import AuditTargetType
 from ...models.follow import FOLLOW_STATE_ACCEPTED, Follow
@@ -337,7 +338,7 @@ async def _load_followers(user: User, config: SonghiveConfig) -> list:
     """
     if not config.federation.enabled or not config.federation.instance_domain or not user.actor_url:
         return []
-    storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+    storage = await asyncio.to_thread(get_federation_storage, config.database)
     try:
         return await asyncio.to_thread(federation_service.get_actor_followers, storage, user.actor_url)
     except Exception:
@@ -365,7 +366,7 @@ async def _followers_count_map(config: SonghiveConfig) -> dict[str, int]:
     """Return per-actor follower counts (empty when federation is off)."""
     if not config.federation.enabled or not config.federation.instance_domain:
         return {}
-    storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+    storage = await asyncio.to_thread(get_federation_storage, config.database)
     try:
         return await asyncio.to_thread(federation_service.count_followers_by_actor, storage)
     except Exception:
@@ -491,7 +492,7 @@ async def _load_follow_requests(user: User, config: SonghiveConfig) -> list:
     """
     if not config.federation.enabled or not config.federation.instance_domain or not user.actor_url:
         return []
-    storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+    storage = await asyncio.to_thread(get_federation_storage, config.database)
     try:
         return await asyncio.to_thread(federation_service.get_actor_follow_requests, storage, user.actor_url)
     except Exception:
@@ -529,7 +530,7 @@ async def _decide_follow_request(
     if not config.federation.enabled or not config.federation.instance_domain or not current_user.actor_url:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+    storage = await asyncio.to_thread(get_federation_storage, config.database)
     request = await asyncio.to_thread(
         federation_service.get_follow_request, storage, current_user.actor_url, body.actor_url
     )
@@ -556,6 +557,12 @@ async def _decide_follow_request(
         target_actor_url=current_user.actor_url or "",
         accept=accept,
     )
+
+    if accept:
+        # The stored follower was committed by pubby's storage inside
+        # ``resolve_follow_request``; defer the collection drop to this
+        # route's commit so a racing render cannot re-cache the old count.
+        doc_cache.invalidate_keys(("coll", current_user.username, "followers"), session=db)
 
     await resolve_follow_request_notification(
         db,

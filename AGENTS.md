@@ -104,6 +104,39 @@
   explicit `<a name="slug"></a>` anchor inside the heading line — keep it in
   sync when renaming a heading (`tests/test_readme_toc.py` enforces this).
 - The `pubby` library provides ActivityPub federation (FastAPI adapter).
+- `init_db(url)` does NOT build an engine eagerly: asyncpg connections are
+  bound to the creating event loop, and one process runs several (Tornado's
+  main loop, the a2wsgi ASGI loop, per-task `asyncio.run` loops in Celery).
+  `models/base.py` creates a bounded pooled engine **per running loop**
+  lazily, honoring `database.pool_size`/`max_overflow`/`pool_timeout`/
+  `pool_recycle`/`pool_pre_ping` (`database_engine_kwargs(config.database)`
+  from `songhive.config` — always pass it to `init_db`; it tolerates
+  duck-typed config objects by falling back to the `DatabaseConfig`
+  defaults). Short-lived `asyncio.run` loops (Celery tasks, CLI commands)
+  instead use `database_task_engine_kwargs(config.database)`, which caps
+  the pool at 1+2 connections to bound the workers-wide budget.
+  `dispose_engine()` empties the current loop's pool
+  but keeps registration; `dispose_and_reset()` clears globals for the next
+  task. Pool saturation surfaces as `sqlalchemy.exc.TimeoutError` → 503 +
+  `Retry-After` via the handler in `api/errors.py`.
+- Federation dereference endpoints serve through `federation/doc_cache.py`
+  (`get_or_render`), backed by `pubby.cache.DocumentCache`: bounded LRU +
+  TTL + single-flight coalescing, tuple keys, stale-if-error.
+  Render closures MUST open their own `get_session()` — never capture the
+  request-scoped `db` (a disconnected leader would close it mid-render).
+  Mutations must call `doc_cache.invalidate_actor`/`invalidate_activity`/
+  `invalidate_track`/`invalidate_segment` **with `session=`** so the drop
+  fires on `after_commit` — an early invalidation lets a concurrent render
+  re-cache the pre-commit row, and stale documents linger for the full
+  TTL. Always reach pubby storage through the memoized
+  `federation.storage.get_federation_storage` (pass `config.database`, not
+  the bare URL, so pool bounds apply) — `create_activitypub_storage`
+  builds a sync engine and runs `create_all` on every call. Pubby storage
+  methods are synchronous: call them via `asyncio.to_thread`.
+- `tests/conftest.py` `make_user` commits fixture rows because cache
+  renders run on independent sessions that can't see the fixture's
+  uncommitted data; `_clear_federation_caches` resets `doc_cache` and the
+  pubby storage cache between tests.
 - Every remote HTTP fetch on the Webmention path (incoming source parsing,
   outgoing endpoint discovery, outgoing delivery, outgoing source reads)
   goes through the library's guarded fetch

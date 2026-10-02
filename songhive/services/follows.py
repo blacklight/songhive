@@ -35,6 +35,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import SonghiveConfig
+from ..federation import doc_cache
 from ..federation._common import get_inbox_url
 from ..federation.activities import create_follow_activity, create_undo_activity
 from ..federation.actors import get_federation_storage, user_to_actor_document
@@ -279,7 +280,7 @@ async def _follow_local(
     assert user.actor_url and target.actor_url
     now = datetime.now(timezone.utc)
     activity = create_follow_activity(user.actor_url, target.actor_url)
-    storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+    storage = await asyncio.to_thread(get_federation_storage, config.database)
     actor_data = await _local_actor_data(user, config)
     inbox_url = get_inbox_url(config.federation.instance_domain or "", user.username)
 
@@ -308,6 +309,8 @@ async def _follow_local(
                 target_actor_id=target.actor_url,
             ),
         )
+
+    doc_cache.invalidate_keys(("coll", target.username, "followers"), session=session)
 
     row = Follow(
         user_id=user.id,
@@ -600,7 +603,7 @@ async def unfollow_user(
         raise FollowError(status_code=404, detail="Not following this actor")
 
     if row.target_user_id is not None:
-        storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+        storage = await asyncio.to_thread(get_federation_storage, config.database)
         await asyncio.to_thread(storage.remove_follower, user.actor_url or "", row.target_actor_url)
         await asyncio.to_thread(storage.remove_follow_request, user.actor_url or "", row.target_actor_url)
         target = await session.get(User, row.target_user_id)
@@ -608,6 +611,7 @@ async def unfollow_user(
             from ..models.notification import NotificationType
             from . import notifications as notifications_service
 
+            doc_cache.invalidate_keys(("coll", target.username, "followers"), session=session)
             await notifications_service.retract_notifications(
                 session,
                 user_id=target.id,

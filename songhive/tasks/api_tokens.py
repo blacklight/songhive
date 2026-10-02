@@ -4,7 +4,7 @@ Celery tasks for API token maintenance.
 
 import logging
 
-from ..config import load_config
+from ..config import database_task_engine_kwargs, load_config
 from ..models.base import dispose_and_reset, get_session, init_db
 from ..services.api_token_tracker import flush_all_api_token_usage
 from ..services.redis import close_redis_client, get_redis_client
@@ -25,7 +25,7 @@ def flush_usage_timestamps():
 
     async def _flush():
         config = load_config([])
-        init_db(config.database.url)
+        init_db(config.database.url, **database_task_engine_kwargs(config.database))
         redis = get_redis_client(config)
         try:
             async with get_session() as db:

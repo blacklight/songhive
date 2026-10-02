@@ -552,7 +552,7 @@ def test_resolve_actor_inbox_uses_cache(config, monkeypatch):
             }
         }
     )
-    monkeypatch.setattr("songhive.services.federation.create_activitypub_storage", lambda url: storage)
+    monkeypatch.setattr("songhive.services.federation.get_federation_storage", lambda url: storage)
     get = MagicMock(side_effect=AssertionError("must not fetch"))
     monkeypatch.setattr("pubby.client.requests.get", get)
 
@@ -566,7 +566,7 @@ def test_resolve_actor_inbox_fetches_and_caches(config, monkeypatch):
     """On a cache miss the actor document is fetched and cached."""
     config = _fed_config(config)
     storage = _FakeStorage()
-    monkeypatch.setattr("songhive.services.federation.create_activitypub_storage", lambda url: storage)
+    monkeypatch.setattr("songhive.services.federation.get_federation_storage", lambda url: storage)
     get = MagicMock(
         return_value=_FakeResponse(
             {
@@ -587,7 +587,7 @@ def test_resolve_actor_inbox_fetches_and_caches(config, monkeypatch):
 def test_resolve_actor_inbox_fetch_failure(config, monkeypatch):
     """A failed fetch resolves to None."""
     config = _fed_config(config)
-    monkeypatch.setattr("songhive.services.federation.create_activitypub_storage", lambda url: _FakeStorage())
+    monkeypatch.setattr("songhive.services.federation.get_federation_storage", lambda url: _FakeStorage())
     monkeypatch.setattr(
         "pubby.client.requests.get",
         MagicMock(side_effect=requests.ConnectionError("boom")),

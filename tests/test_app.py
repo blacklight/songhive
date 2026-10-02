@@ -224,7 +224,7 @@ def test_main_without_admin(monkeypatch, _minimal_config):
         pytest.fail("uvicorn should not be called when a2wsgi is available")
 
     monkeypatch.setattr(app_module, "load_config", lambda: _minimal_config)
-    monkeypatch.setattr(app_module, "init_db", lambda _: None)
+    monkeypatch.setattr(app_module, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(app_module, "_run_tornado", fake_run_tornado)
     monkeypatch.setattr(app_module, "_run_uvicorn", fake_run_uvicorn)
     monkeypatch.setattr(sys, "argv", ["songhive"])
@@ -285,7 +285,7 @@ def test_main_import_error_fallback(monkeypatch, _minimal_config, tmp_path):
         pytest.fail("tornado should not be called when a2wsgi is unavailable")
 
     monkeypatch.setattr(app_module, "load_config", lambda: _minimal_config)
-    monkeypatch.setattr(app_module, "init_db", lambda _: None)
+    monkeypatch.setattr(app_module, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(app_module, "_run_tornado", fake_run_tornado)
     monkeypatch.setattr(app_module, "_run_uvicorn", fake_run_uvicorn)
     monkeypatch.setattr("songhive.api.app.create_app", _fake_create_app)

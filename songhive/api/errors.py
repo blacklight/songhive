@@ -12,6 +12,8 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, model_serializer, model_validator
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import TimeoutError as SQLPoolTimeoutError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from ..config.schema import SonghiveConfig
@@ -75,6 +77,35 @@ def _problem_response(
 def install_error_handlers(app: FastAPI) -> None:
     """Register RFC 7807 problem detail handlers for the FastAPI application."""
 
+    def _overload(request: Request) -> ProblemJSONResponse:
+        problem = ProblemDetails(
+            status=503,
+            detail="The server is temporarily overloaded; retry shortly.",
+            instance=str(request.url.path),
+        )
+        return _problem_response(problem, status_code=503, headers={"Retry-After": "3"})
+
+    def _internal_error(request: Request, exc: Exception) -> ProblemJSONResponse:
+        config: SonghiveConfig = request.app.state.config
+        if config.server.debug:
+            detail = str(exc)
+        else:
+            detail = "An internal server error occurred."
+
+        logger.exception(
+            "Unhandled exception at %s",
+            request.url.path,
+            exc_info=(type(exc), exc, exc.__traceback__),
+        )
+
+        problem = ProblemDetails(
+            status=500,
+            title="Internal server error",
+            detail=detail,
+            instance=str(request.url.path),
+        )
+        return _problem_response(problem, status_code=500)
+
     @app.exception_handler(StarletteHTTPException)
     async def _http_exception_handler(
         request: Request,
@@ -98,6 +129,34 @@ def install_error_handlers(app: FastAPI) -> None:
             headers=exc.headers,
         )
 
+    @app.exception_handler(SQLPoolTimeoutError)
+    async def _pool_timeout_handler(
+        request: Request,
+        exc: SQLPoolTimeoutError,
+    ) -> ProblemJSONResponse:
+        # The connection pool is saturated (``pool_timeout`` elapsed while
+        # queueing for a connection — e.g. a federation fetch stampede).
+        # Fail fast with a retry hint instead of hanging or cascading into
+        # Postgres ``max_connections`` exhaustion.
+        logger.warning("Database pool exhausted serving %s", request.url.path)
+        return _overload(request)
+
+    @app.exception_handler(DBAPIError)
+    async def _dbapi_error_handler(request: Request, exc: DBAPIError) -> ProblemJSONResponse:
+        # Postgres-side exhaustion can still occur (e.g. other processes
+        # holding connections): ``too_many_connections`` surfaces as a
+        # wrapped driver error. Map it to the same retryable 503 as pool
+        # saturation instead of a plain 500.
+        orig = getattr(exc, "orig", None)
+        pgcode = getattr(orig, "sqlstate", None) or getattr(orig, "pgcode", None)
+        if pgcode == "53300" or type(orig).__name__ == "TooManyConnectionsError":
+            logger.warning("Database refused connections serving %s", request.url.path)
+            return _overload(request)
+        # Not a saturation error — fall through to the catch-all logic
+        # directly rather than re-raising into it (which would add a
+        # handler frame to every IntegrityError/DataError traceback).
+        return _internal_error(request, exc)
+
     @app.exception_handler(RequestValidationError)
     async def _validation_exception_handler(
         request: Request,
@@ -120,22 +179,4 @@ def install_error_handlers(app: FastAPI) -> None:
         request: Request,
         exc: Exception,
     ) -> ProblemJSONResponse:
-        config: SonghiveConfig = request.app.state.config
-        if config.server.debug:
-            detail = str(exc)
-        else:
-            detail = "An internal server error occurred."
-
-        logger.exception(
-            "Unhandled exception at %s",
-            request.url.path,
-            exc_info=(type(exc), exc, exc.__traceback__),
-        )
-
-        problem = ProblemDetails(
-            status=500,
-            title="Internal server error",
-            detail=detail,
-            instance=str(request.url.path),
-        )
-        return _problem_response(problem, status_code=500)
+        return _internal_error(request, exc)

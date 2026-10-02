@@ -118,3 +118,59 @@ def test_500_prod_hides_message(config):
     assert "something went wrong" not in body["detail"]
     assert body["detail"] == "An internal server error occurred."
     assert response.headers["content-type"].startswith("application/problem+json")
+
+
+def _raising_app(config: SonghiveConfig, exc: Exception) -> FastAPI:
+    """Return a test app whose route raises the given exception."""
+    app = FastAPI()
+    app.state.config = config
+
+    @app.get("/boom")
+    async def _boom():
+        raise exc
+
+    install_error_handlers(app)
+    return app
+
+
+def test_503_on_pool_timeout(config):
+    """A saturated connection pool answers 503 with a retry hint."""
+    from sqlalchemy.exc import TimeoutError as SQLPoolTimeoutError
+
+    app = _raising_app(config, SQLPoolTimeoutError("pool timeout"))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/boom")
+
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "3"
+    body = response.json()
+    assert body["status"] == 503
+    assert response.headers["content-type"].startswith("application/problem+json")
+
+
+def test_503_on_postgres_too_many_connections(config):
+    """A Postgres ``53300`` driver error maps to the same retryable 503."""
+    from sqlalchemy.exc import DBAPIError
+
+    class _OrigError(Exception):
+        sqlstate = "53300"
+
+    exc = DBAPIError("SELECT 1", {}, _OrigError("too many clients"))
+    app = _raising_app(config, exc)
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/boom")
+
+    assert response.status_code == 503
+    assert response.headers["Retry-After"] == "3"
+
+
+def test_500_on_other_dbapi_error(config):
+    """A non-saturation DBAPIError falls through to the catch-all 500."""
+    from sqlalchemy.exc import IntegrityError
+
+    app = _raising_app(config, IntegrityError("INSERT", {}, Exception("dup")))
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get("/boom")
+
+    assert response.status_code == 500
+    assert response.json()["status"] == 500

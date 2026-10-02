@@ -954,6 +954,32 @@ async def test_reject_follow_request(fed_client, fed_config, fed_user, db_sessio
     assert activity["object"]["actor"] == BOB_ACTOR
 
 
+async def test_accept_follow_request_invalidates_followers_collection(fed_client, fed_config, fed_user, db_session):
+    """Approving a request drops the cached ``("coll", …, "followers")`` doc."""
+    fed_user.private_key_pem = "private-key"
+    await db_session.commit()
+
+    ap_headers = {"Accept": "application/activity+json"}
+    # Prime the cache with the empty collection.
+    before = fed_client.get("/users/regular/followers", headers=ap_headers)
+    assert before.status_code == 200
+    assert before.json()["orderedItems"] == []
+
+    _store_request(fed_config, _follow_request(BOB_ACTOR, actor_data=BOB_DOC))
+
+    with patch("songhive.tasks.federation.deliver_activity"):
+        response = fed_client.post(
+            "/api/v1/users/me/follow-requests/accept",
+            headers=_auth(fed_config, fed_user),
+            json={"actor_url": BOB_ACTOR},
+        )
+    assert response.status_code == 204
+
+    after = fed_client.get("/users/regular/followers", headers=ap_headers)
+    assert after.status_code == 200
+    assert after.json()["orderedItems"] == [BOB_ACTOR]
+
+
 async def test_decide_follow_request_resolves_notification(fed_client, fed_config, fed_user, db_session):
     """Deciding a request rewrites the pending flag on its notification."""
     from sqlalchemy import select

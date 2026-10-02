@@ -20,7 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from textwrap import dedent
 from typing import Any, Awaitable, Callable, Collection, Dict, Optional, cast
 
-from .config import SonghiveConfig, load_config
+from .config import SonghiveConfig, database_engine_kwargs, load_config
 from .migrations import ensure_migrated
 from .models.base import init_db
 from .services.redis import (
@@ -299,7 +299,7 @@ def main():
     )
 
     # Initialize database and apply any pending migrations
-    init_db(config.database.url)
+    init_db(config.database.url, **database_engine_kwargs(config.database))
     ensure_migrated(config.database.url)
 
     # Try Tornado (preferred), fall back to uvicorn

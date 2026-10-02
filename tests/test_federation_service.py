@@ -99,7 +99,7 @@ def test_get_follower_inboxes_returns_unique_inboxes_for_actor():
     storage.get_followers.return_value = [follower_a, follower_b]
 
     with patch(
-        "songhive.services.federation.create_activitypub_storage",
+        "songhive.services.federation.get_federation_storage",
         return_value=storage,
     ):
         inboxes = get_follower_inboxes(actor_url, "sqlite:///:memory:")

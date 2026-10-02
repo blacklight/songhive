@@ -200,6 +200,7 @@ songhive/
 │   ├── fetch.py            # SSRF-guarded remote fetch (DNS/IP checks, redirect revalidation) + guarded binary download
 │   ├── actors.py           # Actor document generation, federation storage helpers
 │   ├── activities.py       # Activity creation (Create, Update, Delete, etc.)
+│   ├── doc_cache.py        # Shared pubby.cache document cache: tuple-key schema + after-commit invalidation helpers
 │   ├── incoming.py         # Materialize inbound remote replies into Activity rows
 │   ├── notifications.py    # Inbox recipient resolution + notification hooks
 │   ├── serializers.py      # Track → ActivityPub Audio object mapping
@@ -322,11 +323,11 @@ these subsections:
 | Section        | Key settings                                                  |
 |----------------|---------------------------------------------------------------|
 | `server`       | host, port, num_workers, debug, cors_origins                  |
-| `database`     | url (asyncpg), pool_size, max_overflow                        |
+| `database`     | url (asyncpg), pool_size, max_overflow, pool_timeout, pool_recycle, pool_pre_ping |
 | `redis`        | url                                                           |
 | `celery`       | broker_url, result_backend, cleanup_orphaned_files_schedule   |
 | `storage`      | backend (local/s3), local_path, s3_*, cdn_prefix, max_upload_size, upload_quota |
-| `federation`   | enabled, instance_domain, instance_name, contact_name/contact_email/contact_url, private_key_path, allow/block lists, remote_search_access, fetch_timeout_seconds, remote_activity_retention_days, remote_activity_prune_schedule |
+| `federation`   | enabled, instance_domain, instance_name, contact_name/contact_email/contact_url, private_key_path, allow/block lists, remote_search_access, fetch_timeout_seconds, remote_activity_retention_days, remote_activity_prune_schedule, document_cache_ttl_seconds |
 | `auth`         | registration_mode, secret_key, token TTLs, rate_limit, trusted_proxy_hops, cookie_secure, cookie_samesite, cookie_domain |
 | `email`        | smtp_host, smtp_port, smtp_user, from_address, tls settings   |
 | `musicbrainz`  | enabled, user_agent, cover_art, artist_image settings       |
@@ -2620,6 +2621,92 @@ instances and with other Songhive instances.
   `in_collection`, `follow_state`, `parent` and `items` (cached
   children), and `RemoteResourceView.vue` renders them with follow and
   collection `EntityActions`, a parent link and a contents list.
+
+**Dereference stampede defenses** (`federation/doc_cache.py`, built on
+`pubby.cache`) — a boosted post makes hundreds of remote instances
+dereference the same actor, object, collection and WebFinger URLs within
+seconds. Every AP read endpoint (`/users/{u}` actor documents and `@{u}`,
+`objects/{id}` and their `followers`, `quote_authorizations`,
+`/activities/{id}`, `/tracks/{id}`, outbox/followers/following
+collections, nodeinfo, WebFinger and the music entities) serves through
+`doc_cache.get_or_render`, which delegates to a shared
+`pubby.cache.DocumentCache`: a bounded (10k-entry LRU) TTL cache
+(`federation.document_cache_ttl_seconds`, default 60 s — misses are
+capped at 15 s) with single-flight coalescing, so concurrent identical
+fetches share one render task (a disconnecting waiter cannot cancel it
+for the others), plus stale-if-error serving while an entry is within
+`ttl * stale_factor`. Keys are tuples — `("obj", user, object_id)` —
+so prefix/segment invalidation is element-wise and cannot collide across
+users or endpoints. Renders open their own `get_session()` session — they
+may outlive the request that started them, so they must not borrow the
+request-scoped session. Invalidation is generation-guarded: a render in
+flight when an invalidation lands cannot re-store a stale result.
+Mutating paths call `invalidate_actor`, `invalidate_activity`,
+`invalidate_track`, `invalidate_keys`, `invalidate_segment` or
+`invalidate_prefix` (profile sync, retractions, cascade deletes,
+follow-request approval, local follow/unfollow) with `session=` so the
+drop fires on `after_commit` — an early invalidation would let a
+concurrent render re-cache the pre-commit row; the listener ignores
+SAVEPOINT releases (`after_commit` also fires for nested-transaction
+commits) and drains only after the outermost commit. Track mutations
+invalidate on the mutation itself, not via publication rows: a
+public → private PATCH drops the track's cached page/object/library
+documents even when no live `create` activities exist to retract, and
+`sync_track_publications` drops the object/activity documents whose
+stored payloads it rebuilds. Album and library PATCH routes and the
+album/artist/library deletion paths drop their own documents the same
+way (`("album", id)`, `("artist", id)`, `("lib", id, …)` plus the
+visibility-changed tracks). Rare privacy-relevant events that touch
+non-user-keyed documents —
+admin suspension/unsuspension, payment deactivation, account deletion —
+call `clear(session=…)` instead: `("trackpage", id)`, `("act", id)` and
+the `lib`/`artist`/`album` keys are not scoped by username, so
+`/tracks/{id}` and `/activities/{id}` would otherwise keep serving the
+user's documents for up to the TTL. The TTL bounds whatever cross-process
+staleness remains (best-effort). Responses carry `Cache-Control:
+public, max-age=<remaining ttl>` — the cache entry's remaining
+freshness, not a restarted full TTL, so downstream caches cannot extend
+an aged document's lifetime; an exhausted-freshness response carries
+`max-age=0, must-revalidate` and a disabled cache (`ttl = 0`) carries
+`no-store` — plus `Vary: Accept` and an `ETag`
+(conditional requests answer 304), so shared caches and the nginx edge
+cache can absorb repeats before they reach the app. The nginx layer
+(`docker/nginx.conf`) `proxy_cache`s only anonymous AP-JSON requests —
+HTML variants and credential-bearing requests bypass it — mirrors the
+app's Accept negotiation into three key classes (`*/*` counts as
+HTML-capable, matching `_accepts_html`), ignores upstream `Vary` (the
+normalized class is already in the key; honoring it would fragment on
+every remote's raw `Accept` string), and single-flights misses with
+`proxy_cache_lock`; the optional per-IP `limit_req` (429) requires
+`set_real_ip_from` for the front proxy first and never applies to inbox
+POSTs. The edge cache sits outside every invalidation hook — app-side
+clears do not reach it — so every cacheable response also carries
+`X-Accel-Expires` bounded by both the remaining in-process freshness and
+`federation.edge_cache_ttl_seconds` (default 15 s, matching the
+`proxy_cache_valid` fallback): the edge TTL can never outlive the app's
+freshness policy, and stale serving is disabled at the edge so the
+staleness window after a suspension or deletion is hard-bounded at that
+cap. Underneath the cache, `init_db(url)` builds a
+bounded `AsyncAdaptedQueuePool` engine **per event loop** (asyncpg
+connections are loop-bound; the process runs several) honoring
+`database.pool_size` / `max_overflow` / `pool_timeout` / `pool_recycle` /
+`pool_pre_ping` — pool-timeout waits and Postgres-side
+`too_many_connections` both fail fast with `503` + `Retry-After` instead
+of hanging. Short-lived Celery/CLI task loops cap their async pool at
+1+2 via `database_task_engine_kwargs`. The same `DocumentCache` instance
+is passed to `bind_activitypub`/`ActivityPubHandler`, so pubby's own
+adapter routes (`/ap/*`, instance actor, nodeinfo) share it and its
+mutation hooks invalidate it — pubby's route keys live under a
+`("pubby", …)` namespace so neither side's invalidations touch the
+other's entries (Songhive's WebFinger route builds its own
+`("webfinger", …)` key from pubby's `normalize_webfinger_resource`
+rather than pubby's namespaced `webfinger_key`).
+`federation/storage.py`'s `get_federation_storage`
+delegates to pubby's memoized `get_db_storage` — the same sync engine is
+reused process-wide instead of building a new engine and running
+`create_all` per call; its pool is fixed at `pool_size=2,
+max_overflow=3` (pubby calls are short), which also bounds each Celery
+prefork child.
 
 ---
 

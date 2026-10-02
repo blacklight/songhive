@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
+from ...federation import doc_cache
 from ...models.notification import NotificationType
 from ...models.payments import InstanceSubscription
 from ...models.user import User
@@ -118,6 +119,11 @@ async def sync_user_active_flag(
     was_active = bool(user.is_active)
     user.is_active = active
     await session.flush()
+
+    # A deactivated user stops federating (dereference endpoints 404) —
+    # drop every cached document: track/activity/entity documents are not
+    # keyed by username.
+    doc_cache.clear(session=session)
     logger.info(
         "User %s is_active %s -> %s (payments_required=%s admin_suspended=%s)",
         user.id,

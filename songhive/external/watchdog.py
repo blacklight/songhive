@@ -18,6 +18,7 @@ from watchfiles import Change, awatch
 
 from ..config.constants import AUDIO_EXTENSIONS
 from ..config.loader import load_config
+from ..config.schema import database_engine_kwargs
 from ..models.base import dispose_and_reset, get_session, init_db
 from ..models.external_library import ExternalLibrary
 from ..services.secrets import decrypt_json
@@ -248,7 +249,7 @@ class _Watchdog:
 async def _resolve_libraries() -> list[tuple[str, Path]]:
     """Load enabled local libraries from the database and resolve their roots."""
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_engine_kwargs(config.database))
 
     libraries: list[tuple[str, Path]] = []
 

@@ -36,6 +36,7 @@ from ...external.errors import (
 )
 from ...external.registry import get_external_adapter
 from ...external.types import ExternalItemRef
+from ...federation import doc_cache
 from ...models import Track, Visibility
 from ...models.album import Album
 from ...models.audit_log import AuditTargetType
@@ -842,6 +843,9 @@ async def update_track(
     previous_album_id = track.album_id
 
     previous_visibility = track.visibility
+    # The AP object id this track was published under — a visibility
+    # transition drops the cached document for the *old* id.
+    previous_object_id = track.federation_object_id
     if body.title is not None:
         track.title = body.title
 
@@ -942,6 +946,14 @@ async def update_track(
         details=details,
         ip_address=client_ip(request),
     )
+    # Drop the track's cached dereference documents on the mutation itself,
+    # deferred to this route's commit. This must not depend on publication
+    # rows: a public -> private transition with no live ``create``
+    # activities retracts nothing, but its cached public object document
+    # and track page must still drop at once. Metadata edits change the
+    # rendered ``Audio`` object and the library pages listing the track.
+    if body.model_fields_set:
+        doc_cache.invalidate_track(str(track.id), object_id=previous_object_id, session=db)
     await db.commit()
     await _handle_visibility_changes(
         track,

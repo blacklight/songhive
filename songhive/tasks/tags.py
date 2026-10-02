@@ -40,11 +40,11 @@ def sync_track_tags(track_id: str) -> bool:
     the tags are synced or when there is nothing to do, and ``False`` on a
     failure that should not be retried automatically.
     """
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
     from ..models.base import init_db
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     try:
         return asyncio.run(_sync_track_tags(track_id, config))

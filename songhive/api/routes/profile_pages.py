@@ -15,18 +15,27 @@ from typing import Any, Optional, Sequence
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...federation import get_actor_url, get_mastodon_actor_url
+from ...federation import doc_cache, get_actor_url, get_mastodon_actor_url
 from ...federation.actors import user_to_actor_document
+from ...models.base import get_session
 from ...models.user import User
+from ...services import moderation as moderation_service
 from ...services import settings as settings_service
 from ...services.auth import get_user_by_username
 from ...services.federation import ensure_user_actor
+from .._common import document_response
 from ..deps import get_current_user_optional, get_db, get_redis
-from ..semantic_meta import feed_link_tags, inject_head_tags, public_base_url, user_head_tags
+from ..semantic_meta import (
+    _PRIVATE_HTML_HEADERS,
+    feed_link_tags,
+    inject_head_tags,
+    public_base_url,
+    user_head_tags,
+)
 
 router = APIRouter(include_in_schema=False)
 
@@ -46,12 +55,36 @@ def _accepts_html(request: Request) -> bool:
     return "text/html" in accept or "*/*" in accept
 
 
+# ``_PRIVATE_HTML_HEADERS`` (imported above) marks HTML pages whose injected
+# <head> tags depend on the requester: keep shared caches (edge caches,
+# CDNs, corporate proxies) from serving one visitor's personalized metadata
+# to another. ``Vary`` covers credentials consulted beyond Cookie.
+
+
 async def _get_active_user(db: AsyncSession, username: str) -> Any:
     """Return an active user or raise 404."""
     user = await get_user_by_username(db, username)
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     return user
+
+
+async def _get_federating_user(db: AsyncSession, username: str) -> Any:
+    """Return an active, non-suspended user or raise 404."""
+    user = await _get_active_user(db, username)
+    if await moderation_service.user_is_suspended(db, str(user.id)):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
+async def _federating_user_or_none(db: AsyncSession, username: str) -> Any:
+    """Return the federating user, or ``None`` when the user is unknown."""
+    try:
+        return await _get_federating_user(db, username)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_404_NOT_FOUND:
+            return None
+        raise
 
 
 def _spa_index_path() -> Path:
@@ -79,6 +112,13 @@ def _spa_response(
     body = index.read_text(encoding="utf-8")
     headers: dict[str, str] = {}
     tags: list[str] = []
+
+    # Injected semantic tags depend on the requester (the logged-in user
+    # and share-token credentials decide what a gated object's OpenGraph
+    # card reveals), so pages carrying them must never be stored or served
+    # by a shared cache.
+    if extra_tags:
+        headers.update(_PRIVATE_HTML_HEADERS)
 
     if me_urls:
         for url in me_urls:
@@ -163,6 +203,53 @@ async def get_home_page(
     return _spa_response()
 
 
+async def _render_actor_document(config, username: str, domain: str) -> Optional[dict]:
+    """Render the ActivityPub actor document, or ``None`` for unknown/inactive users.
+
+    Opens its own session: the render may outlive the request that started it
+    (concurrent fetches share one in-flight render), so it must not borrow a
+    request-scoped session whose dependency cleanup would close it mid-query.
+    """
+    async with get_session() as db:
+        user = await _federating_user_or_none(db, username)
+        if user is None:
+            return None
+        ensure_user_actor(user, config)
+        return user_to_actor_document(user, domain)
+
+
+async def _cached_actor_response(
+    request: Request,
+    username: str,
+    ap_enabled: bool,
+    domain: Optional[str],
+) -> Response:
+    """Serve the cached actor document for AP clients of both URL forms.
+
+    Actor documents are identical for every fetching instance — a boosted
+    post makes hundreds of remotes dereference the same actor at once, so
+    the document goes through the shared stampede cache
+    (``federation.document_cache_ttl_seconds``).
+    """
+    if not ap_enabled or not domain:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    config = request.app.state.config
+    ttl = config.federation.document_cache_ttl_seconds
+    key = ("actor", username)
+    actor = await doc_cache.get_or_render(
+        key,
+        ttl,
+        lambda: _render_actor_document(config, username, domain),
+    )
+    return document_response(
+        actor,
+        ttl,
+        freshness=doc_cache.ttl_remaining(key),
+        edge_ttl=config.federation.edge_cache_ttl_seconds,
+        if_none_match=request.headers.get("if-none-match"),
+    )
+
+
 @router.get("/users/{username}")
 async def get_user_actor_or_redirect(
     username: str,
@@ -170,16 +257,12 @@ async def get_user_actor_or_redirect(
     db: AsyncSession = Depends(get_db),
 ):
     """Serve the ActivityPub actor for AP clients, redirect browsers to /@user."""
-    user = await _get_active_user(db, username)
     ap_enabled, domain = _federation_enabled_config(request)
 
     if _accepts_activitypub(request):
-        if not ap_enabled or not domain:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-        ensure_user_actor(user, request.app.state.config)
-        actor = user_to_actor_document(user, domain)
-        return JSONResponse(content=actor, media_type=ACTIVITY_JSON)
+        return await _cached_actor_response(request, username, ap_enabled, domain)
 
+    await _get_active_user(db, username)
     query = request.url.query
     target = f"/@{username}"
     if query:
@@ -194,15 +277,11 @@ async def get_user_profile_page(
     db: AsyncSession = Depends(get_db),
 ):
     """Serve the user profile SPA or the ActivityPub actor."""
-    user = await _get_active_user(db, username)
     ap_enabled, domain = _federation_enabled_config(request)
 
     if _accepts_activitypub(request):
-        if not ap_enabled or not domain:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-        ensure_user_actor(user, request.app.state.config)
-        actor = user_to_actor_document(user, domain)
-        return JSONResponse(content=actor, media_type=ACTIVITY_JSON)
+        return await _cached_actor_response(request, username, ap_enabled, domain)
 
+    user = await _get_active_user(db, username)
     alternate_url = get_actor_url(domain, user.username) if ap_enabled and domain else None
     return _user_spa_response(user, request, alternate_url=alternate_url, domain=domain)

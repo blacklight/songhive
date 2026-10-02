@@ -21,14 +21,13 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
+from ...federation import doc_cache
 from ...models import Visibility
 from ...models.artist import Artist
 from ...models.audit_log import AuditTargetType
-from ...models.external_library import ExternalLibrary
 from ...models.library import Library
 from ...models.user import User
 from ...services import acl, activities, audit, collection, deletion, music, remote_content
@@ -915,14 +914,12 @@ async def update_library(
     if body.description is not None:
         library.description = body.description
     if body.visibility is not None:
-        library.visibility = body.visibility.value
         # Tracks synced from an external provider inherit the library's
         # visibility; keep them aligned so the library really is as public
-        # (or private) as its visibility advertises.
-        ext_result = await db.execute(select(ExternalLibrary).where(ExternalLibrary.library_id == library_id))
-        external_library = ext_result.scalar_one_or_none()
-        if external_library is not None:
-            await music.propagate_external_library_visibility(db, external_library, current_user)
+        # (or private) as its visibility advertises. The service also drops
+        # the cached dereference documents for the library and the
+        # visibility-changed tracks, deferred to this route's commit.
+        await music.set_library_visibility(db, library, body.visibility.value, current_user)
 
     await audit.log_action(
         db,
@@ -938,6 +935,11 @@ async def update_library(
         },
         ip_address=client_ip(request),
     )
+    # Drop the library's cached dereference documents (all pages) for
+    # non-visibility field changes; visibility changes invalidate through
+    # ``music.set_library_visibility`` above.
+    if body.model_fields_set and body.visibility is None:
+        doc_cache.invalidate_prefix(("lib", library_id), session=db)
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})

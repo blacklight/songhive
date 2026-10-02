@@ -122,7 +122,7 @@ async def test_resolve_audience_public_includes_followers_and_mentions(
         "https://f2.example/inbox",
         "https://remote.example/inbox",
     }
-    followers.assert_called_once_with("https://local.example/users/alice", config.database.url)
+    followers.assert_called_once_with("https://local.example/users/alice", config.database)
     # Only the remote mention is resolved: the local-user and unresolved
     # mentions have no remote inbox.
     resolve.assert_called_once()
@@ -315,7 +315,7 @@ async def test_resolve_audience_public_includes_object_followers(db_session, con
             "https://local.example/users/alice/objects/reply1",
             "https://local.example/users/alice/objects/root",
         },
-        config.database.url,
+        config.database,
     )
 
 

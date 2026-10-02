@@ -15,6 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import RegistrationMode, SonghiveConfig
+from ..federation import doc_cache
 from ..models.album import Album
 from ..models.api_token import ApiToken
 from ..models.audit_log import AuditLog
@@ -611,9 +612,14 @@ async def delete_user(
                 if exc.status_code != 404:
                     raise
 
+    # The deleted user's federated documents must stop resolving at once.
+    # Track/activity/entity documents are not keyed by username, so the
+    # whole cache is dropped once the delete commits.
     await _remove_user_references(session, user)
     await session.delete(user)
     await session.flush()
+
+    doc_cache.clear(session=session)
     return unpublish
 
 

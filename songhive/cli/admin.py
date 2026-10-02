@@ -37,7 +37,7 @@ from typing import Iterable
 from kombu.exceptions import OperationalError as KombuOperationalError
 from sqlalchemy import select
 
-from ..config import AUDIO_EXTENSIONS, load_config
+from ..config import AUDIO_EXTENSIONS, database_task_engine_kwargs, load_config
 from ..migrations import ensure_migrated
 from ..models.base import get_session, init_db
 from ..models.user import User, UserRole
@@ -580,7 +580,7 @@ async def _handle_provision_federation_keys(args):
 async def _handle_rehash_audio(args):
     """Migrate existing audio StoredFile rows to audio-only hashes."""
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     storage = get_storage(config.storage)
     storage_service = StorageService(storage, config.storage)
@@ -607,7 +607,7 @@ async def _handle_purge_notifications(args):
     from ..services import notifications as notifications_service
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     async with get_session() as session:
         deleted = await notifications_service.purge_seen_notifications(
@@ -635,7 +635,7 @@ async def _handle_prune_remote_activities(args):
     from ..services.remote_content import prune_stale_remote_activities
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     days = getattr(args, "days", None) or config.federation.remote_activity_retention_days
     dry_run = getattr(args, "dry_run", False)
@@ -665,7 +665,7 @@ async def _handle_sync_tags(args):
     from ..tasks.tags import sync_track_tags
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     admin_user = User(role="admin")
 
@@ -704,7 +704,7 @@ async def _handle_enrich_images(args):
     from ..tasks.images import bulk_enrich_images
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     if not config.musicbrainz.enabled or not config.musicbrainz.fetch_artist_images:
         print("MusicBrainz or artist image fetching is disabled; nothing to do.")
@@ -757,7 +757,7 @@ async def _handle_tidal_refresh_catalog(args):
     from ..services import provider_catalog
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     async with get_session() as session:
         result = await session.execute(
@@ -824,7 +824,7 @@ def admin_main(argv=None):
 
     # Load config and init DB
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     handlers = {
         "init-db": _handle_init_db,

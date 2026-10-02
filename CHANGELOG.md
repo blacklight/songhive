@@ -2,6 +2,66 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `federation`: Hardened the ActivityPub dereference path against fetch
+  stampedes — a boosted post previously made hundreds of remote instances
+  re-render the same documents concurrently on fresh database connections,
+  exhausting Postgres `max_connections`.
+  - DB layer: `init_db` builds a bounded `AsyncAdaptedQueuePool` engine
+    per event loop honoring `database.pool_size` / `max_overflow` and the
+    new `pool_timeout` / `pool_recycle` / `pool_pre_ping` settings; pool
+    saturation and Postgres-side `too_many_connections` now fail fast
+    with `503` + `Retry-After` instead of hanging.
+  - Document cache: dereference endpoints (actor documents, objects,
+    quote authorizations, collections, nodeinfo, WebFinger, music
+    entities) serve through a shared `pubby.cache.DocumentCache` — a
+    bounded LRU+TTL store with single-flight coalescing
+    (`federation.document_cache_ttl_seconds`, default 60 s; misses cached
+    ≤ 15 s; stale-if-error). Tuple cache keys make invalidation
+    element-wise so endpoints cannot poison each other's keys, and
+    mutations drop entries on `after_commit` so concurrent renders cannot
+    re-cache pre-commit rows (the listener ignores SAVEPOINT releases,
+    which also fire `after_commit`). Approving a follow request drops the
+    local followers-collection entry; admin suspension, payment
+    deactivation and account deletion clear the whole cache, since
+    non-user-keyed documents (`trackpage`/`act`/`lib`/`artist`/`album`)
+    would otherwise keep serving a removed user's content until TTL.
+    Track mutations invalidate on the mutation itself — a public →
+    private PATCH drops the cached public document even with no live
+    publication rows to retract, and payload re-syncs drop the
+    object/activity documents they rebuild; album/library PATCH routes
+    and the album/artist/library deletion paths drop their own documents
+    the same way. Responses emit `Cache-Control` advertising the cache
+    entry's *remaining* freshness (an exhausted-freshness response gets
+    `max-age=0, must-revalidate`; a disabled cache gets `no-store`),
+    `Vary: Accept` and `ETag` (conditional requests get 304).
+  - Storage: all pubby access goes through the memoized
+    `federation.storage.get_federation_storage` (pubby's
+    `get_db_storage`) — each uncached call used to build a new engine and
+    run `create_all`, leaking a connection pool per call. The shared
+    sync pool is fixed at 2+3 connections, which also bounds each Celery
+    prefork child. The shared document cache is also handed to
+    `bind_activitypub`/`ActivityPubHandler`, so pubby's own adapter
+    routes are cached and invalidate on their mutations; Songhive's
+    WebFinger route keys stay in Songhive's own namespace instead of
+    pubby's.
+  - Edge: the reference nginx config caches anonymous AP-JSON fetches
+    (`proxy_cache` + `proxy_cache_lock` single-flighting), bypasses the
+    cache for HTML/credential-bearing requests, ignores upstream `Vary`
+    so raw `Accept` strings cannot fragment the normalized key classes
+    (`*/*` counts as HTML-capable, matching the app), and ships a per-IP
+    GET `limit_req` (429) that requires `set_real_ip_from` for the front
+    proxy before enabling. The app bounds every cacheable response with
+    `X-Accel-Expires` = min(remaining freshness,
+    new `federation.edge_cache_ttl_seconds`, default 15 s), so the edge
+    TTL can never outlive the app's freshness policy and the staleness
+    window after an app-side clear is hard-bounded; edge stale serving is
+    disabled (outage resilience comes from the app's stale-if-error).
+    The compose PostgreSQL service gets `max_connections=200` headroom.
+
 ## 0.4.2
 
 ### Added

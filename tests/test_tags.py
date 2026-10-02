@@ -98,7 +98,7 @@ def _patch_tags_task_env(monkeypatch, tmp_path, db_url, media_dir):
     )
 
     monkeypatch.setattr("songhive.config.load_config", lambda *_: config)
-    monkeypatch.setattr("songhive.models.base.init_db", lambda url: None)
+    monkeypatch.setattr("songhive.models.base.init_db", lambda *a, **k: None)
     monkeypatch.setattr("songhive.services.redis.get_redis_client", lambda cfg: _FakeRedis())
 
     # The task expects ``get_session`` to be an async context manager that

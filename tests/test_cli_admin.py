@@ -90,7 +90,7 @@ async def test_promote_user_handler_missing_user(db_session, monkeypatch, capsys
 def test_admin_main_no_command(monkeypatch, capsys):
     """Test that admin_main prints help and exits when no command is given."""
     monkeypatch.setattr(cli_admin, "load_config", lambda argv: SonghiveConfig())
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     with pytest.raises(SystemExit) as exc_info:
         cli_admin.admin_main([])
     assert exc_info.value.code == 1
@@ -111,7 +111,7 @@ class _FakeParser:
 def test_admin_main_unknown_command(monkeypatch, capsys):
     """Test that admin_main prints help and exits for an unknown command."""
     monkeypatch.setattr(cli_admin, "load_config", lambda argv: SonghiveConfig())
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(cli_admin, "_create_admin_parser", _FakeParser)
     with pytest.raises(SystemExit) as exc_info:
         cli_admin.admin_main([])
@@ -164,7 +164,7 @@ def test_admin_main_create_user(tmp_path, monkeypatch):
         "load_config",
         lambda argv: SonghiveConfig(database={"url": db_url}, federation={"enabled": False}),
     )
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
 
     cli_admin.admin_main(["create-user", "--username", "alice", "--email", "alice@example.com", "--password", "secret"])
@@ -184,7 +184,7 @@ def test_admin_main_promote_user(tmp_path, monkeypatch):
         "load_config",
         lambda argv: SonghiveConfig(database={"url": db_url}, federation={"enabled": False}),
     )
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
 
     cli_admin.admin_main(["create-user", "--username", "alice", "--email", "alice@example.com", "--password", "secret"])
@@ -284,7 +284,7 @@ def test_admin_main_create_invite(tmp_path, monkeypatch):
         "load_config",
         lambda argv: SonghiveConfig(database={"url": db_url}, federation={"enabled": False}),
     )
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
 
     cli_admin.admin_main(
@@ -316,7 +316,7 @@ def test_admin_main_list_invites(tmp_path, monkeypatch, capsys):
         "load_config",
         lambda argv: SonghiveConfig(database={"url": db_url}, federation={"enabled": False}),
     )
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
 
     cli_admin.admin_main(
@@ -426,7 +426,7 @@ def test_admin_main_create_user_with_role(tmp_path, monkeypatch):
         "load_config",
         lambda argv: SonghiveConfig(database={"url": db_url}, federation={"enabled": False}),
     )
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
 
     cli_admin.admin_main(
@@ -456,7 +456,7 @@ def test_admin_main_demote_user(tmp_path, monkeypatch):
         "load_config",
         lambda argv: SonghiveConfig(database={"url": db_url}, federation={"enabled": False}),
     )
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
 
     cli_admin.admin_main(
@@ -480,7 +480,7 @@ def test_admin_main_approve_user(tmp_path, monkeypatch):
         "load_config",
         lambda argv: SonghiveConfig(database={"url": db_url}, federation={"enabled": False}),
     )
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
 
     async def _create_inactive_user():
@@ -506,7 +506,7 @@ def test_admin_main_provision_federation_keys(tmp_path, monkeypatch, capsys):
         )
 
     monkeypatch.setattr(cli_admin, "load_config", _load_config)
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
 
     cli_admin.admin_main(["create-user", "--username", "alice", "--email", "alice@example.com", "--password", "secret"])
@@ -1107,7 +1107,7 @@ def test_admin_main_import_dir(tmp_path, monkeypatch, capsys):
         auth={"secret_key": "a" * 64},
     )
     monkeypatch.setattr(cli_admin, "load_config", lambda argv: config)
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(
         cli_admin,
         "scan_directory",
@@ -1127,7 +1127,7 @@ def test_admin_main_sync_tags_all_dry_run(tmp_path, monkeypatch, capsys):
         "load_config",
         lambda argv: SonghiveConfig(database={"url": db_url}, federation={"enabled": False}),
     )
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
 
     async def _create_track():
@@ -1178,7 +1178,7 @@ def test_admin_main_enrich_images_all_dry_run(tmp_path, monkeypatch, capsys):
             musicbrainz={"enabled": True, "fetch_artist_images": True},
         ),
     )
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
 
     cli_admin.admin_main(["enrich-images", "--all", "--dry-run"])
@@ -1212,7 +1212,7 @@ def test_admin_main_enrich_images_artist_id(tmp_path, monkeypatch, capsys):
             musicbrainz={"enabled": True, "fetch_artist_images": True},
         ),
     )
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
 
     from types import SimpleNamespace
@@ -1299,7 +1299,7 @@ def test_admin_main_rehash_audio_dry_run(tmp_path, monkeypatch, capsys):
         )
 
     monkeypatch.setattr(cli_admin, "load_config", _load_config)
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(cli_admin, "get_session", lambda: _LocalSessionFactory(db_url))
     monkeypatch.setattr(
         cli_admin,
@@ -1348,7 +1348,7 @@ async def _seed_tidal_library(db_session, admin_user):
 
 def _patch_tidal_env(monkeypatch, db_session, adapter):
     monkeypatch.setattr(cli_admin, "load_config", lambda argv: SonghiveConfig())
-    monkeypatch.setattr(cli_admin, "init_db", lambda url: None)
+    monkeypatch.setattr(cli_admin, "init_db", lambda *a, **k: None)
     monkeypatch.setattr(cli_admin, "get_session", lambda: _fake_session(db_session))
     monkeypatch.setattr(
         "songhive.external.registry.get_external_adapter",

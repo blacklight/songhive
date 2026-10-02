@@ -104,8 +104,13 @@ async def test_external_item_unique_per_library_kind_key(db_session, _make_exter
 
 @pytest.mark.asyncio
 async def test_external_items_cascade_with_library(db_session, _make_external_library):
-    await db_session.execute(text("PRAGMA foreign_keys = ON"))
+    # ``make_user`` commits, which releases the session's connection back to
+    # NullPool, and SQLite ignores ``PRAGMA foreign_keys`` inside an open
+    # transaction. Commit to drop both, then set the pragma on the fresh
+    # connection that will actually perform the delete.
     ext_lib = await _make_external_library()
+    await db_session.commit()
+    await db_session.execute(text("PRAGMA foreign_keys = ON"))
     artist = Artist(name="A")
     db_session.add(artist)
     await db_session.flush()

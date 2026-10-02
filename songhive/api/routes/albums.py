@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
 from ...external.lazy import ensure_contents
+from ...federation import doc_cache
 from ...models._enums import Visibility
 from ...models.audit_log import AuditTargetType
 from ...models.track import Track
@@ -483,6 +484,14 @@ async def update_album(
         },
         ip_address=client_ip(request),
     )
+    # Drop the cached album document and the visibility-changed tracks'
+    # dereference documents, deferred to this route's commit. The album
+    # document itself embeds metadata/visibility; the tracks' object
+    # documents and library pages change with theirs.
+    if body.model_fields_set:
+        doc_cache.invalidate_keys(("album", album_id), session=db)
+        for track, _ in visibility_track_changes:
+            doc_cache.invalidate_track(str(track.id), object_id=track.federation_object_id, session=db)
     await db.commit()
 
     for track, previous_visibility in visibility_track_changes:

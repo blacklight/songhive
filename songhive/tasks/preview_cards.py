@@ -6,7 +6,7 @@ import asyncio
 import logging
 from typing import Optional
 
-from ..config import load_config
+from ..config import database_task_engine_kwargs, load_config
 from ..models.activity import Activity
 from ..models.base import dispose_and_reset, get_session, init_db
 from .celery import celery_app
@@ -34,7 +34,7 @@ def fetch_preview_card(self, activity_id: str) -> Optional[str]:
     from ..services.preview_cards import process_activity_preview_card
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     async def _run() -> str:
         try:

@@ -610,7 +610,7 @@ async def test_list_endpoint_resolves_remote_actor_display_name(
             }
         }
     )
-    monkeypatch.setattr("songhive.services.activities.create_activitypub_storage", lambda url: fake_cache)
+    monkeypatch.setattr("songhive.services.activities.get_federation_storage", lambda url: fake_cache)
 
     resp = client.get(f"/api/v1/track/{track.id}/activities", headers=auth_headers(regular_user))
 

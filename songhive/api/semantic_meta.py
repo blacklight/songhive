@@ -552,6 +552,14 @@ def inject_head_tags(body: str, tags: list[str]) -> str:
     return f"{body}{injected}"
 
 
+# Shared with ``routes/profile_pages`` — the canonical definition lives
+# here: injected head tags may depend on the requester's credentials.
+_PRIVATE_HTML_HEADERS = {
+    "Cache-Control": "private, no-store",
+    "Vary": "Accept, Cookie, Authorization, X-Share-Token",
+}
+
+
 async def serve_spa_index(
     scope: Scope,
     receive: Receive,
@@ -562,6 +570,10 @@ async def serve_spa_index(
     request = Request(scope, receive)
     body = index_path.read_text(encoding="utf-8")
     tags = await object_head_tags(request)
+    headers: dict[str, str] = {}
     if tags:
         body = inject_head_tags(body, tags)
-    await HTMLResponse(content=body)(scope, receive, send)
+        # Injected tags depend on the requester (login state, share
+        # tokens); keep shared caches from serving them to others.
+        headers.update(_PRIVATE_HTML_HEADERS)
+    await HTMLResponse(content=body, headers=headers)(scope, receive, send)

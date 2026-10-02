@@ -48,10 +48,10 @@ def materialize_track_sample(track_id: str) -> bool:
 
     Idempotent — re-runs find no ``pending`` derivatives and no-op.
     """
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     try:
         return asyncio.run(_materialize_track_sample(track_id, config))
     except Exception as exc:
@@ -104,10 +104,10 @@ def process_payment_event(event_row_id: str) -> bool:
     ``failed`` rows are retried by celery and can be re-driven by the
     reconcile sweep.
     """
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     try:
         return asyncio.run(_process_payment_event(event_row_id, config))
     except Exception as exc:
@@ -177,10 +177,10 @@ def cancel_provider_subscription(subscription_id: str) -> bool:
     Called when a user is deactivated or deleted and the provider call could
     not be completed — billing must not silently continue.
     """
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     try:
         return asyncio.run(_cancel_provider_subscription(subscription_id, config))
     except Exception as exc:
@@ -222,10 +222,10 @@ def sweep_membership_expirations() -> int:
     inactive, and re-syncs users whose ``paid_through`` advanced while they
     were inactive (e.g. paid during suspension clears).
     """
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     return asyncio.run(_sweep_membership_expirations(config))
 
 
@@ -251,10 +251,10 @@ async def _sweep_membership_expirations(config) -> int:
 @celery_app.task(name="songhive.tasks.payments.expire_pending_orders")
 def expire_pending_orders() -> int:
     """Expire pending checkout orders past their TTL and close provider sessions."""
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     return asyncio.run(_expire_pending_orders(config))
 
 
@@ -302,10 +302,10 @@ def reconcile_pending_orders() -> int:
     pending order's session and feed paid sessions through the same handler the
     webhook path uses; provider-expired sessions flip the order to ``expired``.
     """
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     return asyncio.run(_reconcile_pending_orders(config))
 
 
@@ -433,10 +433,10 @@ def process_fulfillment_outbox() -> int:
     decrypted guest address, and marked ``sent``. Failures retry with a
     bounded attempt count before going ``failed``.
     """
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     return asyncio.run(_process_fulfillment_outbox(config))
 
 
@@ -534,10 +534,10 @@ def cleanup_payments() -> int:
     row and file is safe; failed/stale ``SampleDerivative`` rows get their
     stored file removed then the row deleted.
     """
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     return asyncio.run(_cleanup_payments(config))
 
 

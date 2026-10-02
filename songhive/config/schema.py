@@ -34,6 +34,36 @@ def get_default_user_agent() -> str:
     return f"Songhive/{_app_short_version()} (https://git.fabiomanganiello.com/songhive)"
 
 
+_ENGINE_KWARG_NAMES = ("pool_size", "max_overflow", "pool_timeout", "pool_recycle", "pool_pre_ping")
+
+
+def database_engine_kwargs(database) -> dict:
+    """SQLAlchemy ``create_async_engine`` kwargs for a database config object.
+
+    Reads the ``pool_*`` attributes off ``database``, falling back to the
+    ``DatabaseConfig`` defaults for any that are missing — so duck-typed
+    config objects (e.g. ``types.SimpleNamespace`` in tests) work too.
+    """
+    defaults = DatabaseConfig.model_fields
+    return {name: getattr(database, name, defaults[name].default) for name in _ENGINE_KWARG_NAMES}
+
+
+def database_task_engine_kwargs(database) -> dict:
+    """Pool kwargs for short-lived ``asyncio.run`` loops (Celery tasks, CLI).
+
+    Each task's engine lives for one ``asyncio.run`` and is disposed after;
+    a task rarely holds more than one or two connections at once, so a small
+    pool keeps the cluster-wide connection budget (workers x loops x pool
+    cap) far below Postgres ``max_connections`` while ``pool_timeout`` still
+    bounds queueing.
+    """
+    return {
+        **database_engine_kwargs(database),
+        "pool_size": 1,
+        "max_overflow": 2,
+    }
+
+
 class DatabaseConfig(BaseSettings):
     """Database configuration."""
 
@@ -43,6 +73,25 @@ class DatabaseConfig(BaseSettings):
     )
     pool_size: int = Field(default=5, description="Connection pool size")
     max_overflow: int = Field(default=10, description="Max overflow connections")
+    pool_timeout: float = Field(
+        default=5.0,
+        description=(
+            "Seconds a request may wait for a pooled database connection "
+            "before failing fast with 503. Bounds how long a traffic spike "
+            "can queue inside the app instead of exhausting the database's "
+            "connection limit. Kept below typical remote fetch timeouts "
+            "(Mastodon gives up around 10 s): work nobody receives is shed "
+            "early as a retryable 503 instead."
+        ),
+    )
+    pool_recycle: int = Field(
+        default=1800,
+        description="Seconds after which a pooled connection is recycled",
+    )
+    pool_pre_ping: bool = Field(
+        default=True,
+        description="Test pooled connections for liveness on checkout",
+    )
 
     @field_serializer("url", when_used="always")
     def _redact_url(self, value: str, *_, **__) -> str:
@@ -204,6 +253,34 @@ class FederationConfig(BaseSettings):
             "Optional 5-field cron expression (e.g. '0 4 * * *') scheduling "
             "automatic remote-activity pruning. Empty/unset means the prune "
             "task only runs manually (admin endpoint, CLI, or task call)."
+        ),
+    )
+    document_cache_ttl_seconds: float = Field(
+        default=60.0,
+        ge=0.0,
+        le=3600.0,
+        description=(
+            "Seconds a served ActivityPub document (actor, WebFinger, object, "
+            "collection or nodeinfo dereference) may be reused from the "
+            "in-process cache. When a post is boosted, hundreds of remote "
+            "instances dereference the same URLs at once; the cache collapses "
+            "that stampede into a single render. 0 disables caching; misses "
+            "(404s) are cached for at most 15 seconds regardless."
+        ),
+    )
+    edge_cache_ttl_seconds: float = Field(
+        default=15.0,
+        ge=0.0,
+        le=3600.0,
+        description=(
+            "Cap on how long the reverse proxy's edge cache (nginx "
+            "proxy_cache) may serve a dereference document. The app emits "
+            "X-Accel-Expires bounded by both the document's remaining "
+            "in-process freshness and this cap, so the edge TTL can never "
+            "outlive the app's freshness policy — app-side invalidation "
+            "cannot reach the edge cache, which is why the cap is kept "
+            "short. Must match docker/nginx.conf's proxy_cache_valid "
+            "fallback. 0 disables edge caching entirely."
         ),
     )
 

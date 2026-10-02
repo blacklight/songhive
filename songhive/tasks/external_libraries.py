@@ -10,7 +10,7 @@ from typing import Any, Optional, cast
 from kombu.exceptions import OperationalError as KombuOperationalError
 from sqlalchemy import select
 
-from ..config import load_config
+from ..config import database_task_engine_kwargs, load_config
 from ..external.errors import ExternalLibraryError
 from ..external.registry import get_external_adapter
 from ..external.sync import _metadata_fingerprint, sync_external_library
@@ -148,7 +148,7 @@ def sync_external_library_task(
 ) -> dict:
     """Celery task entry point for syncing a single external library."""
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     try:
         return asyncio.run(
@@ -235,7 +235,7 @@ async def _scan_scheduled_syncs() -> int:
 def scan_scheduled_syncs_task() -> int:
     """Celery task that scans for due scheduled external-library syncs."""
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     try:
         return asyncio.run(_scan_scheduled_syncs())
@@ -331,7 +331,7 @@ async def _write_back_metadata(external_track_id: str) -> bool:
 def write_back_metadata_task(external_track_id: str) -> bool:
     """Celery task entry point for writing Songhive metadata back to a provider."""
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     try:
         return asyncio.run(_write_back_metadata(external_track_id))
@@ -664,7 +664,7 @@ def refresh_external_contents_task(
     from ..external.errors import ExternalRateLimited
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     try:
         return asyncio.run(_refresh_external_contents(external_library_id, kind, provider_key))

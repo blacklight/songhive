@@ -8,14 +8,18 @@ from pathlib import Path
 import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
+from sqlalchemy import update
 
 from songhive.api.app import create_app
 from songhive.api.deps import get_db
+from songhive.federation import doc_cache
+from songhive.federation.actors import sync_user_actor
 from songhive.models import Visibility
 from songhive.models.activity import Activity, ActivityMention
 from songhive.models.artist import Artist
 from songhive.models.base import init_db
 from songhive.models.track import Track
+from songhive.models.user import User
 from songhive.version import __version__
 
 ACTIVITY_JSON = "application/activity+json"
@@ -397,6 +401,55 @@ async def test_get_object_followers_collection(fed_client, db_session, regular_u
     assert data["type"] == "OrderedCollection"
     assert data["id"] == f"{object_url}/followers"
     assert data["orderedItems"] == ["https://remote.example/users/sub"]
+
+
+async def test_object_id_with_colon_does_not_poison_followers(fed_client, db_session, regular_user, fed_config):
+    """A miss for ``objects/{id}:followers`` must not blank ``objects/{id}/followers``."""
+    from pubby import Follower
+
+    from songhive.federation.storage import create_activitypub_storage
+
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    db_session.add(
+        Track(
+            title="Public Track",
+            artist_id=str(artist.id),
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+            federation_object_id="pub-f3",
+        )
+    )
+    await db_session.commit()
+
+    # The colon-bearing object id does not exist: this renders a cached
+    # miss under ("obj", user, "pub-f3:followers") — which must not equal
+    # the followers-collection key ("obj", user, "pub-f3", "followers").
+    poisoned = fed_client.get(
+        "/users/regular/objects/pub-f3:followers",
+        headers={"Accept": ACTIVITY_JSON},
+    )
+    assert poisoned.status_code == status.HTTP_404_NOT_FOUND
+
+    object_url = "https://music.example.com/users/regular/objects/pub-f3"
+    storage = create_activitypub_storage(fed_config.database.url)
+    storage.store_follower(
+        Follower(
+            actor_id="https://remote.example/users/sub",
+            inbox="https://remote.example/users/sub/inbox",
+            followed_at=datetime.now(timezone.utc),
+            actor_data={},
+            target_actor_id=object_url,
+        )
+    )
+
+    response = fed_client.get(
+        "/users/regular/objects/pub-f3/followers",
+        headers={"Accept": ACTIVITY_JSON},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["orderedItems"] == ["https://remote.example/users/sub"]
 
 
 async def test_get_object_followers_unknown_object_404(fed_client, regular_user):
@@ -806,6 +859,80 @@ async def test_track_page_serves_audio_object_for_mastodon_accept(fed_client, db
     assert response.json()["type"] == "Audio"
 
 
+async def test_suspend_owner_clears_cached_track_page(fed_client, db_session, regular_user, admin_user, auth_headers):
+    """Suspending a user drops the whole cache — ``/tracks/{id}`` 404s at once."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    track = Track(
+        title="Public Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id="pub-susp",
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    cached = fed_client.get(f"/tracks/{track.id}", headers={"Accept": ACTIVITY_JSON})
+    assert cached.status_code == status.HTTP_200_OK
+    assert cached.json()["type"] == "Audio"
+
+    resp = fed_client.post(
+        "/api/v1/admin/moderation/users",
+        json={"actor_url": "regular", "action": "suspend", "reason": "spam"},
+        headers=auth_headers(admin_user),
+    )
+    assert resp.status_code == status.HTTP_201_CREATED, resp.text
+
+    # Without the cache clear this second GET would serve the cached Audio
+    # for up to the TTL — the render's user_is_suspended check only runs
+    # on a miss.
+    response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_track_privacy_transition_clears_cached_document_without_publications(
+    fed_client, db_session, regular_user, auth_headers
+):
+    """A public -> private PATCH drops the cached AP document even when the
+    track has no live publication rows to retract.
+
+    ``retract_track_publications`` is a no-op without matching ``create``
+    rows — the invalidation must happen on the track mutation itself, or
+    the cached public document keeps serving after the track went private."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    track = Track(
+        title="Public Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id="pub-priv",
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    cached = fed_client.get(f"/tracks/{track.id}", headers={"Accept": ACTIVITY_JSON})
+    assert cached.status_code == status.HTTP_200_OK
+    assert cached.json()["type"] == "Audio"
+
+    resp = fed_client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"visibility": "private"},
+        headers=auth_headers(regular_user),
+    )
+    assert resp.status_code == status.HTTP_200_OK, resp.text
+
+    # Without the mutation-side invalidation both dereference routes would
+    # still serve the cached public representation.
+    response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+    response = fed_client.get("/users/regular/objects/pub-priv", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
 async def test_track_page_serves_spa_with_discovery_hints_for_browsers(
     fed_client, db_session, regular_user, tmp_path, monkeypatch
 ):
@@ -868,6 +995,120 @@ async def test_track_page_serves_plain_spa_for_unpublished_track(
     # No ActivityStreams discovery hints — RSS/Atom feed alternates are fine.
     assert "application/activity+json" not in response.headers.get("Link", "")
     assert "application/activity+json" not in response.text
+
+
+async def test_track_page_spa_with_tags_marks_response_private(
+    fed_client, db_session, regular_user, tmp_path, monkeypatch
+):
+    """HTML pages carrying requester-dependent <head> tags are private, no-store."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    track = Track(
+        title="Public Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id="pub-priv",
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    index = tmp_path / "index.html"
+    index.write_text("<html><head></head><body></body></html>", encoding="utf-8")
+    monkeypatch.setattr("songhive.api.routes.profile_pages._spa_index_path", lambda: index)
+
+    response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": "text/html"})
+    assert response.status_code == status.HTTP_200_OK
+    assert "og:title" in response.text  # requester-dependent tags were injected
+    assert response.headers["Cache-Control"] == "private, no-store"
+    vary = response.headers["Vary"]
+    assert "Cookie" in vary and "Accept" in vary
+
+
+async def test_track_page_conditional_304(fed_client, db_session, regular_user):
+    """``If-None-Match`` with the served ETag answers 304 without a body."""
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    track = Track(
+        title="Public Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id="pub-etag",
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    first = fed_client.get(f"/tracks/{track.id}", headers={"Accept": ACTIVITY_JSON})
+    assert first.status_code == status.HTTP_200_OK
+    etag = first.headers["etag"]
+    assert etag
+
+    second = fed_client.get(
+        f"/tracks/{track.id}",
+        headers={"Accept": ACTIVITY_JSON, "If-None-Match": etag},
+    )
+    assert second.status_code == status.HTTP_304_NOT_MODIFIED
+    assert second.headers["etag"] == etag
+    assert "cache-control" in second.headers
+    assert not second.content
+
+
+async def test_concurrent_fetches_coalesce_to_one_render(fed_client, db_session, regular_user, monkeypatch):
+    """A burst of identical dereferences shares a single render."""
+    import threading
+    import time
+
+    artist = Artist(name="Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    track = Track(
+        title="Public Track",
+        artist_id=str(artist.id),
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PUBLIC.value,
+        federation_object_id="pub-stampede",
+    )
+    db_session.add(track)
+    await db_session.commit()
+
+    from songhive.federation.serializers import track_to_audio_object
+
+    calls = 0
+    calls_lock = threading.Lock()
+
+    def _counting_render(*args, **kwargs):
+        nonlocal calls
+        with calls_lock:
+            calls += 1
+        # Hold the render briefly so concurrent fetches overlap.
+        time.sleep(0.05)
+        return track_to_audio_object(*args, **kwargs)
+
+    monkeypatch.setattr("songhive.api.routes.federation.track_to_audio_object", _counting_render)
+
+    results: list = []
+    failures: list = []
+
+    def _fetch():
+        try:
+            results.append(fed_client.get(f"/tracks/{track.id}", headers={"Accept": ACTIVITY_JSON}))
+        except Exception as exc:  # surfaced below — a thread must not fail silently
+            failures.append(exc)
+
+    threads = [threading.Thread(target=_fetch) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert not any(t.is_alive() for t in threads), "a fetch thread hung"
+    assert not failures, failures
+    assert len(results) == 8
+
+    assert all(r.status_code == status.HTTP_200_OK for r in results)
+    assert calls == 1
 
 
 async def test_track_page_returns_404_for_unpublished_track(fed_client, db_session, regular_user):
@@ -1355,6 +1596,31 @@ async def test_webfinger_accepts_leading_at_symbol(fed_client, regular_user):
     assert response.json()["subject"] == "acct:regular@music.example.com"
 
 
+async def test_webfinger_route_key_is_songhive_namespaced(fed_client, regular_user):
+    """The WebFinger route caches under Songhive's own ``("webfinger", …)``
+    namespace — pubby's ``("pubby", "webfinger", …)`` adapter key must not
+    collide with it in either direction."""
+    response = fed_client.get("/.well-known/webfinger", params={"resource": "acct:regular@music.example.com"})
+    assert response.status_code == status.HTTP_200_OK
+
+    cache = doc_cache.document_cache()
+    songhive_key = ("webfinger", "regular@music.example.com")
+    pubby_key = ("pubby", "webfinger", "regular@music.example.com")
+    # The route-produced key holds the entry; pubby's namespaced key was
+    # never written (no value-type mixing).
+    assert cache.ttl_remaining(songhive_key) > 0
+    assert cache.ttl_remaining(pubby_key) == 0.0
+
+    # pubby's actor-update invalidation drops its own webfinger prefix —
+    # it must not touch Songhive's entry.
+    cache.invalidate_prefix(("pubby", "webfinger"))
+    assert cache.ttl_remaining(songhive_key) > 0
+
+    # …and Songhive's invalidate_actor drops the route-produced key.
+    doc_cache.invalidate_actor("regular")
+    assert cache.ttl_remaining(songhive_key) == 0.0
+
+
 async def test_nodeinfo_document_reports_songhive_software(fed_client):
     """GET /nodeinfo/2.1 reports Songhive as the server software."""
     response = fed_client.get("/nodeinfo/2.1")
@@ -1413,3 +1679,102 @@ async def test_nodeinfo_document_omits_inactive_admins(fed_client, make_user):
     assert response.status_code == status.HTTP_200_OK
     staff = response.json()["metadata"]["staffAccounts"]
     assert all("gone" not in account for account in staff)
+
+
+async def test_dereference_responses_carry_cache_headers(fed_client, regular_user):
+    """AP dereference responses advertise the entry's *remaining* freshness."""
+    response = fed_client.get("/users/regular", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+    assert 0 < _max_age(response) <= 60
+    assert "Accept" in response.headers["vary"]
+    assert response.headers["x-accel-expires"] == "15"
+
+    response = fed_client.get(
+        "/.well-known/webfinger",
+        params={"resource": "acct:regular@music.example.com"},
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert 0 < _max_age(response) <= 60
+
+    response = fed_client.get("/users/regular/followers", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+    assert 0 < _max_age(response) <= 60
+
+
+def _max_age(response) -> int:
+    """Parse the ``max-age`` value from a response's Cache-Control."""
+    return int(
+        next(
+            part.strip()[len("max-age=") :]
+            for part in response.headers["cache-control"].split(",")
+            if part.strip().startswith("max-age=")
+        )
+    )
+
+
+async def test_aged_cache_hit_advertises_remaining_freshness(fed_client, regular_user):
+    """A hit partway through the entry's lifetime must not restart the TTL
+    clock: the advertised ``max-age`` is the remaining freshness, so a
+    downstream cache cannot extend an already-aged document's lifetime."""
+    import time
+
+    first = fed_client.get("/users/regular", headers={"Accept": ACTIVITY_JSON})
+    assert first.status_code == status.HTTP_200_OK
+
+    key = ("actor", "regular")
+    entry = doc_cache.document_cache().store.get(key)
+    assert entry is not None
+    entry.fresh_until = time.time() + 10
+
+    second = fed_client.get("/users/regular", headers={"Accept": ACTIVITY_JSON})
+    assert second.status_code == status.HTTP_200_OK
+    assert 5 <= _max_age(second) <= 10
+
+
+async def test_dereference_cache_disabled_with_zero_ttl(fed_client, db_session, regular_user):
+    """``document_cache_ttl_seconds = 0`` renders every fetch afresh."""
+    fed_client.app.state.config.federation.document_cache_ttl_seconds = 0
+
+    response = fed_client.get("/users/regular", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+    # A disabled cache must also disable downstream caching: explicit
+    # no-store (not a dropped header, which would let the edge fall back to
+    # its own proxy_cache_valid) and no edge caching either.
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-accel-expires"] == "0"
+
+    # Mutate the profile; the very next fetch must reflect it (no cache).
+    await db_session.execute(update(User).where(User.id == regular_user.id).values(display_name="Renamed"))
+    await db_session.commit()
+
+    response = fed_client.get("/users/regular", headers={"Accept": ACTIVITY_JSON})
+    assert response.json()["name"] == "Renamed"
+
+
+async def test_dereference_cache_serves_stale_until_ttl(fed_client, db_session, regular_user):
+    """With a positive TTL a repeated fetch reuses the cached document."""
+    response = fed_client.get("/users/regular", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["type"] == "Person"
+
+    # A change that skips the invalidation hooks stays invisible until the
+    # TTL expires — the cache must actually hold the render.
+    await db_session.execute(update(User).where(User.id == regular_user.id).values(display_name="Ghost"))
+    await db_session.commit()
+
+    response = fed_client.get("/users/regular", headers={"Accept": ACTIVITY_JSON})
+    assert response.json()["name"] != "Ghost"
+
+
+async def test_profile_update_invalidates_cached_actor(fed_client, db_session, regular_user):
+    """A profile sync drops the cached actor document immediately."""
+    response = fed_client.get("/users/regular", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+
+    await db_session.execute(update(User).where(User.id == regular_user.id).values(display_name="Renamed"))
+    await db_session.commit()
+    await db_session.refresh(regular_user, ["links"])
+    await sync_user_actor(regular_user, fed_client.app.state.config)
+
+    response = fed_client.get("/users/regular", headers={"Accept": ACTIVITY_JSON})
+    assert response.json()["name"] == "Renamed"

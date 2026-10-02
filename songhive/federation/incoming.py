@@ -317,7 +317,7 @@ async def _relay_thread_activity(
     inboxes = await asyncio.to_thread(
         federation_service.get_object_follower_inboxes,
         object_ids,
-        config.database.url,
+        config.database,
     )
 
     if not inboxes:

@@ -42,6 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from ..config.schema import SonghiveConfig
+from ..federation import doc_cache
 from ..federation.fetch import FetchError
 from ..models.activity import Activity
 from ..models.follow import FOLLOW_STATE_ACCEPTED, Follow
@@ -250,6 +251,11 @@ async def set_admin_user_moderation(
         )
         session.add(row)
     await session.flush()
+
+    # Suspended users answer 404 and limited content must not leak through
+    # a stale cached document: the session= deferral drops the entries
+    # right after this transaction commits (best-effort, TTL-bounded).
+    await _clear_document_cache(session, row.target_user_id)
     return row
 
 
@@ -260,7 +266,20 @@ async def clear_admin_user_moderation(session: AsyncSession, actor_url: str) -> 
         return None
     await session.delete(row)
     await session.flush()
+    await _clear_document_cache(session, row.target_user_id)
     return row
+
+
+async def _clear_document_cache(session: AsyncSession, user_id: Optional[str]) -> None:
+    """Drop every cached federation document on a user-moderation change.
+
+    Track/activity/library/entity documents are not keyed by username, so
+    the whole cache is dropped — a suspended user's ``/tracks/{id}`` and
+    ``/activities/{id}`` must stop resolving as soon as the row commits.
+    """
+    if user_id is None:
+        return
+    doc_cache.clear(session=session)
 
 
 async def list_admin_user_moderations(session: AsyncSession, action: Optional[str] = None) -> List[AdminUserModeration]:
@@ -825,7 +844,7 @@ async def sever_relationships(
     try:
         from ..federation.actors import get_federation_storage
 
-        storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+        storage = await asyncio.to_thread(get_federation_storage, config.database)
         removed += await asyncio.to_thread(_remove_pubby_follow_records, storage, actor_url)
     except Exception as exc:
         logger.warning("Failed to remove pubby follow records for %s: %s", actor_url, exc)
@@ -875,7 +894,7 @@ async def sever_block_relationship(
     try:
         from ..federation.actors import get_federation_storage
 
-        storage = await asyncio.to_thread(get_federation_storage, config.database.url)
+        storage = await asyncio.to_thread(get_federation_storage, config.database)
         await asyncio.to_thread(storage.remove_follower, target_actor_url, blocker_url)
         await asyncio.to_thread(storage.remove_follow_request, target_actor_url, blocker_url)
     except Exception as exc:

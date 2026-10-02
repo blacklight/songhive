@@ -21,7 +21,7 @@ from typing import Any, List
 import requests
 from webmentions import ContentTextFormat, Webmention, WebmentionDirection, WebmentionException
 
-from ..config import load_config
+from ..config import database_task_engine_kwargs, load_config
 from ..config.schema import SonghiveConfig
 from ..models.activity import Activity
 from ..models.base import dispose_and_reset, get_session, init_db
@@ -115,7 +115,7 @@ def process_incoming_webmention(_, source: str, target: str) -> None:
 
     if not (processed or deleted):
         return
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     asyncio.run(_apply_incoming(config, processed, deleted))
 
 
@@ -167,7 +167,7 @@ def process_outgoing_webmentions(self, activity_id: str) -> None:
     config = load_config([])
     if not webmentions_enabled(config):
         return
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     prepared = asyncio.run(_prepare_outgoing(config, activity_id))
     if prepared is _MISSING:
@@ -190,5 +190,5 @@ def process_outgoing_webmentions(self, activity_id: str) -> None:
     except Exception:
         sent = False
     # ``_prepare_outgoing`` disposed the engine globals — re-init them.
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     asyncio.run(_finalize_outgoing(config, activity_id, sent))

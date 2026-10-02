@@ -23,7 +23,7 @@ import aiofiles
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from ..config import load_config
+from ..config import database_engine_kwargs, load_config
 from ..config.schema import SonghiveConfig
 from ..models.base import get_session, init_db
 from ..models.output_stream import OutputStream
@@ -57,7 +57,7 @@ LOCK_KEY = "songhive:stream:lock:{output_id}"
 async def run_stream_worker() -> None:
     """Entry point for the ``songhive stream-worker`` command."""
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_engine_kwargs(config.database))
     worker = StreamWorker(config)
     await worker.run()
 

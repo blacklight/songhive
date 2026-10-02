@@ -1823,7 +1823,7 @@ async def test_public_reply_relayed_to_object_followers(db_session, regular_user
 
     assert reply is not None
     # The followed thread root's id was queried.
-    object_inboxes.assert_called_once_with({parent.source_id}, config.database.url)
+    object_inboxes.assert_called_once_with({parent.source_id}, config.database)
     # The received activity is forwarded verbatim, signed by the local
     # ancestor's owner.
     deliver.delay.assert_called_once_with(

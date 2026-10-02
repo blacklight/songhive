@@ -53,6 +53,20 @@ class FakeTidalSession:
         self.user = _FakeUser(user_id)
 
 
+@pytest.fixture(autouse=True)
+def _owner_stream_policy(monkeypatch):
+    """Default the TIDAL stream policy to ``owner`` for every test.
+
+    ``_provider_stream_policy`` resolves the live ``config.toml``, so without
+    this stub a developer's local ``stream_policy`` setting leaks into the
+    suite. Tests exercising other policies re-patch the attribute themselves
+    (the later ``monkeypatch.setattr`` wins).
+    """
+    from songhive.services import streaming as streaming_service
+
+    monkeypatch.setattr(streaming_service, "_provider_stream_policy", lambda _p: "owner")
+
+
 def _config(**overrides) -> dict:
     base = {
         "access_token": "at",

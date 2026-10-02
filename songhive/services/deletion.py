@@ -16,6 +16,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from ..federation import doc_cache
 from ..models._enums import Visibility
 from ..models.activity import Activity, ActivityTarget
 from ..models.album import Album
@@ -394,6 +395,14 @@ async def delete_album(
     if album.cover_file is not None:
         await _maybe_delete_stored_file(session, storage, album.cover_file)
 
+    # Drop the cached dereference documents for the album itself and the
+    # tracks whose membership changed, deferred to the caller's commit.
+    # Deleted tracks are covered by ``delete_track``; this also catches the
+    # tracks that merely lost their album reference.
+    doc_cache.invalidate_keys(("album", str(album.id)), session=session)
+    for track_id in track_ids:
+        doc_cache.invalidate_track(track_id, session=session)
+
     return deletion
 
 
@@ -477,6 +486,8 @@ async def delete_artist(
 
     if artist.image_file is not None:
         await _maybe_delete_stored_file(session, storage, artist.image_file)
+
+    doc_cache.invalidate_keys(("artist", str(artist.id)), session=session)
 
     return deletion
 
@@ -587,6 +598,10 @@ async def delete_library(
     await session.execute(delete(Report).where(Report.target_type == "library", Report.target_id == library.id))
     await cascade_delete_entity(session, "library", str(library.id))
     await session.execute(delete(Library).where(Library.id == library.id))
+
+    # Drop the library's cached dereference documents (all pages plus its
+    # followers collection), deferred to the caller's commit.
+    doc_cache.invalidate_prefix(("lib", str(library.id)), ("libfol", str(library.id)), session=session)
 
     return deletion
 
@@ -794,6 +809,18 @@ async def cascade_delete_entity(
         )
     )
     activities = result.scalars().all()
+
+    # Drop cached dereference documents so remote fetches see the
+    # tombstone/404 promptly rather than a stale payload. Deferred to
+    # after-commit so a concurrent render cannot re-cache the old rows.
+    for activity in activities:
+        doc_cache.invalidate_activity(
+            str(activity.id),
+            object_ids=(activity.local_object_id, activity.source_id),
+            session=session,
+        )
+    if entity_type == "track":
+        doc_cache.invalidate_track(entity_id, session=session)
 
     retracted: List[ActivityUnpublishInfo] = []
     now = datetime.now(timezone.utc)

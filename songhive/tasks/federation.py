@@ -15,7 +15,7 @@ from pubby import deliver_activity as pubby_deliver_activity
 from pubby.crypto import load_private_key
 from pubby.handlers._inbox import InboxProcessor
 
-from ..config import load_config
+from ..config import database_task_engine_kwargs, load_config
 from ..federation.actors import get_federation_storage
 from ..federation.storage import get_or_create_private_key
 from ..models.base import dispose_and_reset, get_session, init_db
@@ -117,7 +117,7 @@ def _object_follow_owner_username(config, activity: dict) -> Optional[str]:
         from ..services import moderation as moderation_service
         from ..services.auth import get_user_by_id
 
-        init_db(config.database.url)
+        init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
         async def _load():
             try:
@@ -168,11 +168,11 @@ def _load_incoming_moderation(actor: str, username: Optional[str]) -> tuple:
     return asyncio.run(_load())
 
 
-def _refresh_instance_policies(database_url: str) -> dict:
+def _refresh_instance_policies(database_config) -> dict:
     """Reload the database instance policies into the sync snapshot."""
     from ..services import moderation as moderation_service
 
-    init_db(database_url)
+    init_db(database_config.url, **database_task_engine_kwargs(database_config))
 
     async def _load():
         try:
@@ -213,10 +213,10 @@ def process_incoming(
         logger.warning("Incoming activity has no usable actor; dropping")
         return None
 
-    storage = get_federation_storage(config.database.url)
+    storage = get_federation_storage(config.database)
     domain = config.federation.instance_domain
 
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     db_policies, actor_suspended, recipient_suspended = _load_incoming_moderation(actor, username)
     if actor_suspended:
         logger.info("Dropping incoming %s from suspended actor %s", activity.get("type"), actor)
@@ -227,7 +227,7 @@ def process_incoming(
 
     # ``_load_incoming_moderation`` disposes the shared engine on exit, so
     # (re-)init unconditionally before the next session user.
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     actor_id: Optional[str]
     private_key_pem: Optional[str]
@@ -254,7 +254,7 @@ def process_incoming(
     # database even for shared-inbox deliveries (``username=None``).
     # ``_load_user_actor`` disposes the shared engine on exit, so (re-)init
     # unconditionally: ``init_db`` is a no-op when an engine is already set.
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     if not actor_id or not private_key_pem:
         logger.warning("No actor context available for incoming activity; dropping")
@@ -417,7 +417,7 @@ def _sync_remote_activities(config, activity: dict) -> None:
 
     from ..federation.incoming import sync_remote_activity
 
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     async def _run() -> None:
         try:
@@ -450,7 +450,7 @@ def _sync_inbox_notifications(config, activity: dict, username: Optional[str], s
     )
     from ..services.auth import get_user_by_username
 
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     # The actor document is normally cached by the signature verification
     # that just ran; it provides the display name and avatar for user cards.
@@ -529,7 +529,7 @@ def deliver_activity(
 
     # Refresh the database instance policies so defederation applies on
     # top of the configured allow/block lists.
-    _refresh_instance_policies(config.database.url)
+    _refresh_instance_policies(config.database)
 
     inbox_domain = extract_domain(inbox_url)
     if is_domain_blocked(inbox_domain, config):
@@ -573,12 +573,12 @@ def provision_federation_keys(dry_run: bool = False) -> int:
     """
     import asyncio
 
-    from ..config import load_config
+    from ..config import database_task_engine_kwargs, load_config
 
     logger.info("Starting federation key provisioning (dry_run=%s)", dry_run)
 
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     async def _run() -> int:
         try:
@@ -612,7 +612,7 @@ def prune_remote_activities(
     days = older_than_days or config.federation.remote_activity_retention_days
     logger.info("Pruning remote activities older than %s days (dry_run=%s)", days, dry_run)
 
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
     async def _run() -> dict:
         try:

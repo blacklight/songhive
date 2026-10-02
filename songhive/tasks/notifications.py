@@ -21,7 +21,7 @@ from typing import List
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import load_config
+from ..config import database_task_engine_kwargs, load_config
 from ..models.base import dispose_and_reset, get_session, init_db
 from ..models.notification import Notification, NotificationPreference
 from ..models.user import User
@@ -117,7 +117,7 @@ async def _send_notification_digests(config) -> int:
 def send_notification_digests() -> int:
     """Send the daily notification digest email to each eligible user."""
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     return asyncio.run(_send_notification_digests(config))
 
 
@@ -137,7 +137,7 @@ async def _purge_old_notifications(config) -> int:
 def purge_old_notifications() -> int:
     """Delete seen notifications older than the configured retention window."""
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     return asyncio.run(_purge_old_notifications(config))
 
 
@@ -154,5 +154,5 @@ async def _send_push_notifications(config, user_id: str, notification: dict) -> 
 def send_push_notifications(user_id: str, notification: dict) -> int:
     """Send a Web Push copy of an in-app notification to the user's browsers."""
     config = load_config([])
-    init_db(config.database.url)
+    init_db(config.database.url, **database_task_engine_kwargs(config.database))
     return asyncio.run(_send_push_notifications(config, user_id, notification))
