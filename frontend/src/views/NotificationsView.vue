@@ -1017,7 +1017,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  max-width: 48rem;
+  width: 100%;
 
   --notification-btn-width: 2.5rem;
 }
@@ -1086,8 +1086,9 @@ onBeforeUnmount(() => {
 }
 
 .notifications-view__list {
+  max-width: 50rem;
   list-style: none;
-  margin: 0;
+  margin: 0 auto;
   padding: 0;
   display: flex;
   flex-direction: column;
