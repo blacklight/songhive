@@ -8,6 +8,7 @@ import {
 } from "@/api/streams";
 import { eventBus, type WsEvent } from "@/api/ws";
 import { useAuthStore } from "@/stores/auth";
+import { useStreamActions } from "@/composables/useStreamActions";
 import { getApiErrorMessage } from "@/api/client";
 import StreamCard from "@/components/streams/StreamCard.vue";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -16,6 +17,7 @@ import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 
 const { t } = useI18n();
 const auth = useAuthStore();
+const { busyStreams, toggleEnabled, togglePlayback } = useStreamActions();
 
 const streams = ref<StreamResponse[]>([]);
 const loading = ref(false);
@@ -115,7 +117,14 @@ onUnmounted(() => {
     </div>
 
     <ul v-else class="streams-view__list" role="list">
-      <StreamCard v-for="stream in streams" :key="stream.id" :stream="stream" />
+      <StreamCard
+        v-for="stream in streams"
+        :key="stream.id"
+        :stream="stream"
+        :busy="busyStreams.has(stream.id)"
+        @toggle-enabled="toggleEnabled"
+        @toggle-playback="togglePlayback"
+      />
     </ul>
   </div>
 </template>

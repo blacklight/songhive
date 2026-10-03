@@ -23,6 +23,7 @@ import {
   type PlaylistResponse,
 } from "@/api/playlists";
 import { listStreams, type StreamResponse } from "@/api/streams";
+import { useStreamActions } from "@/composables/useStreamActions";
 import { getApiErrorMessage } from "@/api/client";
 import { toQueueTrack } from "@/player/enrich";
 import { SHUFFLE_CHUNK_SIZE } from "@/composables/useShufflePlay";
@@ -55,6 +56,7 @@ interface Props {
 const props = defineProps<Props>();
 const { t } = useI18n();
 const route = useRoute();
+const { busyStreams, toggleEnabled, togglePlayback } = useStreamActions();
 
 const username = computed(() => String(route.params.username));
 const limit = 20;
@@ -386,6 +388,9 @@ watch([includeBoosts, includeReplies], () => {
           :key="stream.id"
           :stream="stream"
           :show-owner="false"
+          :busy="busyStreams.has(stream.id)"
+          @toggle-enabled="toggleEnabled"
+          @toggle-playback="togglePlayback"
         />
       </ul>
     </template>

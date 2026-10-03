@@ -468,7 +468,11 @@
       "private": "خاص",
       "listeners": "لا مستمعين | مستمع واحد | مستمعان | {count} مستمعين | {count} مستمعًا | {count} مستمع",
       "nowPlaying": "يُشغَّل الآن",
-      "openStream": "فتح رابط البث"
+      "openStream": "فتح رابط البث",
+      "paused": "مُتوقّف مؤقتًا",
+      "enable": "تفعيل البث",
+      "disable": "تعطيل البث",
+      "actionError": "فشل إجراء البث: {message}"
     },
     "podcasts": {
       "title": "البودكاست",

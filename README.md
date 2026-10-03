@@ -639,7 +639,7 @@ REST API available at `/api/v1/`:
 | `/api/v1/radios/` | Dynamic radios |
 | `/api/v1/stream/{id}` | Audio streaming |
 | `/api/v1/outputs/` | Server-side audio outputs (Icecast relays, Snapcast casting, native HTTP mounts) |
-| `/api/v1/streams/` | Native HTTP stream directory (public mounts for everyone, token-protected mounts for their owner) |
+| `/api/v1/streams/` | Native HTTP stream directory (public mounts for everyone, token-protected mounts for their owner and admins; owner/admin can enable-disable mounts and play/pause their driving session) |
 | `/streams/{mount}` | Native HTTP stream mountpoints (listener-facing) |
 | `/api/v1/admin/` | Admin endpoints |
 

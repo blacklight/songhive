@@ -263,6 +263,30 @@ async def get_output_stream(db: AsyncSession, output_id: str, user: User) -> Out
     return output
 
 
+async def get_http_stream_for_manage(db: AsyncSession, output_id: str, user: User) -> OutputStream:
+    """Load a native-HTTP output the user may manage (its owner or an admin)."""
+    output = await db.get(OutputStream, output_id)
+    if output is None or output.provider_type != "http" or (output.user_id != str(user.id) and not user.is_admin):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Stream not found",
+        )
+    return output
+
+
+async def set_output_enabled(db: AsyncSession, output: OutputStream, user: User, enabled: bool) -> OutputStream:
+    """Toggle an output's enabled flag for its owner or an admin."""
+    if output.user_id != str(user.id) and not user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Output not found",
+        )
+    output.enabled = enabled
+    output.updated_at = datetime.now(timezone.utc)
+    await db.flush()
+    return output
+
+
 async def update_output(
     db: AsyncSession,
     output: OutputStream,

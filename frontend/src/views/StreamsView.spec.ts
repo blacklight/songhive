@@ -9,6 +9,8 @@ import StreamsView from "./StreamsView.vue";
 
 vi.mock("@/api/streams", () => ({
   listStreams: vi.fn(),
+  updateStream: vi.fn(),
+  sendStreamCommand: vi.fn(),
 }));
 
 type BusHandler = (event: { type: string; data: unknown }) => void;
@@ -64,6 +66,7 @@ function createStream(
     stream_url: "/streams/radio",
     visibility: "public",
     is_owner: false,
+    can_manage: false,
     owner: {
       username: "alice",
       display_name: "DJ Alice",
@@ -71,6 +74,7 @@ function createStream(
     },
     enabled: true,
     online: true,
+    playback_state: null,
     description: "Chill beats",
     genre: "Ambient",
     format: "mp3",
@@ -209,6 +213,140 @@ describe("StreamsView", () => {
         remote: true,
       }),
     );
+  });
+
+  it("reports a non-playing session as paused, not live", async () => {
+    vi.mocked(streamsApi.listStreams).mockResolvedValue([
+      createStream({ online: true, playback_state: "paused" }),
+    ]);
+
+    await mountView();
+
+    const badge = wrapper
+      .findAll(".stream-card__badge")
+      .find((b) => b.classes().includes("stream-card__badge--paused"));
+    expect(badge).toBeDefined();
+    expect(badge!.text()).toContain(i18n.global.t("pages.streams.paused"));
+  });
+
+  it("hides manage actions for streams the user cannot manage", async () => {
+    vi.mocked(streamsApi.listStreams).mockResolvedValue([
+      createStream({ playback_state: "playing" }),
+    ]);
+
+    await mountView();
+
+    expect(
+      wrapper
+        .findAll("button")
+        .find(
+          (b) => b.attributes("aria-label") === i18n.global.t("common.pause"),
+        ),
+    ).toBeUndefined();
+    expect(
+      wrapper
+        .findAll("button")
+        .find(
+          (b) =>
+            b.attributes("aria-label") ===
+            i18n.global.t("pages.streams.disable"),
+        ),
+    ).toBeUndefined();
+  });
+
+  it("lets managers pause and resume the driving session", async () => {
+    vi.mocked(streamsApi.listStreams).mockResolvedValue([
+      createStream({ can_manage: true, playback_state: "playing" }),
+    ]);
+    vi.mocked(streamsApi.sendStreamCommand).mockResolvedValue({
+      state: "paused",
+    });
+
+    await mountView();
+
+    const pause = wrapper
+      .findAll("button")
+      .find(
+        (b) => b.attributes("aria-label") === i18n.global.t("common.pause"),
+      );
+    expect(pause).toBeDefined();
+    await pause!.trigger("click");
+    await flushPromises();
+
+    expect(streamsApi.sendStreamCommand).toHaveBeenCalledWith("s1", "pause");
+    expect(wrapper.text()).toContain(i18n.global.t("pages.streams.paused"));
+
+    vi.mocked(streamsApi.sendStreamCommand).mockResolvedValue({
+      state: "playing",
+    });
+    const play = wrapper
+      .findAll("button")
+      .find((b) => b.attributes("aria-label") === i18n.global.t("common.play"));
+    expect(play).toBeDefined();
+    await play!.trigger("click");
+    await flushPromises();
+
+    expect(streamsApi.sendStreamCommand).toHaveBeenCalledWith("s1", "play");
+    expect(wrapper.text()).toContain(i18n.global.t("pages.streams.live"));
+  });
+
+  it("lets managers disable and enable the stream", async () => {
+    vi.mocked(streamsApi.listStreams).mockResolvedValue([
+      createStream({ can_manage: true }),
+    ]);
+    vi.mocked(streamsApi.updateStream).mockResolvedValue({
+      id: "s1",
+      enabled: false,
+    });
+
+    await mountView();
+
+    const disable = wrapper
+      .findAll("button")
+      .find(
+        (b) =>
+          b.attributes("aria-label") === i18n.global.t("pages.streams.disable"),
+      );
+    expect(disable).toBeDefined();
+    await disable!.trigger("click");
+    await flushPromises();
+
+    expect(streamsApi.updateStream).toHaveBeenCalledWith("s1", {
+      enabled: false,
+    });
+    expect(wrapper.text()).toContain(i18n.global.t("pages.streams.disabled"));
+
+    vi.mocked(streamsApi.updateStream).mockResolvedValue({
+      id: "s1",
+      enabled: true,
+    });
+    const enable = wrapper
+      .findAll("button")
+      .find(
+        (b) =>
+          b.attributes("aria-label") === i18n.global.t("pages.streams.enable"),
+      );
+    expect(enable).toBeDefined();
+    await enable!.trigger("click");
+    await flushPromises();
+
+    expect(streamsApi.updateStream).toHaveBeenCalledWith("s1", {
+      enabled: true,
+    });
+  });
+
+  it("disables the transport button when no session drives the stream", async () => {
+    vi.mocked(streamsApi.listStreams).mockResolvedValue([
+      createStream({ can_manage: true, playback_state: null }),
+    ]);
+
+    await mountView();
+
+    const play = wrapper
+      .findAll("button")
+      .find((b) => b.attributes("aria-label") === i18n.global.t("common.play"));
+    expect(play).toBeDefined();
+    expect(play!.attributes("disabled")).toBeDefined();
   });
 
   it("shows the empty state", async () => {

@@ -468,7 +468,11 @@
       "private": "Privado",
       "listeners": "Sin oyentes | {count} oyente | {count} oyentes",
       "nowPlaying": "Sonando ahora",
-      "openStream": "Abrir la URL del stream"
+      "openStream": "Abrir la URL del stream",
+      "paused": "En pausa",
+      "enable": "Activar el stream",
+      "disable": "Desactivar el stream",
+      "actionError": "La acción del stream falló: {message}"
     },
     "podcasts": {
       "title": "Podcasts",

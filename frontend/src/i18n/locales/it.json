@@ -468,7 +468,11 @@
       "private": "Privato",
       "listeners": "Nessun ascoltatore | {count} ascoltatore | {count} ascoltatori",
       "nowPlaying": "In riproduzione",
-      "openStream": "Apri l'URL dello stream"
+      "openStream": "Apri l'URL dello stream",
+      "paused": "In pausa",
+      "enable": "Abilita lo stream",
+      "disable": "Disabilita lo stream",
+      "actionError": "Azione sullo stream non riuscita: {message}"
     },
     "podcasts": {
       "title": "Podcast",

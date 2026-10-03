@@ -6,6 +6,7 @@ import type { StreamResponse } from "@/api/streams";
 import type { ActivityAttachment } from "@/api/activities";
 import ActivityAudioPlayer from "@/components/activities/ActivityAudioPlayer.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
+import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
 
 interface Props {
@@ -13,9 +14,17 @@ interface Props {
   // The owner line is redundant where the listing is already scoped to one
   // user (e.g. a profile tab).
   showOwner?: boolean;
+  busy?: boolean;
 }
 
-const props = withDefaults(defineProps<Props>(), { showOwner: true });
+const props = withDefaults(defineProps<Props>(), {
+  showOwner: true,
+  busy: false,
+});
+const emit = defineEmits<{
+  (e: "toggle-enabled", stream: StreamResponse): void;
+  (e: "toggle-playback", stream: StreamResponse): void;
+}>();
 const { t } = useI18n();
 
 function ownerName(): string {
@@ -26,11 +35,39 @@ function ownerRoute(): string {
   return `/@${props.stream.owner.username}`;
 }
 
+// The mount broadcasts silence while its driving session is paused or
+// stopped — the meta key stays live, so a non-playing session must not be
+// reported as "Live".
+const isPaused = computed(
+  () =>
+    props.stream.online &&
+    props.stream.playback_state != null &&
+    props.stream.playback_state !== "playing",
+);
+
 function statusLabel(): string {
   if (!props.stream.enabled) return t("pages.streams.disabled");
-  return props.stream.online
-    ? t("pages.streams.live")
-    : t("pages.streams.offline");
+  if (!props.stream.online) return t("pages.streams.offline");
+  return isPaused.value ? t("pages.streams.paused") : t("pages.streams.live");
+}
+
+function statusIcon(): string {
+  if (isPaused.value) return "circle-pause";
+  return props.stream.enabled && props.stream.online ? "circle" : "circle-stop";
+}
+
+const canTogglePlayback = computed(
+  () => props.stream.enabled && props.stream.playback_state != null,
+);
+
+function transportIcon(): string {
+  return props.stream.playback_state === "playing" ? "pause" : "play";
+}
+
+function transportLabel(): string {
+  return props.stream.playback_state === "playing"
+    ? t("common.pause")
+    : t("common.play");
 }
 
 function formatLabel(): string {
@@ -93,13 +130,42 @@ const attachment = computed<ActivityAttachment>(() => ({
         <span
           class="stream-card__badge"
           :class="{
-            'stream-card__badge--live': stream.online,
+            'stream-card__badge--live': stream.online && !isPaused,
+            'stream-card__badge--paused': isPaused,
             'stream-card__badge--disabled': !stream.enabled,
           }"
         >
-          <AppIcon :name="stream.online ? 'circle' : 'circle-stop'" />
+          <AppIcon :name="statusIcon()" />
           {{ statusLabel() }}
         </span>
+        <div v-if="stream.can_manage" class="stream-card__actions">
+          <AppButton
+            variant="ghost"
+            size="sm"
+            :icon="transportIcon()"
+            :title="transportLabel()"
+            :aria-label="transportLabel()"
+            :disabled="busy || !canTogglePlayback"
+            @click="emit('toggle-playback', stream)"
+          />
+          <AppButton
+            variant="ghost"
+            size="sm"
+            icon="power-off"
+            :title="
+              stream.enabled
+                ? t('pages.streams.disable')
+                : t('pages.streams.enable')
+            "
+            :aria-label="
+              stream.enabled
+                ? t('pages.streams.disable')
+                : t('pages.streams.enable')
+            "
+            :disabled="busy"
+            @click="emit('toggle-enabled', stream)"
+          />
+        </div>
       </div>
     </div>
 
@@ -233,8 +299,19 @@ const attachment = computed<ActivityAttachment>(() => ({
   border-color: var(--color-danger);
 }
 
+.stream-card__badge--paused {
+  color: var(--color-warning);
+  border-color: var(--color-warning);
+}
+
 .stream-card__badge--private {
   color: var(--color-text);
+}
+
+.stream-card__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
 }
 
 .stream-card__body {

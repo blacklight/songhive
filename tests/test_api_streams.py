@@ -6,6 +6,7 @@ import pytest
 from fastapi import status
 
 from songhive.models.output_stream import OutputStream
+from songhive.models.playback_session import PlaybackSession, PlaybackSessionOutput
 from songhive.services.secrets import encrypt_json
 from songhive.streams.http import stream_listener_key, stream_meta_key
 
@@ -29,6 +30,29 @@ async def _make_http_output(db, user, mount: str = "radio", *, enabled: bool = T
     db.add(output)
     await db.flush()
     return output
+
+
+async def _make_stream_session(db, user, output, *, state: str = "playing") -> PlaybackSession:
+    """Attach a playback session to ``output`` as its driving stream session."""
+    session = PlaybackSession(
+        user_id=str(user.id),
+        state=state,
+        current_index=0,
+        position_seconds=0.0,
+        queue=[{"id": "t1", "title": "Track", "artist": "Artist", "duration": 100}],
+    )
+    db.add(session)
+    await db.flush()
+    db.add(
+        PlaybackSessionOutput(
+            session_id=session.id,
+            output_kind="stream",
+            output_stream_id=str(output.id),
+            status="live",
+        )
+    )
+    await db.flush()
+    return session
 
 
 async def _publish_meta(fake_redis, mount: str, **meta) -> None:
@@ -203,6 +227,186 @@ async def test_list_streams_owner_username_keeps_visibility_rules(client, regula
         "private-mount",
         "public-mount",
     ]
+
+
+@pytest.mark.asyncio
+async def test_list_streams_reports_playback_state(client, regular_user, other_user, db_session, fake_redis):
+    """A live mount exposes its driving session's state for paused reporting."""
+    live = await _make_http_output(db_session, regular_user, "live")
+    paused = await _make_http_output(db_session, other_user, "paused")
+    await _make_http_output(db_session, regular_user, "no-session")
+    await _make_stream_session(db_session, regular_user, live, state="playing")
+    await _make_stream_session(db_session, other_user, paused, state="paused")
+    await _publish_meta(fake_redis, "live", song="A - T")
+    await _publish_meta(fake_redis, "paused", song="A - T")
+    await _publish_meta(fake_redis, "no-session", song="A - T")
+
+    data = {s["mount"]: s for s in client.get("/api/v1/streams/").json()}
+    assert data["live"]["playback_state"] == "playing"
+    assert data["paused"]["playback_state"] == "paused"
+    assert data["no-session"]["playback_state"] is None
+
+
+@pytest.mark.asyncio
+async def test_list_streams_can_manage_flags(client, regular_user, other_user, admin_user, auth_headers, db_session):
+    """``can_manage`` is set for the owner and admins, not other users."""
+    await _make_http_output(db_session, regular_user, "radio")
+
+    anon = client.get("/api/v1/streams/").json()
+    assert anon[0]["can_manage"] is False
+
+    other = client.get("/api/v1/streams/", headers=auth_headers(other_user)).json()
+    assert other[0]["can_manage"] is False
+    assert other[0]["is_owner"] is False
+
+    owner = client.get("/api/v1/streams/", headers=auth_headers(regular_user)).json()
+    assert owner[0]["can_manage"] is True
+    assert owner[0]["is_owner"] is True
+
+    admin = client.get("/api/v1/streams/", headers=auth_headers(admin_user)).json()
+    assert admin[0]["can_manage"] is True
+    assert admin[0]["is_owner"] is False
+
+
+@pytest.mark.asyncio
+async def test_list_streams_admin_sees_private_and_disabled(client, regular_user, admin_user, auth_headers, db_session):
+    """Admins see token-protected and disabled mounts like the owner does."""
+    await _make_http_output(db_session, regular_user, "private-mount", listen_token="s3cret")
+    await _make_http_output(db_session, regular_user, "disabled-mount", enabled=False)
+
+    data = {s["mount"]: s for s in client.get("/api/v1/streams/", headers=auth_headers(admin_user)).json()}
+    assert sorted(data) == ["disabled-mount", "private-mount"]
+    assert data["private-mount"]["can_manage"] is True
+    assert data["private-mount"]["stream_url"] == "/streams/private-mount?token=s3cret"
+
+
+@pytest.mark.asyncio
+async def test_update_stream_requires_manage_rights(
+    client, regular_user, other_user, admin_user, auth_headers, db_session
+):
+    """PATCH toggles ``enabled`` for the owner or an admin; others get 404/401."""
+    output = await _make_http_output(db_session, regular_user, "radio")
+
+    assert (
+        client.patch(f"/api/v1/streams/{output.id}", json={"enabled": False}).status_code
+        == status.HTTP_401_UNAUTHORIZED
+    )
+    response = client.patch(
+        f"/api/v1/streams/{output.id}",
+        json={"enabled": False},
+        headers=auth_headers(other_user),
+    )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    response = client.patch(
+        f"/api/v1/streams/{output.id}",
+        json={"enabled": False},
+        headers=auth_headers(admin_user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == {"id": str(output.id), "enabled": False}
+    await db_session.refresh(output)
+    assert output.enabled is False
+
+    response = client.patch(
+        f"/api/v1/streams/{output.id}",
+        json={"enabled": True},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_update_stream_rejects_non_http_output(client, regular_user, auth_headers, db_session):
+    """PATCH on a non-HTTP output is a 404 — only native mounts are streams."""
+    output = OutputStream(
+        user_id=str(regular_user.id),
+        provider_type="icecast",
+        name="relay",
+        config=encrypt_json({"host": "icecast.example", "mount": "/radio"}),
+        enabled=True,
+    )
+    db_session.add(output)
+    await db_session.flush()
+
+    response = client.patch(
+        f"/api/v1/streams/{output.id}",
+        json={"enabled": False},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_stream_command_toggles_playback(client, regular_user, auth_headers, db_session):
+    """play/pause commands reach the session driving the stream."""
+    output = await _make_http_output(db_session, regular_user, "radio")
+    session = await _make_stream_session(db_session, regular_user, output, state="playing")
+
+    response = client.post(
+        f"/api/v1/streams/{output.id}/command",
+        json={"command": "pause"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["state"] == "paused"
+    await db_session.refresh(session)
+    assert session.state == "paused"
+
+    response = client.post(
+        f"/api/v1/streams/{output.id}/command",
+        json={"command": "play"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["state"] == "playing"
+
+
+@pytest.mark.asyncio
+async def test_stream_command_admin_controls_other_users_stream(
+    client, regular_user, admin_user, other_user, auth_headers, db_session
+):
+    """Admins may command another user's stream; regular users may not."""
+    output = await _make_http_output(db_session, regular_user, "radio")
+    await _make_stream_session(db_session, regular_user, output, state="playing")
+
+    response = client.post(
+        f"/api/v1/streams/{output.id}/command",
+        json={"command": "pause"},
+        headers=auth_headers(other_user),
+    )
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+    response = client.post(
+        f"/api/v1/streams/{output.id}/command",
+        json={"command": "pause"},
+        headers=auth_headers(admin_user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json()["state"] == "paused"
+
+
+@pytest.mark.asyncio
+async def test_stream_command_no_session_and_bad_command(client, regular_user, auth_headers, db_session):
+    """A stream with no driving session is a 409; unknown commands are 422."""
+    output = await _make_http_output(db_session, regular_user, "radio")
+
+    response = client.post(
+        f"/api/v1/streams/{output.id}/command",
+        json={"command": "pause"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_409_CONFLICT
+
+    session = await _make_stream_session(db_session, regular_user, output, state="playing")
+    assert session is not None
+    response = client.post(
+        f"/api/v1/streams/{output.id}/command",
+        json={"command": "seek"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT
 
 
 @pytest.mark.asyncio
