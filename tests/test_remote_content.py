@@ -1093,6 +1093,42 @@ class TestRemoteRoutes:
         assert handle.status_code == 200
         assert handle.json()["url"] == "/@alice"
 
+    async def test_lookup_local_permalink_anonymous(self, client, regular_user, db_session):
+        # Local targets map to SPA routes without any remote fetch, so the
+        # ``remote_search_access`` policy does not gate them — anonymous
+        # browsers resolve object permalinks too (the SPA's
+        # ``/users/{u}/objects/{id}`` landing route depends on it).
+        client.app.state.config.federation.instance_domain = "local.invalid"
+        activity = Activity(
+            entity_type="track",
+            entity_id="t-1",
+            activity_type="create",
+            source_type="local",
+            source_actor="https://local.invalid/users/regular",
+            source_id="https://local.invalid/users/regular/objects/obj-9",
+            local_object_id="obj-9",
+            owner_user_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+        )
+        db_session.add(activity)
+        await db_session.commit()
+
+        response = client.get(
+            "/api/v1/remote/lookup",
+            params={"input": "https://local.invalid/users/regular/objects/obj-9"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert body["kind"] == "local"
+        assert body["url"] == f"/activities/{activity.id}"
+
+        missing = client.get(
+            "/api/v1/remote/lookup",
+            params={"input": "https://local.invalid/users/regular/objects/missing"},
+        )
+        assert missing.status_code == 200
+        assert missing.json()["url"] == "/users/regular/objects/missing"
+
     async def test_lookup_object_url(self, client, fetcher, regular_user, auth_headers, db_session):
         # Commit so the shared session holds no write transaction; pubby's
         # actor-cache storage writes through its own sync engine on the same

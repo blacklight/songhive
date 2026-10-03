@@ -381,11 +381,13 @@ async def remote_lookup(
     WebFinger + the actor cache; object/activity/resource URLs are
     dereferenced (one bounded fetch) into the ``remote_objects`` cache with
     a materialized ``Activity``. Local-domain inputs need no fetch — they
-    map straight to their SPA route. Returns the internal SPA route to
-    navigate to.
+    map straight to their SPA route, and skip the lookup policy: no remote
+    access happens, so object permalinks resolve for anonymous browsers
+    too. Returns the internal SPA route to navigate to.
     """
-    _remote_policy(config, user)
     target = remote_content.parse_remote_target(input, config)
+    if target.kind != remote_content.RemoteTargetKind.LOCAL:
+        _remote_policy(config, user)
 
     if target.kind in (
         remote_content.RemoteTargetKind.HANDLE,

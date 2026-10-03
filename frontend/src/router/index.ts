@@ -398,6 +398,15 @@ const routes: RouteRecordRaw[] = [
         name: "userRedirect",
         redirect: (to) => ({ path: `/@${to.params.username}` }),
       },
+      // ActivityPub object permalinks (``{actor}/objects/{id}``) opened in
+      // a browser: the backend redirects them itself, but front proxies
+      // serving the SPA for HTML traffic bypass that handler — the view
+      // resolves the object id through the local-target lookup.
+      {
+        path: "users/:username/objects/:objectId",
+        name: "objectPermalink",
+        component: () => import("@/views/ObjectPermalinkView.vue"),
+      },
       {
         path: "@:username",
         component: () => import("@/views/UserProfileView.vue"),

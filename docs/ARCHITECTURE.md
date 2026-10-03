@@ -638,6 +638,14 @@ paths) and, for `{actor}/objects/{uuid}` shapes, `local_object_id`. Browser
 requests to a local `/users/{name}/objects/{id}` that map to a stored
 activity are redirected by `federation.py` to the `/activities/{id}`
 permalink, while ActivityPub `Accept` headers still get the object JSON.
+Front proxies that serve the SPA shell for browser traffic bypass that
+redirect, so the SPA also mounts a matching
+`/users/{username}/objects/{objectId}` route
+(`views/ObjectPermalinkView.vue`) that resolves the permalink client-side
+through `/api/v1/remote/lookup` (which maps local URLs to their SPA route
+without any remote fetch, and is therefore exempt from the
+`remote_search_access` policy for local targets) with an
+`/api/v1/activities/lookup` fallback.
 Notification payloads denormalize `object_activity_id`/`object_type`/
 `object_page_url` for the note itself and `target_object_*` for the
 replied-to/quoted activity, so clients can render real activity cards and
@@ -2501,7 +2509,8 @@ resources — without crawling remote timelines or indexing the fediverse.
   policy (`disabled`/`authenticated`/`public`, default `authenticated`,
   editable at runtime by admins) plus the federation domain allow/block
   lists before any network access. Local-domain inputs never hit the
-  network: `resolve_local_target` maps them straight to their SPA route
+  network — and skip the policy, since no remote access happens:
+  `resolve_local_target` maps them straight to their SPA route
   (`/{kind}/{id}`, `/@{user}`, `/activities/{id}`; object permalinks
   resolve through `Track.federation_object_id` /
   `Activity.local_object_id`).
