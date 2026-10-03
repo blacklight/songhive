@@ -1,9 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mount, flushPromises } from "@vue/test-utils";
 import { usePlayerStore } from "@/stores/player";
+import { useAuthStore } from "@/stores/auth";
+import { useToastStore } from "@/stores/toast";
+import { i18n } from "@/i18n";
+import * as playlistsApi from "@/api/playlists";
 import { toQueueTrack } from "@/player/enrich";
-import type { TrackResponse } from "@/player/types";
+import type { QueueTrack, TrackResponse } from "@/player/types";
 import QueuePanel from "./QueuePanel.vue";
+
+vi.mock("@/api/playlists", () => ({
+  createPlaylist: vi.fn(),
+  addTracksToPlaylist: vi.fn(),
+}));
 
 function makeTrack(overrides: Partial<TrackResponse> = {}): TrackResponse {
   return {
@@ -16,6 +25,25 @@ function makeTrack(overrides: Partial<TrackResponse> = {}): TrackResponse {
     visibility: "public" as const,
     ...overrides,
   };
+}
+
+function makeQueueTrack(overrides: Partial<QueueTrack> = {}): QueueTrack {
+  return {
+    ...toQueueTrack(makeTrack(), { artist_name: "Artist" }),
+    ...overrides,
+  };
+}
+
+function setAuthenticated() {
+  const authStore = useAuthStore();
+  authStore.status = "authenticated";
+  authStore.user = { id: "user-1", username: "alice" } as never;
+}
+
+function findBodyButton(text: string) {
+  return Array.from(document.body.querySelectorAll("button")).find(
+    (b) => b.textContent === text,
+  );
 }
 
 function createMockEngine() {
@@ -37,11 +65,14 @@ describe("QueuePanel", () => {
     originalScrollIntoView = Element.prototype.scrollIntoView;
     Element.prototype.scrollIntoView =
       vi.fn() as typeof Element.prototype.scrollIntoView;
+    vi.mocked(playlistsApi.createPlaylist).mockReset();
+    vi.mocked(playlistsApi.addTracksToPlaylist).mockReset();
   });
 
   afterEach(() => {
     Element.prototype.scrollIntoView = originalScrollIntoView;
     document.body.style.overflow = "";
+    document.body.innerHTML = "";
   });
 
   it("scrolls the current track into view when opened", async () => {
@@ -175,5 +206,234 @@ describe("QueuePanel", () => {
     );
     expect(warned).toBe(false);
     warn.mockRestore();
+  });
+
+  it("hides the save-as-playlist button when unauthenticated", async () => {
+    const player = usePlayerStore();
+    player.queue = [makeQueueTrack({ id: "track-1" })];
+    player.index = 0;
+
+    const wrapper = mount(QueuePanel, {
+      props: { open: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    expect(wrapper.find(".queue-panel__save").exists()).toBe(false);
+  });
+
+  it("disables the save button when the queue has no saveable items", async () => {
+    setAuthenticated();
+    const player = usePlayerStore();
+    // Attachment-only remote audio has no cached remote object row to add.
+    player.queue = [makeQueueTrack({ id: "remote-1", remote: true })];
+    player.index = 0;
+
+    const wrapper = mount(QueuePanel, {
+      props: { open: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const save = wrapper.find(".queue-panel__save");
+    expect(save.exists()).toBe(true);
+    expect(save.attributes("disabled")).toBeDefined();
+  });
+
+  it("saves the queue as a new playlist", async () => {
+    setAuthenticated();
+    vi.mocked(playlistsApi.createPlaylist).mockResolvedValue({
+      id: "playlist-1",
+      name: "My Mix",
+      owner_id: "user-1",
+      visibility: "private",
+    } as never);
+    vi.mocked(playlistsApi.addTracksToPlaylist).mockResolvedValue({
+      added: 2,
+      track_ids: ["track-1", "track-2"],
+    });
+
+    const player = usePlayerStore();
+    player.queue = [
+      makeQueueTrack({ id: "track-1", title: "One" }),
+      makeQueueTrack({ id: "track-2", title: "Two" }),
+    ];
+    player.index = 0;
+
+    const wrapper = mount(QueuePanel, {
+      props: { open: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    await wrapper.find(".queue-panel__save").trigger("click");
+    await flushPromises();
+
+    const nameInput = document.body.querySelector(
+      '#queue-save-form input[type="text"]',
+    ) as HTMLInputElement;
+    expect(nameInput).not.toBeNull();
+    nameInput.value = "My Mix";
+    nameInput.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    const saveButton = findBodyButton(i18n.global.t("common.save"));
+    expect(saveButton).toBeDefined();
+    saveButton?.click();
+    await flushPromises();
+
+    expect(playlistsApi.createPlaylist).toHaveBeenCalledWith(
+      { name: "My Mix", description: null },
+      { visibility: "private" },
+    );
+    expect(playlistsApi.addTracksToPlaylist).toHaveBeenCalledTimes(1);
+    expect(playlistsApi.addTracksToPlaylist).toHaveBeenCalledWith(
+      "playlist-1",
+      { track_ids: ["track-1", "track-2"], allow_duplicates: true },
+    );
+
+    const toastStore = useToastStore();
+    expect(toastStore.toasts[0]?.type).toBe("success");
+    expect(toastStore.toasts[0]?.message).toBe(
+      i18n.global.t("player.queueSavedAsPlaylist", {
+        name: "My Mix",
+        count: 2,
+      }),
+    );
+  });
+
+  it("sends one ordered batch per contiguous item kind", async () => {
+    setAuthenticated();
+    vi.mocked(playlistsApi.createPlaylist).mockResolvedValue({
+      id: "playlist-1",
+      name: "Mixed",
+      owner_id: "user-1",
+      visibility: "private",
+    } as never);
+    vi.mocked(playlistsApi.addTracksToPlaylist).mockResolvedValue({
+      added: 1,
+      track_ids: [],
+    });
+
+    const player = usePlayerStore();
+    player.queue = [
+      makeQueueTrack({ id: "track-1" }),
+      makeQueueTrack({ id: "ep-1", podcast_episode_id: "ep-1" }),
+      makeQueueTrack({ id: "rt-1", remote: true, remote_object_id: "ro-1" }),
+      makeQueueTrack({ id: "track-2" }),
+    ];
+    player.index = 0;
+
+    const wrapper = mount(QueuePanel, {
+      props: { open: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    await wrapper.find(".queue-panel__save").trigger("click");
+    await flushPromises();
+
+    const nameInput = document.body.querySelector(
+      '#queue-save-form input[type="text"]',
+    ) as HTMLInputElement;
+    nameInput.value = "Mixed";
+    nameInput.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    findBodyButton(i18n.global.t("common.save"))?.click();
+    await flushPromises();
+
+    const add = vi.mocked(playlistsApi.addTracksToPlaylist);
+    expect(add.mock.calls).toEqual([
+      ["playlist-1", { track_ids: ["track-1"], allow_duplicates: true }],
+      ["playlist-1", { episode_ids: ["ep-1"], allow_duplicates: true }],
+      ["playlist-1", { remote_object_ids: ["ro-1"], allow_duplicates: true }],
+      ["playlist-1", { track_ids: ["track-2"], allow_duplicates: true }],
+    ]);
+  });
+
+  it("keeps repeated queue entries by splitting the batch", async () => {
+    setAuthenticated();
+    vi.mocked(playlistsApi.createPlaylist).mockResolvedValue({
+      id: "playlist-1",
+      name: "Repeats",
+      owner_id: "user-1",
+      visibility: "private",
+    } as never);
+    vi.mocked(playlistsApi.addTracksToPlaylist).mockResolvedValue({
+      added: 1,
+      track_ids: [],
+    });
+
+    const player = usePlayerStore();
+    player.queue = [
+      makeQueueTrack({ id: "track-1" }),
+      makeQueueTrack({ id: "track-2" }),
+      makeQueueTrack({ id: "track-1" }),
+    ];
+    player.index = 0;
+
+    const wrapper = mount(QueuePanel, {
+      props: { open: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    await wrapper.find(".queue-panel__save").trigger("click");
+    await flushPromises();
+
+    const nameInput = document.body.querySelector(
+      '#queue-save-form input[type="text"]',
+    ) as HTMLInputElement;
+    nameInput.value = "Repeats";
+    nameInput.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    findBodyButton(i18n.global.t("common.save"))?.click();
+    await flushPromises();
+
+    const add = vi.mocked(playlistsApi.addTracksToPlaylist);
+    expect(add.mock.calls).toEqual([
+      [
+        "playlist-1",
+        { track_ids: ["track-1", "track-2"], allow_duplicates: true },
+      ],
+      ["playlist-1", { track_ids: ["track-1"], allow_duplicates: true }],
+    ]);
+  });
+
+  it("shows the API error when playlist creation fails", async () => {
+    setAuthenticated();
+    vi.mocked(playlistsApi.createPlaylist).mockRejectedValue(
+      new Error("network down"),
+    );
+
+    const player = usePlayerStore();
+    player.queue = [makeQueueTrack({ id: "track-1" })];
+    player.index = 0;
+
+    const wrapper = mount(QueuePanel, {
+      props: { open: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    await wrapper.find(".queue-panel__save").trigger("click");
+    await flushPromises();
+
+    const nameInput = document.body.querySelector(
+      '#queue-save-form input[type="text"]',
+    ) as HTMLInputElement;
+    nameInput.value = "Failing";
+    nameInput.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    findBodyButton(i18n.global.t("common.save"))?.click();
+    await flushPromises();
+
+    expect(
+      document.body.querySelector(".queue-panel__save-error")?.textContent,
+    ).toBe("network down");
+    expect(playlistsApi.addTracksToPlaylist).not.toHaveBeenCalled();
   });
 });

@@ -84,7 +84,9 @@
     "no": "No",
     "all": "All",
     "required": "Required",
-    "playAll": "Play all"
+    "playAll": "Play all",
+    "expand": "Expand",
+    "shrink": "Shrink"
   },
   "sort": {
     "label": "Sort by",
@@ -2070,6 +2072,8 @@
     "openQueue": "Open queue",
     "closeQueue": "Close queue",
     "clearQueue": "Clear queue",
+    "saveQueueAsPlaylist": "Save queue as playlist",
+    "queueSavedAsPlaylist": "Saved {count} items to playlist \"{name}\".",
     "queue": "Queue",
     "queueTracks": "Queue tracks",
     "emptyQueue": "The queue is empty.",

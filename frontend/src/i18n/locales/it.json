@@ -84,7 +84,9 @@
     "no": "No",
     "all": "Tutti",
     "required": "Obbligatorio",
-    "playAll": "Riproduci tutto"
+    "playAll": "Riproduci tutto",
+    "expand": "Espandi",
+    "shrink": "Riduci"
   },
   "sort": {
     "label": "Ordina per",
@@ -2070,6 +2072,8 @@
     "openQueue": "Apri coda",
     "closeQueue": "Chiudi coda",
     "clearQueue": "Svuota coda",
+    "saveQueueAsPlaylist": "Salva coda come playlist",
+    "queueSavedAsPlaylist": "Salvati {count} elementi nella playlist \"{name}\".",
     "queue": "Coda",
     "queueTracks": "Brani in coda",
     "emptyQueue": "La coda è vuota.",

@@ -84,7 +84,9 @@
     "no": "لا",
     "all": "الكل",
     "required": "مطلوب",
-    "playAll": "تشغيل الكل"
+    "playAll": "تشغيل الكل",
+    "expand": "توسيع",
+    "shrink": "تصغير"
   },
   "sort": {
     "label": "ترتيب حسب",
@@ -2070,6 +2072,8 @@
     "openQueue": "فتح قائمة الانتظار",
     "closeQueue": "إغلاق قائمة الانتظار",
     "clearQueue": "مسح قائمة الانتظار",
+    "saveQueueAsPlaylist": "حفظ قائمة الانتظار كقائمة تشغيل",
+    "queueSavedAsPlaylist": "تم حفظ {count} عناصر في قائمة التشغيل \"{name}\".",
     "queue": "قائمة الانتظار",
     "queueTracks": "مقاطع قائمة الانتظار",
     "emptyQueue": "قائمة الانتظار فارغة.",

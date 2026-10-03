@@ -158,9 +158,12 @@ const attachment = computed<ActivityAttachment>(() => ({
 
 <style scoped>
 .stream-card {
+  width: 100%;
+  max-width: 50rem;
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+  margin: 0 auto;
   padding: var(--space-4);
   background-color: var(--color-surface);
   border-radius: var(--radius-md);

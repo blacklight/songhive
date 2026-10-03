@@ -84,7 +84,9 @@
     "no": "No",
     "all": "Todo",
     "required": "Obligatorio",
-    "playAll": "Reproducir todo"
+    "playAll": "Reproducir todo",
+    "expand": "Expandir",
+    "shrink": "Contraer"
   },
   "sort": {
     "label": "Ordenar por",
@@ -2070,6 +2072,8 @@
     "openQueue": "Abrir cola",
     "closeQueue": "Cerrar cola",
     "clearQueue": "Vaciar cola",
+    "saveQueueAsPlaylist": "Guardar cola como lista de reproducción",
+    "queueSavedAsPlaylist": "Se guardaron {count} elementos en la lista \"{name}\".",
     "queue": "Cola",
     "queueTracks": "Pistas en cola",
     "emptyQueue": "La cola está vacía.",

@@ -1,14 +1,29 @@
 <script setup lang="ts">
 import {
+  computed,
   nextTick,
+  ref,
   useTemplateRef,
   watch,
   type ComponentPublicInstance,
 } from "vue";
 import { useI18n } from "vue-i18n";
 import { usePlayerStore } from "@/stores/player";
+import { useAuthStore } from "@/stores/auth";
+import { useToastStore } from "@/stores/toast";
+import { getApiErrorMessage } from "@/api/client";
+import {
+  createPlaylist,
+  addTracksToPlaylist,
+  type AddTracksToPlaylistRequest,
+  type PlaylistCreate,
+  type Visibility,
+} from "@/api/playlists";
 import { formatTime } from "@/utils/time";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppInput from "@/components/ui/AppInput.vue";
+import AppModal from "@/components/feedback/AppModal.vue";
+import AppSelect from "@/components/ui/AppSelect.vue";
 import { useFocusTrap } from "@/composables/useFocusTrap";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 
@@ -27,6 +42,8 @@ const emit = defineEmits<{
 }>();
 
 const store = usePlayerStore();
+const authStore = useAuthStore();
+const toastStore = useToastStore();
 const panelRef = useTemplateRef<HTMLElement>("panel");
 
 function isOpen() {
@@ -92,6 +109,124 @@ function clearQueue() {
   store.clear();
   emit("close");
 }
+
+type QueueSaveItem = { kind: "track" | "episode" | "remote"; id: string };
+
+/**
+ * Flatten the queue into playlist-addable items. Podcast episodes and cached
+ * remote objects are playlist members in their own right; attachment-only
+ * remote audio (``remote`` without ``remote_object_id``) has no row to
+ * reference and is skipped.
+ */
+function queueSaveItems(): QueueSaveItem[] {
+  const items: QueueSaveItem[] = [];
+  for (const track of store.queue) {
+    if (track.podcast_episode_id) {
+      items.push({ kind: "episode", id: track.podcast_episode_id });
+    } else if (track.remote && track.remote_object_id) {
+      items.push({ kind: "remote", id: track.remote_object_id });
+    } else if (!track.remote) {
+      items.push({ kind: "track", id: track.id });
+    }
+  }
+  return items;
+}
+
+/**
+ * Turn saveable items into a sequence of add requests that replays the
+ * queue order exactly. A single request appends tracks first, then
+ * episodes, then remote objects, and repeated ids inside one request are
+ * deduplicated — so the queue is split into contiguous same-kind runs, and
+ * a run is split again when an id repeats within it.
+ */
+function buildSaveBatches(
+  items: QueueSaveItem[],
+): AddTracksToPlaylistRequest[] {
+  const batches: AddTracksToPlaylistRequest[] = [];
+  let kind: QueueSaveItem["kind"] | null = null;
+  let ids: string[] = [];
+  let seen = new Set<string>();
+
+  const flush = () => {
+    if (!kind || ids.length === 0) return;
+    const body: AddTracksToPlaylistRequest = { allow_duplicates: true };
+    if (kind === "track") body.track_ids = ids;
+    else if (kind === "episode") body.episode_ids = ids;
+    else body.remote_object_ids = ids;
+    batches.push(body);
+    ids = [];
+    seen = new Set();
+  };
+
+  for (const item of items) {
+    if (item.kind !== kind || seen.has(item.id)) {
+      flush();
+      kind = item.kind;
+    }
+    ids.push(item.id);
+    seen.add(item.id);
+  }
+  flush();
+  return batches;
+}
+
+const hasSaveableItems = computed(() => queueSaveItems().length > 0);
+
+const isSaveOpen = ref(false);
+const saveName = ref("");
+const saveVisibility = ref<Visibility>("private");
+const saveError = ref<string | null>(null);
+const isSaving = ref(false);
+const isMaximized = ref(false);
+
+const visibilityOptions = computed(() => [
+  { value: "private", label: t("browse.visibility.private") },
+  { value: "local", label: t("browse.visibility.local") },
+  { value: "public", label: t("browse.visibility.public") },
+]);
+
+function openSave() {
+  saveName.value = "";
+  saveVisibility.value = "private";
+  saveError.value = null;
+  isSaveOpen.value = true;
+}
+
+function closeSave() {
+  if (!isSaving.value) isSaveOpen.value = false;
+}
+
+async function onSaveQueue() {
+  saveError.value = null;
+  const name = saveName.value.trim();
+  if (!name) return;
+  const batches = buildSaveBatches(queueSaveItems());
+  if (batches.length === 0) return;
+
+  isSaving.value = true;
+  try {
+    const body: PlaylistCreate = { name, description: null };
+    const playlist = await createPlaylist(body, {
+      visibility: saveVisibility.value,
+    });
+    let added = 0;
+    for (const batch of batches) {
+      const response = await addTracksToPlaylist(playlist.id, batch);
+      added += response.added;
+    }
+    toastStore.push({
+      type: "success",
+      message: t("player.queueSavedAsPlaylist", { name, count: added }),
+    });
+    isSaveOpen.value = false;
+  } catch (err) {
+    saveError.value =
+      getApiErrorMessage(err) ||
+      (err instanceof Error ? err.message : t("errors.unknown"));
+  } finally {
+    isSaving.value = false;
+  }
+}
 </script>
 
 <template>
@@ -99,6 +234,7 @@ function clearQueue() {
     v-if="open"
     ref="panel"
     class="queue-panel"
+    :class="{ 'queue-panel--maximized': isMaximized }"
     role="dialog"
     :aria-label="t('player.queue')"
     aria-modal="true"
@@ -116,14 +252,32 @@ function clearQueue() {
       <AppButton
         variant="ghost"
         size="sm"
+        class="queue-panel__maximize"
+        :aria-label="t(`common.${isMaximized ? 'shrink' : 'expand'}`)"
+        :title="t(`common.${isMaximized ? 'shrink' : 'expand'}`)"
+        :icon="isMaximized ? 'compress' : 'expand'"
+        @click="isMaximized = !isMaximized"
+      />
+      <AppButton
+        variant="ghost"
+        size="sm"
         class="queue-panel__clear"
         :aria-label="t('player.clearQueue')"
         :title="t('player.clearQueue')"
         icon="trash"
         @click="clearQueue"
-      >
-        {{ t("common.clear") }}
-      </AppButton>
+      />
+      <AppButton
+        v-if="authStore.isAuthenticated"
+        variant="ghost"
+        size="sm"
+        class="queue-panel__save"
+        :aria-label="t('player.saveQueueAsPlaylist')"
+        :title="t('player.saveQueueAsPlaylist')"
+        icon="floppy-disk"
+        :disabled="!hasSaveableItems"
+        @click="openSave"
+      />
       <AppButton
         variant="ghost"
         size="sm"
@@ -190,6 +344,54 @@ function clearQueue() {
     <div v-if="store.queue.length === 0" class="queue-panel__empty">
       {{ t("player.emptyQueue") }}
     </div>
+
+    <AppModal
+      :open="isSaveOpen"
+      :title="t('player.saveQueueAsPlaylist')"
+      @close="closeSave"
+    >
+      <form
+        id="queue-save-form"
+        class="queue-panel__save-form"
+        @submit.prevent="onSaveQueue"
+      >
+        <AppInput
+          v-model="saveName"
+          :label="t('browse.edit.name')"
+          :required="true"
+          :disabled="isSaving"
+        />
+        <AppSelect
+          v-model="saveVisibility"
+          :label="t('browse.detail.visibility')"
+          :options="visibilityOptions"
+          :disabled="isSaving"
+        />
+        <p v-if="saveError" class="queue-panel__save-error" role="alert">
+          {{ saveError }}
+        </p>
+      </form>
+
+      <template #actions>
+        <AppButton
+          variant="secondary"
+          icon="xmark"
+          :disabled="isSaving"
+          @click="closeSave"
+        >
+          {{ t("common.cancel") }}
+        </AppButton>
+        <AppButton
+          form="queue-save-form"
+          type="submit"
+          :loading="isSaving"
+          :disabled="isSaving || !saveName.trim()"
+          icon="floppy-disk"
+        >
+          {{ t("common.save") }}
+        </AppButton>
+      </template>
+    </AppModal>
   </div>
 </template>
 
@@ -208,6 +410,21 @@ function clearQueue() {
   box-shadow: var(--shadow-lg);
   z-index: var(--z-player);
   overflow: hidden;
+}
+
+.queue-panel--maximized {
+  width: 100%;
+  height: 100%;
+  max-width: 768px;
+  max-height: 80vh;
+  border-radius: var(--radius-lg);
+}
+
+@media (max-width: 767px) {
+  .queue-panel--maximized {
+    max-width: none;
+    max-height: 70vh;
+  }
 }
 
 .queue-panel__header {
@@ -316,10 +533,23 @@ function clearQueue() {
   color: var(--color-text-muted);
 }
 
+.queue-panel .queue-panel__save,
 .queue-panel .queue-panel__clear,
 .queue-panel .queue-panel__close,
 .queue-panel .queue-panel__remove {
   font-size: 1rem;
+}
+
+.queue-panel__save-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.queue-panel__save-error {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 0.875rem;
 }
 
 .queue-panel__remove:hover {
@@ -337,6 +567,12 @@ function clearQueue() {
     left: 0;
     width: auto;
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  }
+
+  /* Keep the header row compact on phones: the "Clear" button collapses to
+     its icon (the label stays on the title/aria-label). */
+  .queue-panel__clear-label {
+    display: none;
   }
 }
 </style>
