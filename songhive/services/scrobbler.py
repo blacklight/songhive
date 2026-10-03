@@ -136,14 +136,9 @@ class ScrobblerClient:
         raw = "".join(f"{key}{params[key]}" for key in sorted(params)) + secret
         return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
-    def _post(self, params: Dict[str, Any], *, sign: bool = True) -> dict:
-        payload = {key: str(value) for key, value in params.items() if value is not None}
-        payload["api_key"] = self._api_key
-        if sign:
-            payload["api_sig"] = self._signature(payload, self._api_secret)
-        payload["format"] = "json"
+    def _send_scrobble_request(self, payload: Dict[str, Any]) -> requests.Response:
         try:
-            response = self._session.post(
+            return self._session.post(
                 self._api_url,
                 data=payload,
                 timeout=self._timeout,
@@ -151,6 +146,15 @@ class ScrobblerClient:
             )
         except requests.RequestException as exc:
             raise ScrobblerTemporaryError(f"Cannot reach scrobble service: {exc}") from exc
+
+    def _post(self, params: Dict[str, Any], *, sign: bool = True) -> dict:
+        payload = {key: str(value) for key, value in params.items() if value is not None}
+        payload["api_key"] = self._api_key
+        if sign:
+            payload["api_sig"] = self._signature(payload, self._api_secret)
+        payload["format"] = "json"
+        response = self._send_scrobble_request(payload)
+
         try:
             if response.status_code >= 500:
                 raise ScrobblerTemporaryError(f"Scrobble service returned HTTP {response.status_code}")
