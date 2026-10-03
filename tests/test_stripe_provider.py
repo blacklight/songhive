@@ -130,16 +130,24 @@ class TestCreateConnectedAccount:
         assert params["display_name"] == "Seller"
         assert params["identity"]["country"] == "US"
         assert params["metadata"] == {"songhive_user_id": "u1"}
-        # New platforms only support application-collected fees and losses.
+        # Platform-collected fees; losses default to Stripe (application
+        # requires platform-managed-risk approval and is config-gated).
         assert params["defaults"]["responsibilities"] == {
             "fees_collector": "application",
-            "losses_collector": "application",
+            "losses_collector": "stripe",
         }
         merchant = params["configuration"]["merchant"]
         assert merchant["capabilities"]["card_payments"] == {"requested": True}
         recipient = params["configuration"]["recipient"]
         assert recipient["capabilities"]["stripe_balance"]["stripe_transfers"] == {"requested": True}
         provider._client.v1.accounts.create_async.assert_not_called()
+
+    async def test_losses_collector_opt_in(self, provider):
+        provider._config.payments.stripe_losses_collector = "application"
+        provider._client.v2.core.accounts.create_async = AsyncMock(return_value=MagicMock(id="acct_v2_123"))
+        await provider.create_connected_account(user_id="u1", email="", country="DE")
+        params = provider._client.v2.core.accounts.create_async.await_args.args[0]
+        assert params["defaults"]["responsibilities"]["losses_collector"] == "application"
 
     async def test_omits_empty_contact_email(self, provider):
         provider._client.v2.core.accounts.create_async = AsyncMock(return_value=MagicMock(id="acct_v2_123"))

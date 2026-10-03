@@ -1020,6 +1020,14 @@ class PaymentsConfig(BaseSettings):
             "absolute URLs fail closed when neither resolves to a canonical https URL."
         ),
     )
+    stripe_losses_collector: Literal["stripe", "application"] = Field(
+        default="stripe",
+        description=(
+            "Connect defaults.responsibilities.losses_collector for new seller accounts. "
+            "'stripe' is the only value platforms may use by default; 'application' requires "
+            "Stripe approval for platform-managed risk"
+        ),
+    )
     supported_currencies: list[str] = Field(
         default_factory=lambda: ["usd"],
         description="ISO-4217 currencies accepted for sales (lowercase)",

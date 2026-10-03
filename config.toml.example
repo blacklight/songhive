@@ -227,10 +227,15 @@ enabled = false
 # the platform profile (platform name, industry, support details). Seller
 # accounts are created through the Accounts v2 API with an Express dashboard,
 # merchant card_payments + recipient stripe_transfers capabilities, and
-# application-collected fees and losses (the only responsibility model new
-# platforms support) — the seller's country of operation is collected in the
-# UI at onboarding time.
+# platform-collected fees — the seller's country of operation is collected in
+# the UI at onboarding time.
 # stripe_secret_key = ""
+
+# Connect losses_collector for new seller accounts. "stripe" is the only
+# value allowed without Stripe approval: setting "application" makes your
+# platform liable for connected-account negative balances and Stripe rejects
+# account creation unless your platform is approved for managed risk.
+# stripe_losses_collector = "stripe"
 
 # Webhook signing secrets (whsec_...). These are NOT the same as payment
 # links or API keys — each secret is generated when you register a webhook

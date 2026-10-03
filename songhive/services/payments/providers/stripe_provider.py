@@ -232,10 +232,12 @@ class StripeProvider(PaymentProvider):
         account and ``recipient`` + ``stripe_transfers`` lets it receive
         transfers. ``identity.country`` is required when the merchant
         configuration is applied. ``defaults.responsibilities`` is immutable
-        once set — ``application``/``application`` is the only combination new
-        platforms support, meaning the platform collects fees and carries
-        negative-balance liability (Stripe still processes refunds/disputes
-        against the connected account's direct charges).
+        once set — ``fees_collector="application"`` lets the platform collect
+        fees via application fees, while ``losses_collector`` comes from
+        ``payments.stripe_losses_collector``: Stripe rejects
+        ``"application"`` (platform-carried negative-balance liability) with
+        ``account_creation_losses_collector_unavailable`` unless the platform
+        is approved for managed risk, so it defaults to ``"stripe"``.
         """
         import stripe
 
@@ -245,7 +247,7 @@ class StripeProvider(PaymentProvider):
             "defaults": {
                 "responsibilities": {
                     "fees_collector": "application",
-                    "losses_collector": "application",
+                    "losses_collector": self._config.payments.stripe_losses_collector,
                 },
             },
             "configuration": {

@@ -2078,9 +2078,10 @@ creation for new Connect integrations — as `dashboard="express"` accounts
 with `merchant.card_payments` (direct charges) and
 `recipient.stripe_transfers` capabilities, `identity.country` taken from
 the seller's onboarding request (required before a `merchant`
-configuration can be applied) and `defaults.responsibilities` fixed to
-`application`/`application` (platform-collected fees, platform loss
-liability — the only combination new platforms support). Onboarding uses
+configuration can be applied) and `defaults.responsibilities` set to
+platform-collected fees with `losses_collector` from
+`payments.stripe_losses_collector` (default `stripe` — `application`
+requires Stripe approval for platform-managed risk). Onboarding uses
 v2 Account Links and `connected_account_state` normalizes both v1
 (`account.updated` webhook) and v2 (live retrieve) payload shapes into the
 stored `ConnectedAccount` flags. Provider events are the only authority that moves
