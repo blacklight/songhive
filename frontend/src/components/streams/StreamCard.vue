@@ -171,6 +171,13 @@ const attachment = computed<ActivityAttachment>(() => ({
   box-shadow: var(--shadow-md);
 }
 
+@media (max-width: 767px) {
+  .stream-card {
+    width: calc(100% - 2 * var(--space-4));
+    max-width: none;
+  }
+}
+
 .stream-card:hover {
   border: 1px solid var(--color-surface-raised);
 }
