@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `streams`: Stream owners and admins can now manage mounts directly
+  from the stream directory — new endpoints toggle a stream's enabled
+  state and send play/pause commands, directory responses expose
+  `can_manage` and `playback_state`, and the stream card shows manage
+  actions, a paused badge and busy handling.
+  ([`a90d05c`](https://git.platypush.tech/blacklight/songhive/commit/a90d05ce2f322df26152069744513afc45aa9e4a)).
+
+### Fixed
+
+- `federation`: ActivityPub object permalinks (`/users/:u/objects/:id`)
+  now resolve in the SPA — front proxies that serve the SPA shell for
+  browser traffic bypassed the backend's redirect and landed visitors
+  on a 404. The SPA gains a matching route that resolves the permalink
+  through `/remote/lookup` (with an `/activities/lookup` fallback), and
+  local targets are exempt from the `remote_search_access` policy so
+  anonymous callers resolve too.
+  ([`f48627e`](https://git.platypush.tech/blacklight/songhive/commit/f48627e9eeb0cc003e5668f8382693ae6e83c63b)).
+- `streams`: Stream cards now stretch to the full viewport width on
+  mobile instead of keeping their desktop fixed width.
+  ([`0e3be66`](https://git.platypush.tech/blacklight/songhive/commit/0e3be66e34b1724fe3fd6589f6f40ab968a55842)).
+
 ## 0.4.4
 
 ### Added
