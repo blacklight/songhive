@@ -385,4 +385,121 @@ describe("ActivityAudioPlayer", () => {
     expect(secondPause).toHaveBeenCalled();
     expect(firstPause).not.toHaveBeenCalled();
   });
+
+  it("live player reloads and reconnects after the stream ends", async () => {
+    const wrapper = mountPlayer(makeAttachment({ name: "Radio" }), false, true);
+    const el = audioEl(wrapper);
+    el.play = vi.fn().mockResolvedValue(undefined);
+    el.load = vi.fn();
+
+    await wrapper.find('button[aria-label="Play"]').trigger("click");
+    await fireMediaEvent(wrapper, "play");
+
+    vi.useFakeTimers();
+    try {
+      // The connection drops at a track boundary: the browser reports ended.
+      el.paused = true;
+      Object.defineProperty(el, "ended", { value: true, configurable: true });
+      audioEl(wrapper).dispatchEvent(new Event("ended"));
+
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(el.load).toHaveBeenCalled();
+      expect(el.play).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("live player reconnects after a media error", async () => {
+    const wrapper = mountPlayer(makeAttachment({ name: "Radio" }), false, true);
+    const el = audioEl(wrapper);
+    el.play = vi.fn().mockResolvedValue(undefined);
+    el.load = vi.fn();
+
+    await wrapper.find('button[aria-label="Play"]').trigger("click");
+    await fireMediaEvent(wrapper, "play");
+
+    vi.useFakeTimers();
+    try {
+      el.paused = true;
+      Object.defineProperty(el, "error", {
+        value: {} as MediaError,
+        configurable: true,
+      });
+      audioEl(wrapper).dispatchEvent(new Event("error"));
+
+      await vi.advanceTimersByTimeAsync(3000);
+      expect(el.load).toHaveBeenCalled();
+      expect(el.play).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a pause during the reconnect window cancels the retry", async () => {
+    const wrapper = mountPlayer(makeAttachment({ name: "Radio" }), false, true);
+    const el = audioEl(wrapper);
+    el.play = vi.fn().mockResolvedValue(undefined);
+    el.load = vi.fn();
+
+    await wrapper.find('button[aria-label="Play"]').trigger("click");
+    await fireMediaEvent(wrapper, "play");
+
+    vi.useFakeTimers();
+    try {
+      el.paused = true;
+      Object.defineProperty(el, "ended", { value: true, configurable: true });
+      audioEl(wrapper).dispatchEvent(new Event("ended"));
+
+      // A pause before the retry fires (e.g. another embedded player took
+      // over) drops the intent flag; the pending timer must not resurrect
+      // the stream.
+      Object.defineProperty(el, "ended", {
+        value: false,
+        configurable: true,
+      });
+      el.paused = false;
+      audioEl(wrapper).dispatchEvent(new Event("pause"));
+
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(el.load).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("pressing play on an ended live element reloads it first", async () => {
+    const wrapper = mountPlayer(makeAttachment({ name: "Radio" }), false, true);
+    const el = audioEl(wrapper);
+    el.play = vi.fn().mockResolvedValue(undefined);
+    el.load = vi.fn();
+    Object.defineProperty(el, "ended", { value: true, configurable: true });
+
+    await wrapper.find('button[aria-label="Play"]').trigger("click");
+    expect(el.load).toHaveBeenCalled();
+    expect(el.play).toHaveBeenCalled();
+  });
+
+  it("finite audio does not auto-reconnect on ended", async () => {
+    const wrapper = mountPlayer(makeAttachment());
+    const el = audioEl(wrapper);
+    el.play = vi.fn().mockResolvedValue(undefined);
+    el.load = vi.fn();
+
+    await wrapper.find('button[aria-label="Play"]').trigger("click");
+    await fireMediaEvent(wrapper, "play");
+
+    vi.useFakeTimers();
+    try {
+      el.paused = true;
+      Object.defineProperty(el, "ended", { value: true, configurable: true });
+      audioEl(wrapper).dispatchEvent(new Event("ended"));
+
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(el.load).not.toHaveBeenCalled();
+      expect(el.play).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

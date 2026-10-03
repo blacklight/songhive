@@ -173,6 +173,14 @@ class SessionDriver:
     _CONTROL_SETTLE_S = 0.3
     _CONTROL_BURST_MAX_S = 1.5
 
+    # A failed track advance (transient DB/storage/provider error) is retried
+    # a few times; while retries are pending the old decoder is dead and the
+    # encoder starves, so on giving up the driver is paused — the silence
+    # generator keeps the mount alive instead of leaving listeners on dead
+    # air until the liveness key expires.
+    _ADVANCE_RETRY_DELAY_S = 1.0
+    _ADVANCE_MAX_RETRIES = 5
+
     def __init__(
         self,
         worker: StreamWorker,
@@ -189,6 +197,9 @@ class SessionDriver:
         self._shutting_down = False
         self._idle_since: Optional[float] = None
         self._active_track_id: Optional[str] = None
+        self._advance_retry_at: Optional[float] = None
+        self._advance_retry_event: Optional[dict] = None
+        self._advance_retry_count = 0
 
     @property
     def _control_key(self) -> str:
@@ -261,6 +272,7 @@ class SessionDriver:
 
     async def _stop_driver(self) -> None:
         """Stop the provider driver, if it was started."""
+        self._clear_advance_retry()
         if self.driver is not None:
             try:
                 await self.driver.stop()
@@ -320,8 +332,10 @@ class SessionDriver:
             if envelopes:
                 await self._handle_commands(envelopes)
 
-            # Drain any driver events.
+            # Drain any driver events, then retry a failed track advance
+            # whose backoff has elapsed.
             await self._drain_events()
+            await self._maybe_retry_advance()
 
             # Stop the worker if the session/output has been removed or disabled.
             if not await self._session_has_stream_output():
@@ -374,7 +388,16 @@ class SessionDriver:
         """Pop every control envelope currently queued for this session."""
         envelopes: list[dict] = []
         while True:
-            raw = cast(Optional[str], await self.worker.redis.lpop(self._control_key, count=None))  # type: ignore[misc]
+            try:
+                raw = cast(
+                    Optional[str],
+                    await self.worker.redis.lpop(self._control_key, count=None),  # type: ignore[misc]
+                )
+            except Exception:
+                # A transient Redis error must not kill the driver loop —
+                # commands are re-polled on the next iteration anyway.
+                logger.exception("Failed to pop control envelopes for %s", self.session_id)
+                return envelopes
             if raw is None:
                 return envelopes
             try:
@@ -467,6 +490,12 @@ class SessionDriver:
                     self._active_track_id = track_id
                 except Exception:
                     logger.exception("Failed to set driver source for %s", self.session_id)
+                    # A failed swap leaves the decoder dead; feed silence so
+                    # the mount keeps a live stream instead of dead air.
+                    try:
+                        await self.driver.pause()
+                    except Exception:
+                        logger.exception("Failed to pause driver for %s", self.session_id)
         elif session.state in ("paused", "idle"):
             try:
                 if "seek" in commands and source is not None:
@@ -641,6 +670,46 @@ class SessionDriver:
             elif event.get("type") == "listeners":
                 logger.debug("Listener count: %s", event.get("count"))
 
+    def _clear_advance_retry(self) -> None:
+        """Forget any pending failed-advance retry."""
+        self._advance_retry_at = None
+        self._advance_retry_event = None
+        self._advance_retry_count = 0
+
+    def _schedule_advance_retry(self, event: Optional[dict]) -> None:
+        """Queue a failed track advance for another attempt shortly.
+
+        The event is stored with the retry so the generation check still
+        drops it if something else resyncs the driver meanwhile.
+        """
+        if self.driver is None:
+            return
+        self._advance_retry_count += 1
+        self._advance_retry_event = event
+        self._advance_retry_at = time.monotonic() + self._ADVANCE_RETRY_DELAY_S
+
+    async def _maybe_retry_advance(self) -> None:
+        """Re-run a failed track advance once its backoff has elapsed."""
+        if self._advance_retry_at is None or time.monotonic() < self._advance_retry_at:
+            return
+        self._advance_retry_at = None
+        if self.driver is None:
+            self._clear_advance_retry()
+            return
+        if self._advance_retry_count > self._ADVANCE_MAX_RETRIES:
+            logger.error(
+                "source_ended retries exhausted for %s; feeding silence",
+                self.session_id,
+            )
+            self._clear_advance_retry()
+            if self.driver is not None:
+                try:
+                    await self.driver.pause()
+                except Exception:
+                    logger.exception("Failed to pause driver for %s", self.session_id)
+            return
+        await self._on_source_ended(self._advance_retry_event)
+
     async def _on_source_ended(self, event: Optional[dict] = None) -> None:
         """Handle a track finishing: record the listen, then advance or idle."""
         # Drop events from a decoder generation that has been superseded, e.g.
@@ -657,23 +726,38 @@ class SessionDriver:
                 if session is None:
                     return
 
-                track = _current_track(session)
-                track_id = track.get("id") if track else None
-                if track_id:
-                    await record_server_listen(db, session, track_id)
+                # Only move the queue forward while it still points at the
+                # track the driver just finished. Otherwise the advance
+                # already happened (a command resynced, or this is a retry
+                # of a failed attempt whose index update committed) — jump
+                # straight to reconciling the driver instead of skipping
+                # the listener's track. The ``_advanced`` marker on the
+                # event covers the queue-end case, where the committed
+                # advance leaves the index unchanged.
+                finished = _current_track_id(session)
+                advance_pending = not (event or {}).get("_advanced")
+                if advance_pending and (self._active_track_id is None or finished == self._active_track_id):
+                    if finished:
+                        await record_server_listen(db, session, finished)
 
-                # Always advance autonomously: the controller only sends
-                # commands on explicit user actions, so pausing here would
-                # just starve the encoder until someone presses play again.
-                await self._advance_index(session, direction="next")
-                await db.flush()
-                state = await session_state_dict(db, session)
-                await self._publish_state(state)
+                    # Always advance autonomously: the controller only sends
+                    # commands on explicit user actions, so pausing here would
+                    # just starve the encoder until someone presses play again.
+                    await self._advance_index(session, direction="next")
+                    await db.flush()
+                    state = await session_state_dict(db, session)
+                    await self._publish_state(state)
 
                 source, metadata = await self._resolve_source(db, session)
         except Exception:
             logger.exception("source_ended handling failed for %s", self.session_id)
+            self._schedule_advance_retry(event)
             return
+
+        # The queue handling for this event is committed — a retry of a
+        # later failure must not advance again.
+        if event is not None:
+            event["_advanced"] = True
 
         if self.driver is None:
             return
@@ -687,15 +771,20 @@ class SessionDriver:
                     position=session.position_seconds,
                     metadata=metadata,
                 )
-                await self.driver.update_metadata(metadata)
                 self._active_track_id = track_id
+                await self.driver.update_metadata(metadata)
             except Exception:
                 logger.exception("Failed to set next driver source for %s", self.session_id)
+                self._schedule_advance_retry(event)
+                return
         else:
             try:
                 await self.driver.pause()
             except Exception:
                 logger.exception("Failed to pause driver for %s", self.session_id)
+                self._schedule_advance_retry(event)
+                return
+        self._clear_advance_retry()
 
     async def _resolve_metadata(self, db, session: PlaybackSession) -> Optional[TrackMeta]:
         """Resolve the current queue track to a TrackMeta without touching audio."""
@@ -865,8 +954,11 @@ class SessionDriver:
                 result = await db.execute(stmt)
                 return result.scalar_one_or_none() is not None
         except Exception:
+            # A transient DB error must not read as "output gone": assume the
+            # stream output is still attached rather than tearing the driver
+            # (and every listener's connection) down over a blip.
             logger.exception("Failed to check stream output for %s", self.session_id)
-            return False
+            return True
 
     async def _should_stop_on_idle(self) -> bool:
         """Return True when the output has been idle with no controller/listeners."""

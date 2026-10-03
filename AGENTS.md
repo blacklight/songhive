@@ -738,10 +738,14 @@ async def update_library(
   are skipped so a lagging listener jumps forward instead of accumulating
   latency, and `X-Accel-Buffering: no` keeps buffering proxies (nginx) from
   hiding that lag in their own buffers. Liveness is the TTL'd
-  `songhive:stream:meta:{mount}` key refreshed by the driver; an
-  `{"end": "1"}` stream entry disconnects listeners on graceful stop, and
-  per-listener `songhive:stream:listener:{mount}:{id}` TTL keys feed
-  `driver.listener_count()` for idle shutdown. Mount slugs must be unique
+  `songhive:stream:meta:{mount}` key, refreshed by the driver on a timer
+  (not by chunk flow, so decoder gaps at track boundaries can't expire it);
+  an `{"end": "1"}` stream entry disconnects listeners on graceful stop and
+  on encoder restart (a new encoder writes a fresh container stream that
+  can't be spliced into an open response), and per-listener
+  `songhive:stream:listener:{mount}:{id}` TTL keys, refreshed by the handler
+  on a timer while connected, feed `driver.listener_count()` for idle
+  shutdown. Mount slugs must be unique
   across all `http` outputs (enforced in `services/outputs.py`), may carry an
   optional `listen_token` (`?token=`/`Bearer`), and are unreachable in the
   uvicorn fallback like the other native Tornado routes. Mount visibility is
@@ -770,6 +774,16 @@ async def update_library(
   private mount's metadata. The page still polls every 30 s: the WS
   endpoint needs auth (anonymous visitors have no socket), and a crashed
   driver only expires its meta key without emitting an event.
+- Track-boundary resilience: `SessionDriver._on_source_ended` retries a
+  failed advance a few times (`_ADVANCE_RETRY_DELAY_S`/`_ADVANCE_MAX_RETRIES`)
+  and is idempotent — if the index update already committed it resyncs the
+  new track instead of advancing again; on exhaustion the driver pauses
+  (silence generator) rather than leaving the encoder starved. A transient
+  DB error in `_session_has_stream_output` reads as "output still there",
+  and control-list/Redis read failures in the worker loop and mount handler
+  are retried rather than tearing down live listeners. The embedded
+  `ActivityAudioPlayer` live mode reconnects itself (`load()` + `play()`)
+  with bounded backoff after `ended`/`error`; finite audio does not.
 - The `snapcast` provider (`songhive/streams/snapcast.py`) casts to a
   snapserver via an ffmpeg *passthrough* encoder that copies raw s16le PCM to
   a `pipe://` source FIFO (`mode=fifo`, auto-created with `mkfifo`; existing

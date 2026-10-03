@@ -1,6 +1,7 @@
 import asyncio
 import inspect
 import json
+from contextlib import asynccontextmanager
 
 import pytest
 from fakeredis.aioredis import FakeRedis
@@ -862,3 +863,129 @@ async def test_separate_seeks_still_reposition(
     assert len(set_source_commands) == 3
     assert set_source_commands[1][2] == pytest.approx(5.0)
     assert set_source_commands[2][2] == pytest.approx(10.0)
+
+
+@pytest.mark.asyncio
+async def test_source_ended_retries_transient_failure(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """A transient failure while advancing to the next track is retried."""
+    init_db(engine=engine, force=True)
+    fail_next = False
+
+    async def _flaky_resolve(self, db, session: PlaybackSession):
+        nonlocal fail_next
+        if fail_next:
+            fail_next = False
+            raise RuntimeError("transient storage error")
+        return await _fake_resolve_source(self, db, session)
+
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _flaky_resolve)
+    monkeypatch.setattr(SessionDriver, "_ADVANCE_RETRY_DELAY_S", 0.05)
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    # The first advance attempt dies inside _resolve_source (rolling back the
+    # index update); the scheduled retry succeeds and lands on track two.
+    fail_next = True
+    fake.trigger_source_ended()
+    assert await _wait_until(lambda: len(_set_source_commands(fake)) >= 2)
+
+    await _stop_driver_task(driver, task)
+
+    assert _set_source_commands(fake)[-1][3].track_id == "t2"
+
+
+@pytest.mark.asyncio
+async def test_source_ended_retry_exhaustion_pauses(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """After repeated advance failures the driver feeds silence, not dead air."""
+    init_db(engine=engine, force=True)
+
+    async def _always_fail(self, db, session: PlaybackSession):
+        raise RuntimeError("persistent storage error")
+
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _always_fail)
+    monkeypatch.setattr(SessionDriver, "_ADVANCE_RETRY_DELAY_S", 0.05)
+    monkeypatch.setattr(SessionDriver, "_ADVANCE_MAX_RETRIES", 2)
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+
+    fake.trigger_source_ended()
+    assert await _wait_until(lambda: _find_command(fake, "pause") is not None)
+
+    await _stop_driver_task(driver, task)
+
+
+@pytest.mark.asyncio
+async def test_source_ended_committed_advance_resyncs(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """A retry after a committed advance resyncs instead of skipping a track.
+
+    When the queue advance commits but ``set_source`` dies, the retry must
+    feed the track the session already moved to — advancing again would skip
+    the listener's next song.
+    """
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+    monkeypatch.setattr(SessionDriver, "_ADVANCE_RETRY_DELAY_S", 0.05)
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    # Sabotage the next set_source: the advance commits, the swap dies.
+    original_set_source = fake.set_source
+    broken = True
+
+    async def _flaky_set_source(source, *, position, metadata):
+        nonlocal broken
+        if broken:
+            broken = False
+            raise RuntimeError("encoder rejected source")
+        return await original_set_source(source, position=position, metadata=metadata)
+
+    monkeypatch.setattr(fake, "set_source", _flaky_set_source)
+
+    fake.trigger_source_ended()
+    assert await _wait_until(lambda: len(_set_source_commands(fake)) >= 2)
+
+    await _stop_driver_task(driver, task)
+
+    assert _set_source_commands(fake)[-1][3].track_id == "t2"
+    async with get_session() as db:
+        refreshed = await db.get(PlaybackSession, session.id)
+        assert refreshed is not None
+        assert refreshed.current_index == 1
+
+
+@pytest.mark.asyncio
+async def test_session_has_stream_output_survives_db_error(worker_config, make_worker, monkeypatch):
+    """A transient DB error must not read as 'output removed' and stop the driver."""
+    worker = make_worker()
+    driver = SessionDriver(worker, "sess", "out", "user")
+
+    @asynccontextmanager
+    async def _failing_session():
+        raise RuntimeError("database unreachable")
+        yield
+
+    monkeypatch.setattr("songhive.streams.worker.get_session", _failing_session)
+    assert await driver._session_has_stream_output() is True

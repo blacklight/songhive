@@ -170,6 +170,18 @@ def _patch_exec(monkeypatch, encoder: _FakeEncoderProc):
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
 
 
+def _patch_exec_seq(monkeypatch, encoders: list[_FakeEncoderProc]):
+    """Like ``_patch_exec`` but each encoder spawn gets the next proc."""
+    procs = list(encoders)
+
+    async def fake_exec(*args, **_kwargs):
+        if "pipe:0" in args:
+            return procs.pop(0)
+        return _FakeDecoderProc()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+
 @pytest.mark.asyncio
 async def test_http_driver_requires_redis():
     provider = HttpStreamOutput()
@@ -290,6 +302,117 @@ async def test_http_driver_publishes_now_playing(fake_redis):
     entries = await fake_redis.xrange(stream_data_key("radio"))
     meta_entries = [json.loads(fields["m"]) for _id, fields in entries if fields.get("m")]
     assert [m["song"] for m in meta_entries] == ["Artist - Song", "Artist - Next"]
+
+
+@pytest.mark.asyncio
+async def test_http_driver_meta_refresh_survives_dead_air(monkeypatch, fake_redis):
+    """The liveness key is refreshed by a timer, not by chunk production.
+
+    When the encoder is starved (e.g. a long track transition) the publish
+    pump goes quiet; the meta key must stay alive regardless or every
+    listener gets disconnected at the next read timeout.
+    """
+    monkeypatch.setattr("songhive.streams.http._META_REFRESH_INTERVAL", 0.05)
+    provider = HttpStreamOutput()
+    config = _valid_config()
+    await provider.validate_config(config)
+    config["_redis"] = fake_redis
+    driver = HttpStreamDriver(config)
+
+    encoder = _FakeEncoderProc([b"chunk", b""])
+    _patch_exec(monkeypatch, encoder)
+
+    refreshes = 0
+    original = driver._publish_meta
+
+    async def _counting_publish_meta():
+        nonlocal refreshes
+        refreshes += 1
+        await original()
+
+    await driver.start()
+    try:
+        monkeypatch.setattr(driver, "_publish_meta", _counting_publish_meta)
+        # The encoder exhausts its chunks immediately; from here on the
+        # publish pump is idle and only the timer can refresh the key.
+        await asyncio.sleep(0.4)
+        assert refreshes >= 3
+        assert await fake_redis.get(stream_meta_key("radio")) is not None
+    finally:
+        await driver.stop()
+
+
+@pytest.mark.asyncio
+async def test_http_driver_stop_cancels_meta_refresh(monkeypatch, fake_redis):
+    """stop() cancels the refresh task and deletes the liveness key."""
+    provider = HttpStreamOutput()
+    config = _valid_config()
+    await provider.validate_config(config)
+    config["_redis"] = fake_redis
+    driver = HttpStreamDriver(config)
+
+    encoder = _FakeEncoderProc([b"chunk"])
+    _patch_exec(monkeypatch, encoder)
+
+    await driver.start()
+    assert driver._meta_task is not None
+    await driver.stop()
+    assert driver._meta_task is None
+    assert await fake_redis.get(stream_meta_key("radio")) is None
+
+
+@pytest.mark.asyncio
+async def test_http_driver_encoder_restart_signals_end(monkeypatch, fake_redis):
+    """An encoder restart appends ``end`` so listeners reconnect.
+
+    A fresh encoder writes a brand-new container stream; splicing it into
+    the old response breaks players (chained Ogg), so the driver signals
+    listeners to reconnect for a clean stream instead.
+    """
+    provider = HttpStreamOutput()
+    config = _valid_config()
+    await provider.validate_config(config)
+    config["_redis"] = fake_redis
+    driver = HttpStreamDriver(config)
+
+    first = _FakeEncoderProc([b"first-chunk"])
+    second = _FakeEncoderProc([b"second-chunk"])
+    _patch_exec_seq(monkeypatch, [first, second])
+
+    await driver.start()
+    try:
+        for _ in range(100):
+            entries = await fake_redis.xrange(stream_data_key("radio"))
+            if any(base64.b64decode(fields["d"]) == b"first-chunk" for _id, fields in entries if fields.get("d")):
+                break
+            await asyncio.sleep(0.01)
+
+        # Kill the encoder: the watcher restarts the pipeline.
+        first.returncode = 1
+
+        for _ in range(300):
+            entries = await fake_redis.xrange(stream_data_key("radio"))
+            if any(fields.get("end") for _id, fields in entries):
+                break
+            await asyncio.sleep(0.02)
+        else:
+            raise AssertionError("no end sentinel written on encoder restart")
+
+        # The replacement encoder's audio resumes after the sentinel.
+        for _ in range(300):
+            entries = await fake_redis.xrange(stream_data_key("radio"))
+            payloads = [base64.b64decode(fields["d"]) for _id, fields in entries if fields.get("d")]
+            if b"second-chunk" in payloads:
+                break
+            await asyncio.sleep(0.02)
+        else:
+            raise AssertionError("restarted encoder never published audio")
+
+        end_index = next(i for i, (_id, fields) in enumerate(entries) if fields.get("end"))
+        audio_after_end = [base64.b64decode(fields["d"]) for _id, fields in entries[end_index + 1 :] if fields.get("d")]
+        assert audio_after_end == [b"second-chunk"]
+    finally:
+        await driver.stop()
 
 
 async def _read_ws_envelope(pubsub, attempts: int = 50) -> Optional[dict]:

@@ -17,7 +17,11 @@ buffering proxies from hiding that lag inside their own buffers.
 
 The mount is considered live only while the driver keeps the short-TTL
 ``songhive:stream:meta:{mount}`` key refreshed; once it expires (or an
-``{"end": "1"}`` sentinel arrives) listeners are disconnected.
+``{"end": "1"}`` sentinel arrives) listeners are disconnected. Each
+listener also holds a short-TTL presence key
+(``songhive:stream:listener:{mount}:{id}``, used for the directory's
+listener count and idle shutdown) which it refreshes on a timer — a
+continuously-flowing read cursor would otherwise let it lapse mid-listen.
 
 Clients that send ``Icy-MetaData: 1`` get an ``icy-metaint`` response header
 and ICY ``StreamTitle`` metadata blocks interleaved into the audio every
@@ -27,6 +31,7 @@ appends to the stream on track changes, so updates reach listeners in audio
 order. Plain clients receive untouched audio.
 """
 
+import asyncio
 import base64
 import hmac
 import json
@@ -81,8 +86,10 @@ class StreamMountHandler(tornado.web.RequestHandler):
     """Serve a native HTTP audio mountpoint to listeners."""
 
     _LISTENER_TTL_SECONDS = 25
+    _LISTENER_REFRESH_SECONDS = 10.0
     _XREAD_BLOCK_MS = 5000
     _XREAD_COUNT = 64
+    _XREAD_MAX_FAILURES = 5
 
     # Per-request ICY interleave state, initialised in _handle.
     _icy_metaint: int = 0
@@ -290,12 +297,24 @@ class StreamMountHandler(tornado.web.RequestHandler):
                 self._write_audio(base64.b64decode(data))
             await self.flush()
 
+            listener_refreshed_at = time.monotonic()
+            xread_failures = 0
             while not self._finished:
-                result = await redis.xread(
-                    {stream_key: last_id},
-                    count=self._XREAD_COUNT,
-                    block=self._XREAD_BLOCK_MS,
-                )
+                try:
+                    result = await redis.xread(
+                        {stream_key: last_id},
+                        count=self._XREAD_COUNT,
+                        block=self._XREAD_BLOCK_MS,
+                    )
+                    xread_failures = 0
+                except Exception:
+                    # A transient Redis error must not kill an otherwise
+                    # healthy listener; only give up after a few in a row.
+                    xread_failures += 1
+                    if xread_failures >= self._XREAD_MAX_FAILURES:
+                        raise
+                    await asyncio.sleep(0.5)
+                    continue
                 # redis-py returns {stream: entries}; fakeredis returns the
                 # raw [(stream, entries)] list — accept both.
                 entries: list = []
@@ -305,38 +324,53 @@ class StreamMountHandler(tornado.web.RequestHandler):
                     entries = [e for name, e in result if name == stream_key]
                     entries = entries[0] if entries else []
                 if not entries:
-                    # Read timeout: refresh listener presence and drop the
-                    # connection if the mount went offline.
-                    if not await redis.exists(meta_key):
+                    # Read timeout: drop the connection if the mount went
+                    # offline; a failed check counts as "still live" — the
+                    # next read resolves the truth.
+                    try:
+                        offline = not await redis.exists(meta_key)
+                    except Exception:
+                        offline = False
+                    if offline:
                         return
-                    await redis.set(listener_key, "1", ex=self._LISTENER_TTL_SECONDS)
-                    continue
-                now_ms = await self._now_ms(redis) if max_lag_ms else 0
-                dropped = 0
-                for entry_id, fields in entries:
-                    last_id = entry_id
-                    if fields.get("end"):
-                        return
-                    meta_update = fields.get("m")
-                    if meta_update:
-                        self._icy_song = _song_from_meta_entry(meta_update)
-                        continue
-                    data = fields.get("d")
-                    if not data:
-                        continue
-                    if max_lag_ms and self._entry_age_ms(entry_id, now_ms) > max_lag_ms:
-                        # The listener fell behind: skip stale audio so it
-                        # jumps forward instead of accumulating latency.
-                        dropped += 1
-                        continue
-                    self._write_audio(base64.b64decode(data))
-                    await self.flush()
-                if dropped:
-                    logger.info(
-                        "Dropped %d stale chunks for lagging listener on mount %s",
-                        dropped,
-                        slug,
-                    )
+                else:
+                    now_ms = await self._now_ms(redis) if max_lag_ms else 0
+                    dropped = 0
+                    for entry_id, fields in entries:
+                        last_id = entry_id
+                        if fields.get("end"):
+                            return
+                        meta_update = fields.get("m")
+                        if meta_update:
+                            self._icy_song = _song_from_meta_entry(meta_update)
+                            continue
+                        data = fields.get("d")
+                        if not data:
+                            continue
+                        if max_lag_ms and self._entry_age_ms(entry_id, now_ms) > max_lag_ms:
+                            # The listener fell behind: skip stale audio so it
+                            # jumps forward instead of accumulating latency.
+                            dropped += 1
+                            continue
+                        self._write_audio(base64.b64decode(data))
+                        await self.flush()
+                    if dropped:
+                        logger.info(
+                            "Dropped %d stale chunks for lagging listener on mount %s",
+                            dropped,
+                            slug,
+                        )
+                # Refresh listener presence on a timer, not only on read
+                # timeouts — while audio flows continuously the key would
+                # otherwise expire mid-listen, making the driver count zero
+                # listeners (idle shutdown) and the directory show an empty
+                # mount.
+                if time.monotonic() - listener_refreshed_at >= self._LISTENER_REFRESH_SECONDS:
+                    try:
+                        await redis.set(listener_key, "1", ex=self._LISTENER_TTL_SECONDS)
+                        listener_refreshed_at = time.monotonic()
+                    except Exception:
+                        pass
         except tornado.iostream.StreamClosedError:
             pass
         except Exception:

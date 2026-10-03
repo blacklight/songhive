@@ -297,3 +297,90 @@ async def test_mount_plain_client_gets_pure_audio(mount_server, fake_redis, db_s
     body = b"".join(chunks)
     assert b"StreamTitle" not in body
     assert body == b"X" * 3000
+
+
+@pytest.mark.asyncio
+async def test_mount_refreshes_listener_presence(mount_server, fake_redis, db_session, monkeypatch):
+    """Presence keys are refreshed on a timer while audio flows continuously.
+
+    The key only used to be touched on read timeouts, so an uninterrupted
+    stream let it expire mid-listen — the driver then counted zero listeners
+    and the directory showed an empty mount.
+    """
+    monkeypatch.setattr(StreamMountHandler, "_LISTENER_TTL_SECONDS", 1)
+    monkeypatch.setattr(StreamMountHandler, "_LISTENER_REFRESH_SECONDS", 0.1)
+    base, user = mount_server
+    await _make_http_output(db_session, user)
+    await fake_redis.set(stream_meta_key("radio"), json.dumps({"content_type": "audio/mpeg"}), ex=30)
+
+    client = tornado.httpclient.AsyncHTTPClient()
+    chunks: list[bytes] = []
+    request = tornado.httpclient.HTTPRequest(
+        f"{base}/streams/radio",
+        streaming_callback=chunks.append,
+        request_timeout=30,
+    )
+    fetch = asyncio.ensure_future(client.fetch(request))
+    try:
+        # Feed audio for well past the 1s presence TTL; the handler must
+        # keep the listener key alive on its refresh timer.
+        for _ in range(6):
+            await asyncio.sleep(0.25)
+            await fake_redis.xadd(stream_data_key("radio"), {"d": _b64(b"data")})
+        keys = [key async for key in fake_redis.scan_iter(match=stream_listener_pattern("radio"))]
+        assert keys, "listener presence key expired while audio was flowing"
+        await fake_redis.xadd(stream_data_key("radio"), {"end": "1"})
+        resp = await asyncio.wait_for(fetch, timeout=15)
+    finally:
+        client.close()
+    assert resp.code == 200
+
+
+@pytest.mark.asyncio
+async def test_mount_survives_transient_xread_errors(mount_server, fake_redis, db_session, monkeypatch):
+    """A few consecutive Redis read failures don't drop a healthy listener."""
+    base, user = mount_server
+    await _make_http_output(db_session, user)
+    await fake_redis.set(stream_meta_key("radio"), json.dumps({"content_type": "audio/mpeg"}), ex=30)
+
+    original_xread = fake_redis.xread
+    failures = 0
+
+    async def _flaky_xread(*args, **kwargs):
+        nonlocal failures
+        if failures < 2:
+            failures += 1
+            raise RuntimeError("transient redis error")
+        return await original_xread(*args, **kwargs)
+
+    monkeypatch.setattr(fake_redis, "xread", _flaky_xread)
+
+    client = tornado.httpclient.AsyncHTTPClient()
+    chunks: list[bytes] = []
+    request = tornado.httpclient.HTTPRequest(
+        f"{base}/streams/radio",
+        streaming_callback=chunks.append,
+        request_timeout=30,
+    )
+    fetch = asyncio.ensure_future(client.fetch(request))
+    try:
+        await asyncio.sleep(0.2)
+        # This chunk lands while the flaky reads burn through their retries;
+        # it must still be delivered once reads recover.
+        await fake_redis.xadd(stream_data_key("radio"), {"d": _b64(b"after-blip")})
+        await _wait_for(lambda: failures >= 2)
+        await fake_redis.xadd(stream_data_key("radio"), {"end": "1"})
+        resp = await asyncio.wait_for(fetch, timeout=15)
+    finally:
+        client.close()
+
+    assert resp.code == 200
+    assert b"after-blip" in b"".join(chunks)
+
+
+async def _wait_for(predicate, attempts: int = 200, interval: float = 0.02) -> None:
+    for _ in range(attempts):
+        if predicate():
+            return
+        await asyncio.sleep(interval)
+    raise AssertionError("condition not met in time")

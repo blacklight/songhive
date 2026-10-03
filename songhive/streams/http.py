@@ -16,11 +16,12 @@ Redis keys per mount:
   entries appended on track changes, and an ``{"end": "1"}`` sentinel
   appended on a graceful stop so listeners disconnect promptly.
 - ``songhive:stream:meta:{mount}`` — JSON blob (content type, bitrate, ICY
-  fields, current track) with a short TTL, refreshed while the encoder is
-  alive; its absence means the mount is offline and listeners get a 404.
+  fields, current track) with a short TTL, refreshed on a timer for the
+  driver's lifetime so dead air during track transitions cannot expire it;
+  its absence means the mount is offline and listeners get a 404.
 - ``songhive:stream:listener:{mount}:{id}`` — per-listener TTL keys written
   by the web process so the driver can report ``listener_count`` for idle
-  shutdown.
+  shutdown; listeners refresh them on a timer while connected.
 
 Track changes, starts and stops also emit a ``stream_update`` event on the
 WebSocket fan-out channel (``songhive:ws-events``, see ``ws.events``) so the
@@ -167,7 +168,7 @@ class HttpStreamDriver(IcecastDriver):
         self._mount = normalize_mount(config.get("mount"))
         self._max_entries = int(config.get("_stream_max_entries") or _DEFAULT_MAX_ENTRIES)
         self._publish_task: Optional[asyncio.Task] = None
-        self._last_meta_refresh = 0.0
+        self._meta_task: Optional[asyncio.Task] = None
 
     def _encoder_argv(self) -> list[str]:
         """Encoder writing the mount's encoded format to stdout."""
@@ -197,13 +198,23 @@ class HttpStreamDriver(IcecastDriver):
 
     async def _start_encoder(self) -> None:
         """Start the encoder plus the Redis publish pump."""
-        if self._publish_task is not None:
-            self._publish_task.cancel()
+        old_publish_task = self._publish_task
+        if old_publish_task is not None:
+            old_publish_task.cancel()
             try:
-                await self._publish_task
+                await old_publish_task
             except asyncio.CancelledError:
                 pass
             self._publish_task = None
+            # A fresh encoder writes a brand-new container stream into the
+            # same Redis stream, and listeners cannot splice it into the old
+            # one (a second Ogg chain breaks most players). Signal them to
+            # reconnect so they pick up a clean stream from the burst.
+            if self._redis is not None:
+                try:
+                    await self._redis.xadd(stream_data_key(self._mount), {"end": "1"})
+                except Exception:
+                    logger.warning("Failed to signal encoder restart for mount %s", self._mount)
 
         argv = self._encoder_argv()
         logger.info("Starting encoder: %s", argv)
@@ -239,9 +250,20 @@ class HttpStreamDriver(IcecastDriver):
         }
         try:
             await self._redis.set(stream_meta_key(self._mount), json.dumps(meta), ex=int(_META_TTL_SECONDS))
-            self._last_meta_refresh = time.monotonic()
         except Exception:
             logger.warning("Failed to refresh stream meta for mount %s", self._mount)
+
+    async def _meta_refresh_loop(self) -> None:
+        """Keep the liveness key fresh for the driver's whole lifetime.
+
+        Track transitions, slow source resolution and decoder gaps all
+        starve the publish pump without meaning the stream is offline —
+        if the TTL were only renewed while chunks flow, any quiet spell
+        would expire the key and drop every listener.
+        """
+        while True:
+            await asyncio.sleep(_META_REFRESH_INTERVAL)
+            await self._publish_meta()
 
     def _now_playing_payload(self) -> Optional[dict]:
         """Return the REST-shaped now-playing block for the current metadata."""
@@ -311,8 +333,6 @@ class HttpStreamDriver(IcecastDriver):
                         maxlen=self._max_entries,
                         approximate=True,
                     )
-                    if time.monotonic() - self._last_meta_refresh >= _META_REFRESH_INTERVAL:
-                        await self._publish_meta()
                 except Exception:
                     logger.warning("Failed to publish stream chunk for mount %s", self._mount)
         except asyncio.CancelledError:
@@ -325,12 +345,21 @@ class HttpStreamDriver(IcecastDriver):
         if self._redis is None:
             raise RuntimeError("HttpStreamDriver requires a '_redis' client in the driver config")
         await super().start()
+        if self._meta_task is None:
+            self._meta_task = asyncio.create_task(self._meta_refresh_loop())
         await self._publish_meta()
         await self._publish_ws_update(online=True)
 
     async def stop(self) -> None:
         """Signal listeners to disconnect and stop the pipeline."""
         self._shutting_down = True
+        if self._meta_task is not None:
+            self._meta_task.cancel()
+            try:
+                await self._meta_task
+            except asyncio.CancelledError:
+                pass
+            self._meta_task = None
         if self._redis is not None:
             try:
                 await self._redis.xadd(stream_data_key(self._mount), {"end": "1"})

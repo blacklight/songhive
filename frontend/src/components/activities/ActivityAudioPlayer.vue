@@ -74,6 +74,45 @@ const downloading = ref(false);
 const info = computed(() => audioAttachmentInfo(props.attachment));
 duration.value = info.value.duration ?? 0;
 
+// Live streams (native HTTP mounts) can drop when the source's connection
+// ends: an ``ended``/``error`` event leaves the media element in a state
+// where play() alone will not re-request the URL — it needs load() first.
+// While the user still wants the stream, reconnect automatically a few
+// times with a linear backoff before giving up.
+const LIVE_RECONNECT_DELAY_MS = 3000;
+const LIVE_MAX_RECONNECTS = 5;
+const liveDesired = ref(false);
+const liveReconnectCount = ref(0);
+let liveReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearLiveReconnect() {
+  if (liveReconnectTimer !== null) {
+    clearTimeout(liveReconnectTimer);
+    liveReconnectTimer = null;
+  }
+}
+
+function scheduleLiveReconnect() {
+  if (!props.live || !liveDesired.value) return;
+  if (liveReconnectTimer !== null) return;
+  if (liveReconnectCount.value >= LIVE_MAX_RECONNECTS) {
+    liveDesired.value = false;
+    toast.push({
+      type: "error",
+      message: t("activities.audio.playError"),
+    });
+    return;
+  }
+  liveReconnectCount.value += 1;
+  liveReconnectTimer = setTimeout(() => {
+    liveReconnectTimer = null;
+    const el = audioEl.value;
+    if (!el || !liveDesired.value || !el.paused) return;
+    el.load();
+    el.play().catch(() => {});
+  }, LIVE_RECONNECT_DELAY_MS * liveReconnectCount.value);
+}
+
 const artworkUrl = computed(() => info.value.imageUrl ?? props.avatarUrl);
 const showImage = computed(() => !!artworkUrl.value && !imageFailed.value);
 const subtitle = computed(() =>
@@ -111,6 +150,10 @@ function toggle() {
   const el = audioEl.value;
   if (!el) return;
   if (el.paused) {
+    liveDesired.value = true;
+    liveReconnectCount.value = 0;
+    clearLiveReconnect();
+    if (props.live && (el.error || el.ended)) el.load();
     el.play().catch(() => {
       toast.push({
         type: "error",
@@ -118,12 +161,17 @@ function toggle() {
       });
     });
   } else {
+    liveDesired.value = false;
+    clearLiveReconnect();
     el.pause();
   }
 }
 
 function onPlay() {
   playing.value = true;
+  liveDesired.value = true;
+  liveReconnectCount.value = 0;
+  clearLiveReconnect();
   const el = audioEl.value;
   if (el) pauseOtherInlineAudio(el);
   // One soundtrack at a time: an inline preview stops the player bar.
@@ -131,6 +179,19 @@ function onPlay() {
   // session (possibly the one feeding this stream), and pausing it through
   // the session controller would silence the very mount being monitored.
   if (!props.live && playerStore.isPlaying) playerStore.pause();
+}
+
+function onPause() {
+  playing.value = false;
+  const el = audioEl.value;
+  // A pause emitted as part of stream end/error is not the user pausing —
+  // leave the intent flag set so the reconnect path still fires.
+  if (el && !el.ended && !el.error) liveDesired.value = false;
+}
+
+function onMediaInterrupted() {
+  playing.value = false;
+  scheduleLiveReconnect();
 }
 
 function onTimeUpdate() {
@@ -245,6 +306,8 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  liveDesired.value = false;
+  clearLiveReconnect();
   const el = audioEl.value;
   if (el) {
     el.pause();
@@ -265,8 +328,9 @@ onBeforeUnmount(() => {
       :preload="live ? 'none' : 'metadata'"
       class="audio-player__el"
       @play="onPlay"
-      @pause="playing = false"
-      @ended="playing = false"
+      @pause="onPause"
+      @ended="onMediaInterrupted"
+      @error="onMediaInterrupted"
       @timeupdate="onTimeUpdate"
       @loadedmetadata="onLoadedMetadata"
     />

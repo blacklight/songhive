@@ -1893,8 +1893,11 @@ the controlling tab closes.
   released on shutdown) so exactly one worker drives a given output. The
   worker owns queue advancement, repeat/shuffle, listen recording,
   scrobbling and idle shutdown (`streams.background_idle_timeout_seconds`).
-  Deployed as the `stream-worker` Compose service (`streams` profile) and
-  `songhive-stream-worker.service`.
+  A failed track advance (transient DB/storage/provider error) is retried a
+  few times before the driver falls back to its silence generator, and the
+  advance is idempotent — a retry after a committed index update re-syncs
+  the source instead of skipping a track. Deployed as the `stream-worker`
+  Compose service (`streams` profile) and `songhive-stream-worker.service`.
 - **Icecast provider** (`streams/icecast.py`) — one long-lived ffmpeg
   *encoder* pushes an MP3, Ogg Vorbis or Opus stream to an `icecast://`
   mountpoint;
@@ -1923,10 +1926,14 @@ the controlling tab closes.
   behind jumps forward instead of accumulating latency, and the
   `X-Accel-Buffering: no` response header keeps buffering proxies from
   hiding listener lag in their own buffers. Liveness is the TTL'd
-  `songhive:stream:meta:{mount}` key refreshed by the driver; `{"end": "1"}`
-  entries disconnect listeners on graceful stop; per-listener TTL keys under
-  `songhive:stream:listener:{mount}:*` feed `listener_count` for idle
-  shutdown and enforce `streams.http_stream_max_listeners` (0 = uncapped).
+  `songhive:stream:meta:{mount}` key, refreshed by the driver on a timer so
+  decoder gaps at track boundaries cannot expire it; `{"end": "1"}` entries
+  disconnect listeners on graceful stop and on encoder restart (a fresh
+  encoder produces a new container stream that cannot be spliced into an
+  open response); per-listener TTL keys under
+  `songhive:stream:listener:{mount}:*`, refreshed by the handler while
+  connected, feed `listener_count` for idle shutdown and enforce
+  `streams.http_stream_max_listeners` (0 = uncapped).
   Now-playing metadata rides the same stream as `{"m": ...}` entries and is
   mirrored into the meta blob; listeners that send `Icy-MetaData: 1` get an
   `icy-metaint` header and `StreamTitle` blocks interleaved into the audio
