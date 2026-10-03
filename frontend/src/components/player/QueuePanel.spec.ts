@@ -18,6 +18,18 @@ function makeTrack(overrides: Partial<TrackResponse> = {}): TrackResponse {
   };
 }
 
+function createMockEngine() {
+  return {
+    load: vi.fn(),
+    play: vi.fn(),
+    pause: vi.fn(),
+    seek: vi.fn(),
+    setVolume: vi.fn(),
+    setNextTrack: vi.fn(),
+    destroy: vi.fn(),
+  };
+}
+
 describe("QueuePanel", () => {
   let originalScrollIntoView: typeof Element.prototype.scrollIntoView;
 
@@ -105,5 +117,63 @@ describe("QueuePanel", () => {
 
     expect(player.queue.map((t) => t.id)).toEqual(["track-1"]);
     expect(player.index).toBe(0);
+  });
+
+  it("does not start playback when Enter is pressed on a remove button", async () => {
+    const tracks = [
+      makeTrack({ id: "track-1", title: "Song One" }),
+      makeTrack({ id: "track-2", title: "Song Two" }),
+    ].map((t) => toQueueTrack(t, { artist_name: "Artist" }));
+
+    const player = usePlayerStore();
+    const engine = createMockEngine();
+    player.registerEngine(engine);
+    player.queue = tracks;
+    player.index = 0;
+    player.isPlaying = true;
+    player.playbackState = "playing";
+
+    const wrapper = mount(QueuePanel, {
+      props: { open: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    const removeButton = wrapper
+      .findAll(".queue-panel__item")[1]
+      .find(".queue-panel__remove");
+    await removeButton.trigger("keydown", { key: "Enter" });
+
+    // The row's Enter-to-play handler must not fire through the button —
+    // removing a queue row never changes what is playing.
+    expect(engine.load).not.toHaveBeenCalled();
+    expect(player.index).toBe(0);
+    expect(player.currentTrack?.id).toBe("track-1");
+  });
+
+  it("renders repeated queue entries without duplicate key warnings", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const track = toQueueTrack(makeTrack({ id: "dup", title: "Same" }), {
+      artist_name: "Artist",
+    });
+
+    const player = usePlayerStore();
+    player.queue = [track, track];
+    player.index = 0;
+
+    const wrapper = mount(QueuePanel, {
+      props: { open: true },
+      attachTo: document.body,
+    });
+    await flushPromises();
+
+    expect(wrapper.findAll(".queue-panel__item")).toHaveLength(2);
+    const warned = warn.mock.calls.some((args) =>
+      args.some(
+        (arg) => typeof arg === "string" && arg.includes("Duplicate keys"),
+      ),
+    );
+    expect(warned).toBe(false);
+    warn.mockRestore();
   });
 });

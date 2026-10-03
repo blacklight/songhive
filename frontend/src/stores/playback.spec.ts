@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { flushPromises } from "@vue/test-utils";
 import { setActivePinia, createPinia } from "pinia";
 import { usePlaybackStore } from "./playback";
 import { usePlayerStore } from "./player";
@@ -63,6 +64,26 @@ function makeQueueTrack(id: string): QueueTrack {
     artwork_url: `/api/v1/files/${id}/download`,
     visibility: "public",
   } as QueueTrack;
+}
+
+function makeTrackData(id: string): QueueTrackData {
+  return {
+    id,
+    title: `Track ${id}`,
+    artist: `Artist ${id}`,
+    album: `Album ${id}`,
+    duration: 180,
+    artist_id: `artist-${id}`,
+    album_id: `album-${id}`,
+    image_url: `/api/v1/files/${id}/download`,
+    visibility: "public",
+  };
+}
+
+function sentCommands(): string[] {
+  return vi
+    .mocked(playbackApi.sendPlaybackCommand)
+    .mock.calls.map(([body]) => body.command);
 }
 
 describe("usePlaybackStore", () => {
@@ -167,6 +188,107 @@ describe("usePlaybackStore", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("removeAt on a non-playing row only rewrites the queue", async () => {
+    const store = usePlaybackStore();
+    const playerStore = usePlayerStore();
+    store.registerWithPlayer();
+    const state = {
+      ...makeState([
+        makeTrackData("t1"),
+        makeTrackData("t2"),
+        makeTrackData("t3"),
+      ]),
+      current_index: 1,
+    };
+    vi.mocked(playbackApi.sendPlaybackCommand).mockResolvedValue(state);
+    vi.mocked(playbackApi.setSessionOutputs).mockResolvedValue(state);
+    await store.selectOutput("os1");
+    vi.mocked(playbackApi.sendPlaybackCommand).mockClear();
+
+    playerStore.removeAt(2);
+    await flushPromises();
+
+    expect(sentCommands()).toEqual(["set_queue"]);
+    const call = vi.mocked(playbackApi.sendPlaybackCommand).mock.calls[0][0];
+    const queue = call.args?.queue as QueueTrackData[];
+    expect(queue.map((t) => t.id)).toEqual(["t1", "t2"]);
+  });
+
+  it("removeAt on the playing row starts whatever takes its slot", async () => {
+    const store = usePlaybackStore();
+    const playerStore = usePlayerStore();
+    store.registerWithPlayer();
+    const state = {
+      ...makeState([
+        makeTrackData("t1"),
+        makeTrackData("t2"),
+        makeTrackData("t3"),
+      ]),
+      current_index: 1,
+    };
+    vi.mocked(playbackApi.sendPlaybackCommand).mockResolvedValue(state);
+    vi.mocked(playbackApi.setSessionOutputs).mockResolvedValue(state);
+    await store.selectOutput("os1");
+    vi.mocked(playbackApi.sendPlaybackCommand).mockClear();
+
+    playerStore.removeAt(1);
+    await flushPromises();
+
+    expect(sentCommands()).toEqual(["set_queue", "play_at"]);
+    const calls = vi.mocked(playbackApi.sendPlaybackCommand).mock.calls;
+    const queue = calls[0][0].args?.queue as QueueTrackData[];
+    expect(queue.map((t) => t.id)).toEqual(["t1", "t3"]);
+    expect(calls[1][0].args).toMatchObject({ index: 1 });
+  });
+
+  it("enqueueNext only rewrites the queue, inserting after the current track", async () => {
+    const store = usePlaybackStore();
+    const playerStore = usePlayerStore();
+    store.registerWithPlayer();
+    const state = {
+      ...makeState([
+        makeTrackData("t1"),
+        makeTrackData("t2"),
+        makeTrackData("t3"),
+      ]),
+      current_index: 1,
+    };
+    vi.mocked(playbackApi.sendPlaybackCommand).mockResolvedValue(state);
+    vi.mocked(playbackApi.setSessionOutputs).mockResolvedValue(state);
+    await store.selectOutput("os1");
+    vi.mocked(playbackApi.sendPlaybackCommand).mockClear();
+
+    playerStore.enqueueNext(makeQueueTrack("t9"));
+    await flushPromises();
+
+    expect(sentCommands()).toEqual(["set_queue"]);
+    const call = vi.mocked(playbackApi.sendPlaybackCommand).mock.calls[0][0];
+    const queue = call.args?.queue as QueueTrackData[];
+    expect(queue.map((t) => t.id)).toEqual(["t1", "t2", "t9", "t3"]);
+    expect(queue[2]).toMatchObject({
+      artist: "Artist t9",
+      image_url: "/api/v1/files/t9/download",
+    });
+  });
+
+  it("clear empties the session queue instead of just stopping", async () => {
+    const store = usePlaybackStore();
+    const playerStore = usePlayerStore();
+    store.registerWithPlayer();
+    const state = makeState([makeTrackData("t1"), makeTrackData("t2")]);
+    vi.mocked(playbackApi.sendPlaybackCommand).mockResolvedValue(state);
+    vi.mocked(playbackApi.setSessionOutputs).mockResolvedValue(state);
+    await store.selectOutput("os1");
+    vi.mocked(playbackApi.sendPlaybackCommand).mockClear();
+
+    playerStore.clear();
+    await flushPromises();
+
+    expect(sentCommands()).toEqual(["set_queue"]);
+    const call = vi.mocked(playbackApi.sendPlaybackCommand).mock.calls[0][0];
+    expect(call.args?.queue).toEqual([]);
   });
 
   it("toggleMute maps to volume 0 on the output in session mode", async () => {

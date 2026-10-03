@@ -417,6 +417,10 @@ export const usePlayerStore = defineStore("player", () => {
         index.value = queue.value.length - 1;
       }
       if (currentTrack.value && engine) {
+        currentTime.value = 0;
+        duration.value = 0;
+        playbackState.value = "loading";
+        isPlaying.value = true;
         engine.load(currentTrack.value);
         engine.play();
       } else {

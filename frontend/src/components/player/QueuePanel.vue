@@ -143,7 +143,7 @@ function clearQueue() {
       <!-- Drag-to-reorder is deferred to a later phase. -->
       <li
         v-for="(track, i) in store.queue"
-        :key="track.id"
+        :key="`${track.id}:${i}`"
         class="queue-panel__item"
         :class="{ 'queue-panel__item--current': i === store.index }"
         role="option"
@@ -182,6 +182,7 @@ function clearQueue() {
           :title="t('player.removeFromQueue', { title: track.title })"
           icon="xmark"
           @click="removeAt($event, i)"
+          @keydown.enter.stop
         />
       </li>
     </ol>

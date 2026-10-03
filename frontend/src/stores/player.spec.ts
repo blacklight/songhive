@@ -482,6 +482,25 @@ describe("usePlayerStore", () => {
     expect(engine.load).toHaveBeenCalledWith(tracks[1]);
   });
 
+  it("removeAt at the current index resets progress like a track change", () => {
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+    const tracks = [makeTrack("a"), makeTrack("b"), makeTrack("c")];
+    store.playAll(tracks, 0);
+    store.updateDuration(180);
+    store.updateTime(95);
+
+    store.removeAt(0);
+
+    expect(store.index).toBe(0);
+    expect(store.currentTrack?.id).toBe("b");
+    expect(store.currentTime).toBe(0);
+    expect(store.duration).toBe(0);
+    expect(store.playbackState).toBe("loading");
+    expect(store.isPlaying).toBe(true);
+  });
+
   it("removeAt after the current index does not affect index", () => {
     const store = usePlayerStore();
     const engine = createMockEngine();
