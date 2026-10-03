@@ -1562,6 +1562,7 @@
       "albums": "Álbumes",
       "libraries": "Bibliotecas",
       "playlists": "Listas de reproducción",
+      "streams": "Streams",
       "notifications": "Notificaciones",
       "interface": "Interfaz",
       "moderation": "Moderación",
@@ -1782,7 +1783,8 @@
       "item": "Elemento",
       "episode": "Episodio",
       "share": "Compartido",
-      "shares": "Compartidos"
+      "shares": "Compartidos",
+      "streams": "Streams"
     },
     "list": {
       "searchPlaceholder": "Buscar {entity}…",

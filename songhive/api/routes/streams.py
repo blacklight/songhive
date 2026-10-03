@@ -16,11 +16,12 @@ from datetime import datetime
 from typing import Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.user import User
+from ...services.auth import get_user_by_username
 from ...services.outputs import list_http_streams
 from ...streams.http import (
     normalize_mount,
@@ -95,6 +96,7 @@ def _stream_url(mount: str, token: Optional[str]) -> str:
 @router.get("/", response_model=list[StreamResponse])
 async def list_streams(
     request: Request,
+    owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
     user: Optional[User] = Depends(get_current_user_optional),
     db: AsyncSession = Depends(get_db),
 ):
@@ -104,8 +106,15 @@ async def list_streams(
     Public mounts (no listen token) are listed for everyone; token-protected
     mounts only appear to their owner, as do disabled outputs.
     """
+    owner_id: Optional[str] = None
+    if owner_username:
+        owner = await get_user_by_username(db, owner_username)
+        if owner is None or not owner.is_active:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        owner_id = str(owner.id)
+
     redis = getattr(request.app.state, "redis", None)
-    rows = await list_http_streams(db)
+    rows = await list_http_streams(db, user_id=owner_id)
 
     items: list[StreamResponse] = []
     for output, owner, cfg in rows:

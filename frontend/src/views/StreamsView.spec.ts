@@ -116,7 +116,7 @@ describe("StreamsView", () => {
 
     await mountView();
 
-    const card = wrapper.find(".streams-view__card");
+    const card = wrapper.find(".stream-card");
     expect(card.exists()).toBe(true);
     expect(wrapper.text()).toContain("Test Radio");
     expect(wrapper.text()).toContain("DJ Alice");
@@ -125,7 +125,7 @@ describe("StreamsView", () => {
     expect(wrapper.text()).toContain("Chill beats");
     expect(wrapper.text()).toContain(i18n.global.t("pages.streams.live"));
 
-    const ownerLink = wrapper.find(".streams-view__owner");
+    const ownerLink = wrapper.find(".stream-card__owner");
     expect(ownerLink.attributes("href")).toBe("/@alice");
   });
 
@@ -143,7 +143,7 @@ describe("StreamsView", () => {
 
     await mountView();
 
-    const link = wrapper.find(".streams-view__now-playing-link");
+    const link = wrapper.find(".stream-card__now-playing-link");
     expect(link.exists()).toBe(true);
     expect(link.text()).toBe("Artist - Song");
     expect(link.attributes("href")).toBe("/tracks/t1");
@@ -262,7 +262,7 @@ describe("StreamsView", () => {
     });
     await flushPromises();
 
-    const link = wrapper.find(".streams-view__now-playing-link");
+    const link = wrapper.find(".stream-card__now-playing-link");
     expect(link.exists()).toBe(true);
     expect(link.text()).toBe("Artist - Next");
     expect(link.attributes("href")).toBe("/tracks/t2");
@@ -272,7 +272,7 @@ describe("StreamsView", () => {
     emitStreamUpdate({ mount: "radio", online: false, now_playing: null });
     await flushPromises();
 
-    expect(wrapper.find(".streams-view__now-playing").exists()).toBe(false);
+    expect(wrapper.find(".stream-card__now-playing").exists()).toBe(false);
     expect(wrapper.text()).toContain(i18n.global.t("pages.streams.offline"));
 
     // Events for mounts not in the listing are ignored.

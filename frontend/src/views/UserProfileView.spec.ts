@@ -58,6 +58,7 @@ function createTestRouter() {
         "userProfileAlbums",
         "userProfileLibraries",
         "userProfilePlaylists",
+        "userProfileStreams",
       ].map((name) => ({
         path: `/@:username/${name}`,
         name,

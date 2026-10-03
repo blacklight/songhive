@@ -101,6 +101,11 @@ const TABS = [
     label: t("profile.tabs.playlists"),
     name: "userProfilePlaylists",
   },
+  {
+    key: "streams",
+    label: t("profile.tabs.streams"),
+    name: "userProfileStreams",
+  },
 ] as const;
 
 const data = ref<PublicUserWithModeration | null>(null);

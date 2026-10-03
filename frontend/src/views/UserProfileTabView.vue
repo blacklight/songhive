@@ -22,6 +22,7 @@ import {
   type ListPlaylistsResult,
   type PlaylistResponse,
 } from "@/api/playlists";
+import { listStreams, type StreamResponse } from "@/api/streams";
 import { getApiErrorMessage } from "@/api/client";
 import { toQueueTrack } from "@/player/enrich";
 import { SHUFFLE_CHUNK_SIZE } from "@/composables/useShufflePlay";
@@ -31,13 +32,21 @@ import AlbumCard from "@/components/library/AlbumCard.vue";
 import LibraryCard from "@/components/library/LibraryCard.vue";
 import PlaylistCard from "@/components/library/PlaylistCard.vue";
 import TrackList from "@/components/library/TrackList.vue";
+import StreamCard from "@/components/streams/StreamCard.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import type { TrackResponse } from "@/player/types";
 
 interface Props {
-  tab: "posts" | "activity" | "tracks" | "albums" | "libraries" | "playlists";
+  tab:
+    | "posts"
+    | "activity"
+    | "tracks"
+    | "albums"
+    | "libraries"
+    | "playlists"
+    | "streams";
   // Set by the parent profile view when the viewer opts in to seeing a
   // limited profile's timeline anyway.
   reveal?: boolean;
@@ -58,6 +67,7 @@ const tracksResult = ref<ListTracksResult | null>(null);
 const albums = ref<AlbumResponse[]>([]);
 const libraries = ref<LibraryResponse[]>([]);
 const playlists = ref<PlaylistResponse[]>([]);
+const streams = ref<StreamResponse[]>([]);
 const offset = ref(0);
 const hasMoreEntities = ref(false);
 
@@ -78,6 +88,8 @@ const emptyEntity = computed(() => {
       return t("browse.entities.libraries");
     case "playlists":
       return t("browse.entities.playlists");
+    case "streams":
+      return t("browse.entities.streams");
     case "tracks":
       return t("browse.entities.tracks");
     default:
@@ -108,6 +120,7 @@ function reset() {
   albums.value = [];
   libraries.value = [];
   playlists.value = [];
+  streams.value = [];
   offset.value = 0;
   hasMoreEntities.value = false;
   activitiesCursor.value = null;
@@ -189,6 +202,9 @@ async function load(append = false) {
         playlists.value = result.items;
       }
       hasMoreEntities.value = offset.value + result.items.length < result.total;
+    } else if (props.tab === "streams") {
+      // The stream directory is unpaginated — the whole listing comes back.
+      streams.value = await listStreams({ owner_username: username.value });
     }
   } catch (err) {
     error.value = getApiErrorMessage(err) || t("common.error");
@@ -267,7 +283,8 @@ watch([includeBoosts, includeReplies], () => {
         !activities &&
         !albums.length &&
         !libraries.length &&
-        !playlists.length
+        !playlists.length &&
+        !streams.length
       "
       class="user-profile-tab__loading"
     >
@@ -359,6 +376,20 @@ watch([includeBoosts, includeReplies], () => {
       </div>
     </template>
 
+    <template v-else-if="tab === 'streams'">
+      <p v-if="!streams.length" class="user-profile-tab__empty">
+        {{ emptyMessage }}
+      </p>
+      <ul v-else class="user-profile-tab__streams" role="list">
+        <StreamCard
+          v-for="stream in streams"
+          :key="stream.id"
+          :stream="stream"
+          :show-owner="false"
+        />
+      </ul>
+    </template>
+
     <div
       v-if="
         ['albums', 'libraries', 'playlists'].includes(tab) &&
@@ -423,6 +454,15 @@ watch([includeBoosts, includeReplies], () => {
 .user-profile-tab__grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
+  gap: var(--space-4);
+}
+
+.user-profile-tab__streams {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
   gap: var(--space-4);
 }
 

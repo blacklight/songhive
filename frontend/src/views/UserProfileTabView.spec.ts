@@ -7,6 +7,7 @@ import { listAlbumsWithMeta } from "@/api/albums";
 import { listLibrariesWithMeta } from "@/api/libraries";
 import { listPlaylistsWithMeta } from "@/api/playlists";
 import { listTracksWithMeta } from "@/api/tracks";
+import { listStreams, type StreamResponse } from "@/api/streams";
 import { listUserActivities } from "@/api/activities";
 import type { ActivityResponse } from "@/api/activities";
 import type { AlbumResponse } from "@/api/albums";
@@ -29,6 +30,13 @@ vi.mock("@/api/playlists", () => ({
 
 vi.mock("@/api/tracks", () => ({
   listTracksWithMeta: vi.fn(),
+  // Re-exported for ActivityAudioPlayer (pulled in by StreamCard).
+  getTrack: vi.fn(),
+  downloadTrack: vi.fn(),
+}));
+
+vi.mock("@/api/streams", () => ({
+  listStreams: vi.fn(),
 }));
 
 vi.mock("@/api/activities", () => ({
@@ -104,6 +112,29 @@ function createTrack(id: string, title: string): TrackResponse {
   } as TrackResponse;
 }
 
+function createStream(overrides: Partial<StreamResponse> = {}): StreamResponse {
+  return {
+    id: "s1",
+    name: "Test Radio",
+    mount: "radio",
+    stream_url: "/streams/radio",
+    visibility: "public",
+    is_owner: false,
+    owner: { username: "user1", display_name: null, avatar_url: null },
+    enabled: true,
+    online: true,
+    description: null,
+    genre: null,
+    format: "mp3",
+    bitrate: "128k",
+    content_type: "audio/mpeg",
+    now_playing: null,
+    listener_count: 0,
+    created_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
 function createActivity(
   id: string,
   overrides: Partial<ActivityResponse> = {},
@@ -168,6 +199,7 @@ describe("UserProfileTabView", () => {
       activities: [],
       next_cursor: null,
     });
+    vi.mocked(listStreams).mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -337,6 +369,48 @@ describe("UserProfileTabView", () => {
       expect(wrapper.text()).toContain("Playlist 0");
       expect(wrapper.text()).toContain("Playlist 19");
       expect(findLoadMoreButton(wrapper)).toBeUndefined();
+    });
+  });
+
+  describe("streams", () => {
+    it("lists the profile owner's streams without an owner line", async () => {
+      vi.mocked(listStreams).mockResolvedValue([
+        createStream(),
+        createStream({ id: "s2", name: "Second Radio", mount: "second" }),
+      ]);
+
+      const router = createTestRouter();
+      await router.push("/user1");
+      await router.isReady();
+      wrapper = mount(UserProfileTabView, {
+        global: { plugins: [router, i18n] },
+        props: { tab: "streams" },
+      });
+      await flushPromises();
+
+      expect(listStreams).toHaveBeenCalledWith({ owner_username: "user1" });
+      const cards = wrapper.findAll(".stream-card");
+      expect(cards.length).toBe(2);
+      expect(wrapper.text()).toContain("Test Radio");
+      expect(wrapper.text()).toContain("Second Radio");
+      expect(wrapper.find(".stream-card__owner").exists()).toBe(false);
+    });
+
+    it("shows the streams empty state", async () => {
+      const router = createTestRouter();
+      await router.push("/user1");
+      await router.isReady();
+      wrapper = mount(UserProfileTabView, {
+        global: { plugins: [router, i18n] },
+        props: { tab: "streams" },
+      });
+      await flushPromises();
+
+      expect(wrapper.text()).toContain(
+        i18n.global.t("browse.list.empty", {
+          entity: i18n.global.t("browse.entities.streams"),
+        }),
+      );
     });
   });
 

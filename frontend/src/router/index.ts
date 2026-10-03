@@ -443,6 +443,12 @@ const routes: RouteRecordRaw[] = [
             component: () => import("@/views/UserProfileTabView.vue"),
             props: { tab: "playlists" },
           },
+          {
+            path: "streams",
+            name: "userProfileStreams",
+            component: () => import("@/views/UserProfileTabView.vue"),
+            props: { tab: "streams" },
+          },
         ],
       },
       {

@@ -165,6 +165,47 @@ async def test_list_streams_includes_owner_profile(client, regular_user, db_sess
 
 
 @pytest.mark.asyncio
+async def test_list_streams_owner_username_filter(client, regular_user, other_user, db_session):
+    """``owner_username`` narrows the directory to one user's mounts."""
+    await _make_http_output(db_session, regular_user, "regular-mount")
+    await _make_http_output(db_session, other_user, "other-mount")
+
+    response = client.get("/api/v1/streams/", params={"owner_username": "regular"})
+    assert response.status_code == status.HTTP_200_OK
+    assert [s["mount"] for s in response.json()] == ["regular-mount"]
+
+
+@pytest.mark.asyncio
+async def test_list_streams_owner_username_unknown_user(client):
+    """Filtering by an unknown username is a 404, like other owner filters."""
+    response = client.get("/api/v1/streams/", params={"owner_username": "nobody"})
+    assert response.status_code == status.HTTP_404_NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_list_streams_owner_username_keeps_visibility_rules(client, regular_user, auth_headers, db_session):
+    """The owner filter composes with mount visibility: private and disabled
+    mounts still only show to the owner themselves."""
+    await _make_http_output(db_session, regular_user, "public-mount")
+    await _make_http_output(db_session, regular_user, "private-mount", listen_token="s3cret")
+    await _make_http_output(db_session, regular_user, "disabled-mount", enabled=False)
+
+    anon = client.get("/api/v1/streams/", params={"owner_username": "regular"})
+    assert [s["mount"] for s in anon.json()] == ["public-mount"]
+
+    owner = client.get(
+        "/api/v1/streams/",
+        params={"owner_username": "regular"},
+        headers=auth_headers(regular_user),
+    )
+    assert sorted(s["mount"] for s in owner.json()) == [
+        "disabled-mount",
+        "private-mount",
+        "public-mount",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_list_streams_ignores_non_http_outputs(client, regular_user, db_session):
     """Icecast/snapcast outputs are not native mounts and never listed."""
     output = OutputStream(

@@ -114,19 +114,23 @@ def _output_host_allowed(provider_type: str, cfg: dict, user: User, config: Song
     return host in allowed_hosts
 
 
-async def list_http_streams(db: AsyncSession) -> list[tuple[OutputStream, User, dict]]:
+async def list_http_streams(db: AsyncSession, user_id: Optional[str] = None) -> list[tuple[OutputStream, User, dict]]:
     """
     Return every native HTTP output with its owner and decrypted config.
 
-    Used by the public stream directory; requester-facing filtering
-    (token-protected mounts are owner-only) happens in the route.
+    ``user_id`` narrows the listing to a single owner. Used by the public
+    stream directory; requester-facing filtering (token-protected mounts
+    are owner-only) happens in the route.
     """
-    result = await db.execute(
+    stmt = (
         select(OutputStream, User)
         .join(User, OutputStream.user_id == User.id)
         .where(OutputStream.provider_type == "http")
         .order_by(OutputStream.created_at.desc())
     )
+    if user_id is not None:
+        stmt = stmt.where(OutputStream.user_id == user_id)
+    result = await db.execute(stmt)
     return [(output, owner, _decrypt_output_config(output.config)) for output, owner in result.all()]
 
 

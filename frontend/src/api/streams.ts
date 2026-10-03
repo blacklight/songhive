@@ -50,6 +50,8 @@ export interface StreamUpdateEvent {
   now_playing?: StreamNowPlaying | null;
 }
 
-export function listStreams(): Promise<StreamResponse[]> {
-  return apiRequest<StreamResponse[]>("/streams/");
+export function listStreams(params?: {
+  owner_username?: string;
+}): Promise<StreamResponse[]> {
+  return apiRequest<StreamResponse[]>("/streams/", { query: params });
 }

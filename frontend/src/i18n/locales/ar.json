@@ -1562,6 +1562,7 @@
       "albums": "الألبومات",
       "libraries": "المكتبات",
       "playlists": "قوائم التشغيل",
+      "streams": "البثوث",
       "notifications": "الإشعارات",
       "interface": "الواجهة",
       "moderation": "الإشراف",
@@ -1782,7 +1783,8 @@
       "item": "العنصر",
       "episode": "الحلقة",
       "share": "المشاركة",
-      "shares": "المشاركات"
+      "shares": "المشاركات",
+      "streams": "البثوث"
     },
     "list": {
       "searchPlaceholder": "ابحث في {entity}…",
