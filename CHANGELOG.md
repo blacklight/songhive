@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `external`: Add a YouTube provider with video variant playback — an
+  entity-backed adapter (ytmusicapi + Data API) authenticates per
+  device, streams resolve via yt-dlp with audio-only and optional
+  video variants, and `stream_variants` / `?variant=video` are exposed
+  through the API and the SPA track view.
+  ([`d58274a`](https://git.platypush.tech/blacklight/songhive/commit/d58274a7622282df2f298e2a7aba5cdcbfe0bf0f)).
+- `payments`: Stripe Connect's `losses_collector` is now configurable
+  through the new `payments.stripe_losses_collector` setting (default
+  `stripe`), applied when creating v2 Connect accounts.
+  ([`4a43a15`](https://git.platypush.tech/blacklight/songhive/commit/4a43a1573eb116c43798d7c06efa31517fdb1783)).
+
 ## 0.4.5
 
 ### Added
