@@ -223,33 +223,51 @@ class StripeProvider(PaymentProvider):
 
     async def create_connected_account(self, *, user_id: str, email: str, country: str, display_name: str = "") -> str:
         """
-        Create an Express-dashboard seller account via Accounts v2.
+        Create a seller account via Accounts v2.
 
         Accounts v1 creation is disabled for new Connect integrations — Stripe
-        rejects ``POST /v1/accounts``. ``dashboard="express"`` gives sellers
-        the hosted Express dashboard; ``merchant`` + ``card_payments`` enables
+        rejects ``POST /v1/accounts``. ``merchant`` + ``card_payments`` enables
         the direct charges our checkout sessions perform on the connected
         account and ``recipient`` + ``stripe_transfers`` lets it receive
         transfers. ``identity.country`` is required when the merchant
         configuration is applied. ``defaults.responsibilities`` is immutable
-        once set — ``fees_collector="application"`` lets the platform collect
-        fees via application fees, while ``losses_collector`` comes from
-        ``payments.stripe_losses_collector``: Stripe rejects
-        ``"application"`` (platform-carried negative-balance liability) with
-        ``account_creation_losses_collector_unavailable`` unless the platform
-        is approved for managed risk, so it defaults to ``"stripe"``.
+        once set.
+
+        ``payments.stripe_dashboard`` picks the hosted dashboard sellers get
+        and pins the only ``responsibilities`` combination Stripe accepts for
+        it without special approval:
+
+        - ``"full"`` (default) — the standard Stripe dashboard with
+          ``fees_collector="stripe"``/``losses_collector="stripe"``: Stripe
+          deducts its fees from the connected account and carries
+          negative-balance liability. This is the only combination available
+          to self-serve platforms; platform-collected fees/losses with a full
+          dashboard are sales-gated.
+        - ``"express"`` — the co-branded Express dashboard with
+          ``fees_collector="application"`` and ``losses_collector`` from
+          ``payments.stripe_losses_collector``. Stripe rejects
+          ``"application"`` with ``account_creation_losses_collector_unavailable``
+          unless the platform is approved for managed risk, and rejects
+          ``"stripe"`` with ``account_controller_unsupported_configuration``
+          unless the platform is enrolled in the Express +
+          Stripe-managed-liability preview (added in the 2026-06-24 dahlia
+          release but still gated).
         """
         import stripe
 
+        dashboard = self._config.payments.stripe_dashboard
+        if dashboard == "express":
+            responsibilities = {
+                "fees_collector": "application",
+                "losses_collector": self._config.payments.stripe_losses_collector,
+            }
+        else:
+            responsibilities = {"fees_collector": "stripe", "losses_collector": "stripe"}
+
         params: Dict[str, Any] = {
-            "dashboard": "express",
+            "dashboard": dashboard,
             "identity": {"country": country.upper()},
-            "defaults": {
-                "responsibilities": {
-                    "fees_collector": "application",
-                    "losses_collector": self._config.payments.stripe_losses_collector,
-                },
-            },
+            "defaults": {"responsibilities": responsibilities},
             "configuration": {
                 "merchant": {"capabilities": {"card_payments": {"requested": True}}},
                 "recipient": {

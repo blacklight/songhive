@@ -222,7 +222,15 @@
 - Payments (`[payments]` config, `services/payments/`,
   `api/routes/payments.py`): all byte-access decisions go through
   `services/payments/access.py` — never gate on raw `is_active` or ACL
-  alone for gated tracks. `services/payments/membership.py`
+  alone for gated tracks. Seller Connect accounts are Accounts v2 with
+  `payments.stripe_dashboard` pinning the only unapproved
+  `defaults.responsibilities` combo for that dashboard: `full` →
+  `stripe`/`stripe` (the self-serve path); `express` → `application` fees +
+  `stripe_losses_collector`, both approval-gated (managed risk / gated
+  preview) — an unapproved platform gets
+  `account_controller_unsupported_configuration` or
+  `account_creation_losses_collector_unavailable`.
+  `services/payments/membership.py`
   `sync_user_active_flag` is the single writer of `User.is_active` for
   payment reasons; `admin_suspended` is the sticky flag that keeps manual
   deactivations from being undone by webhooks. Stripe webhooks

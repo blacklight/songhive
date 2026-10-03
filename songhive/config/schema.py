@@ -1102,12 +1102,24 @@ class PaymentsConfig(BaseSettings):
             "absolute URLs fail closed when neither resolves to a canonical https URL."
         ),
     )
+    stripe_dashboard: Literal["express", "full"] = Field(
+        default="full",
+        description=(
+            "Stripe-hosted dashboard type for new seller (Connect) accounts. 'full' gives "
+            "sellers the standard Stripe dashboard with fees_collector/losses_collector "
+            "'stripe' — the only combination self-serve platforms may use. 'express' "
+            "requires Stripe approval: platform-managed risk for losses_collector "
+            "'application', or the Express + Stripe-managed-liability preview for 'stripe'"
+        ),
+    )
     stripe_losses_collector: Literal["stripe", "application"] = Field(
         default="stripe",
         description=(
-            "Connect defaults.responsibilities.losses_collector for new seller accounts. "
-            "'stripe' is the only value platforms may use by default; 'application' requires "
-            "Stripe approval for platform-managed risk"
+            "Connect defaults.responsibilities.losses_collector for new seller accounts "
+            "when stripe_dashboard = 'express'. 'application' requires Stripe approval "
+            "for platform-managed risk; 'stripe' requires enrollment in the Express + "
+            "Stripe-managed-liability preview. Ignored when stripe_dashboard = 'full' "
+            "(always 'stripe')"
         ),
     )
     supported_currencies: list[str] = Field(

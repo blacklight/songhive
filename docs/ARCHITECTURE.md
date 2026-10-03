@@ -2152,17 +2152,21 @@ with direct charges on connected accounts for sales, Billing for
 memberships, Connect for seller onboarding) and a deterministic `fake`
 provider used by the test suite. Seller accounts are created through the
 Accounts v2 API (`POST /v2/core/accounts`) — Stripe disables Accounts v1
-creation for new Connect integrations — as `dashboard="express"` accounts
-with `merchant.card_payments` (direct charges) and
-`recipient.stripe_transfers` capabilities, `identity.country` taken from
-the seller's onboarding request (required before a `merchant`
-configuration can be applied) and `defaults.responsibilities` set to
-platform-collected fees with `losses_collector` from
-`payments.stripe_losses_collector` (default `stripe` — `application`
-requires Stripe approval for platform-managed risk). Onboarding uses
-v2 Account Links and `connected_account_state` normalizes both v1
-(`account.updated` webhook) and v2 (live retrieve) payload shapes into the
-stored `ConnectedAccount` flags. Provider events are the only authority that moves
+creation for new Connect integrations — with `merchant.card_payments`
+(direct charges) and `recipient.stripe_transfers` capabilities,
+`identity.country` taken from the seller's onboarding request (required
+before a `merchant` configuration can be applied). `payments.stripe_dashboard`
+picks the hosted dashboard and pins the only `defaults.responsibilities`
+combination Stripe accepts for it without approval: `full` (default) gives
+sellers the standard Stripe dashboard with
+`fees_collector`/`losses_collector` = `stripe`; `express` gives the
+co-branded Express dashboard with platform-collected fees and
+`losses_collector` from `payments.stripe_losses_collector` — `application`
+requires managed-risk approval, `stripe` requires the gated Express +
+Stripe-managed-liability preview (`account_controller_unsupported_configuration`
+otherwise). Onboarding uses v2 Account Links and `connected_account_state`
+normalizes both v1 (`account.updated` webhook) and v2 (live retrieve)
+payload shapes into the stored `ConnectedAccount` flags. Provider events are the only authority that moves
 money state: checkout redirects are never trusted.
 
 **Data model** (`models/payments.py`) — `Sale` (per track or album, with
