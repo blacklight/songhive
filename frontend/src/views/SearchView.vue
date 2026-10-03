@@ -51,9 +51,10 @@ const {
 const hasSearched = ref(false);
 
 // A pasted URL is a direct entity lookup, not a text query: ``/search``
-// resolves it to the single referenced entity's section. The view renders
-// only that result — per-entity lists, provider groups and the cached
-// remote section stay off.
+// resolves it to the single referenced entity's section. Per-entity lists
+// and the cached remote section stay off; provider libraries still get
+// the query so providers that resolve their own URLs (e.g. YouTube) can
+// surface the entity.
 const isUrlQuery = computed(() => /^https?:\/\/\S+$/i.test(query.value.trim()));
 const directSections = ref<SearchResultSection[]>([]);
 const directBusy = ref(false);
@@ -79,6 +80,33 @@ const providerGroups = ref<ProviderSearchGroup[]>([]);
 const providerLoading = ref(false);
 const providerAdded = ref<Record<string, string>>({});
 const providerImportError = ref<Record<string, string>>({});
+
+// For URL queries empty provider groups are noise — a provider either
+// resolves the URL or has nothing to say about it.
+const displayedProviderGroups = computed(() =>
+  isUrlQuery.value
+    ? providerGroups.value.filter(
+        (group) => group.results.length || group.error,
+      )
+    : providerGroups.value,
+);
+const providerHasResults = computed(() =>
+  displayedProviderGroups.value.some((group) => group.results.length),
+);
+
+function runProviderSearch(term: string) {
+  providerLoading.value = true;
+  void searchProviders(term, 8)
+    .then((response) => {
+      providerGroups.value = response.providers ?? [];
+    })
+    .catch(() => {
+      providerGroups.value = [];
+    })
+    .finally(() => {
+      providerLoading.value = false;
+    });
+}
 
 function providerResultKey(group: ProviderSearchGroup, providerKey: string) {
   return `${group.external_library_id}:${providerKey}`;
@@ -161,10 +189,10 @@ async function performSearch() {
   const term = query.value.trim();
   directSections.value = [];
   if (isUrlQuery.value) {
-    providerLoading.value = false;
     for (const entity of SEARCH_ENTITIES) {
       resetSection(entity);
     }
+    runProviderSearch(term);
     directBusy.value = true;
     try {
       const response = await searchPreview(term);
@@ -179,17 +207,7 @@ async function performSearch() {
   }
   const hashtag = term.startsWith("#");
   if (term && !hashtag) {
-    providerLoading.value = true;
-    void searchProviders(term, 8)
-      .then((response) => {
-        providerGroups.value = response.providers ?? [];
-      })
-      .catch(() => {
-        providerGroups.value = [];
-      })
-      .finally(() => {
-        providerLoading.value = false;
-      });
+    runProviderSearch(term);
   } else {
     providerLoading.value = false;
   }
@@ -377,7 +395,12 @@ const visibleEntities = computed<SearchSectionEntity[]>(() =>
         >
           {{ t("common.loading") }}
         </div>
-        <p v-else-if="!directItems.length" class="search-view__section-empty">
+        <p
+          v-else-if="
+            !directItems.length && !providerHasResults && !providerLoading
+          "
+          class="search-view__section-empty"
+        >
           {{ t("search.noResults") }}
         </p>
       </template>
@@ -648,7 +671,7 @@ const visibleEntities = computed<SearchSectionEntity[]>(() =>
       </section>
 
       <section
-        v-for="group in providerGroups"
+        v-for="group in displayedProviderGroups"
         :key="group.external_library_id"
         class="search-view__section search-view__section--provider"
       >

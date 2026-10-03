@@ -513,6 +513,7 @@ async def _build_track_response(
     audio_url: Optional[str] = None
     external_url: Optional[str] = None
     editable_fields: Optional[List[str]] = None
+    stream_variants: Optional[List[str]] = None
 
     # A track is external when referenced by a file-backed ``ExternalTrack``
     # or by an entity-backed ``ExternalItem(kind="track")``; both expose the
@@ -533,6 +534,7 @@ async def _build_track_response(
             can_rename_source = bool(capabilities.get("rename_source"))
             can_delete_source = bool(capabilities.get("delete_source"))
             editable_fields = (capabilities.get("limits") or {}).get("editable_fields")
+            stream_variants = (capabilities.get("limits") or {}).get("stream_variants")
             if db is not None and can_stream and _provider_stream_policy(external_library.provider_type):
                 from ...services.streaming import external_stream_allowed
 
@@ -612,6 +614,7 @@ async def _build_track_response(
         price_minor=price_minor,
         currency=currency,
         editable_fields=editable_fields,
+        stream_variants=stream_variants,
         created_at=track.created_at,
         updated_at=track.updated_at,
     )

@@ -29,6 +29,8 @@ import DeleteModal from "@/components/entity/DeleteModal.vue";
 import TagList from "@/components/tags/TagList.vue";
 import GenreList from "@/components/genres/GenreList.vue";
 import { toQueueTrack } from "@/player/enrich";
+import { streamUrl } from "@/api/stream";
+import VideoEmbedPlayer from "@/components/player/VideoEmbedPlayer.vue";
 import { formatTime } from "@/utils/time";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
@@ -52,6 +54,8 @@ useFeedLinks(feedUrls);
 
 const addDialogOpen = ref(false);
 const addDialogMode = ref<"library" | "playlist">("library");
+// Embedded video playback (YouTube tracks serve a ?variant=video stream).
+const videoOpen = ref(false);
 
 function openAddDialog(mode: "library" | "playlist") {
   addDialogMode.value = mode;
@@ -75,6 +79,19 @@ const queueTrack = computed(() => {
 const coverUrl = computed(
   () => track.value?.image_url || album.value?.cover_url || null,
 );
+
+const isVideoTrack = computed(() => {
+  if (track.value?.external_provider_type !== "youtube") return false;
+  // Providers that serve multiple renditions advertise them via
+  // stream_variants; video playback may be disabled instance-wide.
+  const variants = track.value.stream_variants;
+  return variants == null || variants.includes("video");
+});
+
+const videoUrl = computed(() => {
+  if (!track.value) return "";
+  return streamUrl(track.value, { variant: "video" });
+});
 
 const { owner, visibilityText } = useEntityMeta(track);
 const { isOwner } = useOwnership(computed(() => track.value?.owner_id ?? null));
@@ -129,6 +146,14 @@ const actions = computed(() => [
     label: t("browse.contextMenu.enqueue"),
     icon: "plus",
     visible: !!queueTrack.value,
+  },
+  {
+    key: "watch-video",
+    label: videoOpen.value
+      ? t("browse.detail.hideVideo")
+      : t("browse.detail.watchVideo"),
+    icon: "video",
+    visible: isVideoTrack.value,
   },
   {
     key: "download",
@@ -230,6 +255,9 @@ async function onAction(key: string) {
         type: "success",
         message: t("activities.audio.addedToQueue"),
       });
+      break;
+    case "watch-video":
+      videoOpen.value = !videoOpen.value;
       break;
     case "download":
       await download(track.value);
@@ -521,6 +549,15 @@ watch(
           />
         </div>
       </div>
+
+      <VideoEmbedPlayer
+        v-if="videoOpen"
+        class="track-view__video"
+        :src="videoUrl"
+        :poster="coverUrl"
+        :title="track.title"
+        @close="videoOpen = false"
+      />
     </template>
 
     <AddToCollectionDialog

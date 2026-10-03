@@ -363,8 +363,11 @@ describe("SearchView", () => {
   });
 
   describe("direct URL lookup", () => {
-    function makeUrlFetch(sections: unknown[] = []) {
+    function makeUrlFetch(sections: unknown[] = [], providers: unknown[] = []) {
       return vi.fn().mockImplementation((url: string) => {
+        if (url.includes("/search/providers")) {
+          return Promise.resolve(makeResponse({ query: "q", providers }));
+        }
         if (url.includes("/search/")) {
           return Promise.resolve(
             makeResponse({
@@ -410,7 +413,7 @@ describe("SearchView", () => {
       expect(section.find(".search-view__meta").text()).toBe("URL Artist");
     });
 
-    it("hits only the aggregate endpoint — no lists or provider search", async () => {
+    it("hits the aggregate and provider endpoints — no per-entity lists", async () => {
       vi.stubGlobal("fetch", makeUrlFetch([trackSection]));
       await mountView({ q: "https://manganiello.music/tracks/t-1" });
       await flushPromises();
@@ -418,11 +421,58 @@ describe("SearchView", () => {
       const calledUrls = vi
         .mocked(fetch)
         .mock.calls.map(([url]) => String(url));
-      expect(calledUrls.filter((u) => u.includes("/search/"))).toHaveLength(1);
       expect(
         calledUrls.filter((u) => u.includes("/search/providers")),
-      ).toHaveLength(0);
+      ).toHaveLength(1);
+      expect(calledUrls.filter((u) => u.includes("/search/?"))).toHaveLength(1);
       expect(calledUrls.filter((u) => !u.includes("/search/"))).toHaveLength(0);
+    });
+
+    it("renders provider results for a pasted provider URL", async () => {
+      const youtubeGroup = {
+        ...providerGroup,
+        provider_type: "youtube",
+        library_name: "My YouTube",
+        results: [
+          {
+            kind: "track",
+            provider_key: "vid001",
+            title: "YouTube Video",
+            subtitle: "Channel",
+            external_url: "https://www.youtube.com/watch?v=vid001",
+          },
+        ],
+      };
+      vi.stubGlobal("fetch", makeUrlFetch([], [youtubeGroup]));
+      const wrapper = await mountView({
+        q: "https://www.youtube.com/watch?v=vid001",
+      });
+      await flushPromises();
+
+      const section = wrapper.find(".search-view__section--provider");
+      expect(section.exists()).toBe(true);
+      expect(section.text()).toContain("YouTube Video");
+      // The direct lookup resolved to nothing, but the provider hit means
+      // the page is not empty — no "No results" fallback.
+      expect(wrapper.find(".search-view__section-empty").exists()).toBe(false);
+    });
+
+    it("hides provider groups with no results for a URL query", async () => {
+      vi.stubGlobal(
+        "fetch",
+        makeUrlFetch([], [{ ...providerGroup, results: [] }]),
+      );
+      const wrapper = await mountView({
+        q: "https://manganiello.music/tracks/missing",
+      });
+      await flushPromises();
+
+      expect(wrapper.find(".search-view__section--provider").exists()).toBe(
+        false,
+      );
+      expect(wrapper.find(".search-view__section-empty").text()).toBe(
+        "No results found.",
+      );
     });
 
     it("shows a no-results state when the URL resolves to nothing", async () => {

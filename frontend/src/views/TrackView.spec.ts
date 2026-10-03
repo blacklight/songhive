@@ -12,6 +12,7 @@ import { useAuthStore } from "@/stores/auth";
 import type { TrackResponse } from "@/api/tracks";
 import type { ArtistResponse } from "@/api/artists";
 import type { AlbumResponse } from "@/api/albums";
+import VideoEmbedPlayer from "@/components/player/VideoEmbedPlayer.vue";
 import TrackView from "./TrackView.vue";
 
 vi.mock("@/api/tracks", () => ({
@@ -359,6 +360,41 @@ describe("TrackView", () => {
       await selectMenuItem(t("browse.contextMenu.enrich"));
 
       expect(tracksApi.enrichTrack).toHaveBeenCalledWith("track-1");
+    });
+
+    it("offers an embedded video player for YouTube tracks", async () => {
+      vi.mocked(tracksApi.getTrack).mockResolvedValue({
+        ...createTrack("track-1", "Song One"),
+        is_external: true,
+        external_provider_type: "youtube",
+        can_stream: true,
+        stream_variants: ["audio", "video"],
+      });
+      await mountAt("/tracks/track-1");
+
+      await selectMenuItem(t("browse.detail.watchVideo"));
+
+      const player = wrapper.findComponent(VideoEmbedPlayer);
+      expect(player.exists()).toBe(true);
+      expect(player.props("src")).toContain("/api/v1/stream/track-1");
+      expect(player.props("src")).toContain("variant=video");
+
+      await selectMenuItem(t("browse.detail.hideVideo"));
+      expect(wrapper.find(".video-embed-player").exists()).toBe(false);
+    });
+
+    it("hides the video action when the provider serves audio only", async () => {
+      vi.mocked(tracksApi.getTrack).mockResolvedValue({
+        ...createTrack("track-1", "Song One"),
+        is_external: true,
+        external_provider_type: "youtube",
+        can_stream: true,
+        stream_variants: ["audio"],
+      });
+      await mountAt("/tracks/track-1");
+
+      const labels = (await openMenu()).map((el) => el.textContent?.trim());
+      expect(labels).not.toContain(t("browse.detail.watchVideo"));
     });
   });
 });

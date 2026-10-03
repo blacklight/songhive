@@ -5,6 +5,8 @@ export type TrackResponse = components["schemas"]["TrackResponse"] & {
   external_url?: string | null;
   /** Fields the provider allows editing locally (e.g. ["genres", "tags"]). */
   editable_fields?: string[] | null;
+  /** Stream renditions the provider supports (e.g. ["audio", "video"]). */
+  stream_variants?: string[] | null;
   /** An active sale gates this track. */
   paid?: boolean;
   unpaid_policy?: "full_stream" | "sample" | "none" | null;

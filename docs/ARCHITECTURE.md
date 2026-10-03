@@ -993,8 +993,8 @@ providers* (`local`, `s3`, `gdrive`, `sftp`, `webdav`, `dropbox`, `http`)
 enumerate remote audio files; each produces an `ExternalTrack` row that keeps
 file-oriented state (sha256, mime, size, write-back/rename/delete state), and
 the owning `Track` gets `audio_file_id = NULL`. *Entity-backed providers*
-(identified by `capabilities.limits["entity_import"]`, currently `jellyfin`
-and `tidal`) enumerate tracks, albums, artists, and playlists as provider items;
+(identified by `capabilities.limits["entity_import"]`, currently `jellyfin`,
+`tidal`, and `youtube`) enumerate tracks, albums, artists, and playlists as provider items;
 each imported Songhive entity gets an `ExternalItem` row in the matching `kind`
 instead. The generic `Track.source` stays `"external"` for both — provenance is
 recovered through `ExternalItem.external_library.provider_type` — and audio
@@ -1519,6 +1519,84 @@ A TIDAL external library stores the following adapter config:
 
 *Credentials are supplied by the device-auth/PKCE connect flow rather than
 entered manually.
+
+#### YouTube provider
+
+The `youtube` provider (`external/_youtube/`, `ytmusicapi` + `yt-dlp` +
+a raw YouTube Data API v3 client) imports a Google account's liked/saved
+videos, playlists, channel subscriptions and — for YouTube Music Premium
+accounts — saved albums. It is entity-backed (`entity_import`) and shares
+the TIDAL capability set: `immutable_tracks`, `lazy_contents` for playlists
+and albums, `editable_fields: ["genres", "tags"]`,
+`federate_audio: false` (federated objects carry metadata and a
+youtube.com link only), and `search`.
+
+**API surface.** Which upstream API a library uses is resolved once per
+credential set and cached in Redis for an hour: `music` (ytmusicapi's
+innertube endpoints) for Premium accounts and browser sessions, `youtube`
+(Data API v3 under the OAuth Bearer token) otherwise. `auto` mode probes
+`YTMusic.get_account_menu` for a Premium entry; `music`/`youtube` can be
+pinned per library via `api_mode`.
+
+**Authentication.** The device-authorization flow
+(`external/device_auth.py`) wraps Google's OAuth device grant for
+TV/limited-input clients — the SPA shows the user code, the user approves
+on `google.com/device`, and tokens (`access_token`/`refresh_token`/
+`expiry_time`) land in the encrypted library config, refreshed
+transparently through a Redis-cached, per-account locked refresh. It needs
+an instance-level OAuth client of the "TVs and limited input devices" type
+(`external_libraries.youtube.client_id`/`client_secret`) with the YouTube
+Data API v3 enabled. Without one — or for cookie-only sessions — users
+paste the request headers of a logged-in `music.youtube.com` browser
+session into `request_headers` (or a Netscape export into `cookies`);
+`external/_youtube/cookies.py` normalizes either shape to a Netscape cookie
+file that is handed to yt-dlp on every extraction, so member/age-restricted
+videos resolve like the user's own session. Both fields are credential
+material and are redacted from API responses by the secret-name heuristic
+(`services/secrets.py` also treats `cookie`/`header` keys as secret).
+
+**Streaming.** There are no local bytes: at play time
+`external/_youtube/ytdlp.py` extracts the video's format list and resolves
+a signed `googlevideo.com` URL, cached in Redis for
+`stream_url_ttl_seconds` (never past the URL's own expiry). The default
+rendition is best audio-only (`bestaudio[ext=m4a]/bestaudio/best`);
+`GET /api/v1/stream/{id}?variant=video` selects the `video_format`
+selector (video+audio) when `external_libraries.youtube.video_playback`
+allows it — `ExternalItemRef.variant` carries the choice through
+`services/streaming.py` to `open_stream`. Streams stay `kind="url"` with
+`safe_to_redirect=False` (googlevideo URLs are bound to the session
+cookies/IP) and the `stream_policy` limit gates them like TIDAL. The SPA
+exposes the video rendition through the reusable
+`components/player/VideoEmbedPlayer.vue` on the track page's "Watch video"
+action. Downloads (`download_format = "audio" | "video"`) run yt-dlp into
+the stream temp dir and are disabled unless
+`external_libraries.youtube.allow_downloads` is set.
+
+**Search.** `adapter.search` resolves `youtube.com`/`youtu.be` URLs (and
+bare video ids) directly — falling back to a yt-dlp extraction when the
+active API surface can't address the entity — and forwards other text to
+ytmusicapi's catalog search.
+
+A YouTube external library stores the following adapter config:
+
+| Key                          | Required | Default      | Description                                                    |
+|------------------------------|----------|--------------|----------------------------------------------------------------|
+| `access_token`/`refresh_token`/`expiry_time` | yes* | —    | OAuth credentials; populated by the Connect flow.              |
+| `client_id`/`client_secret`  | auto     | —            | OAuth client pair that issued the tokens (recorded at grant).  |
+| `request_headers`/`cookies`  | alt*     | —            | Pasted browser session (headers text or Netscape export).      |
+| `auth_mode`                  | auto     | —            | `oauth` or `browser`; inferred from stored credentials.        |
+| `account_name`/`channel_handle` | auto  | —            | Account identity captured after authorization.                 |
+| `api_mode`                   | no       | `auto`       | `auto`, `music`, or `youtube`.                                 |
+| `include_tracks`/`include_playlists`/`include_subscriptions`/`include_albums` | no | `true` | Which collections to import (albums need `music` mode). |
+| `download_format`            | no       | `audio`      | `audio` or `video`; requires `allow_downloads` in instance config. |
+| `playlist_ttl_seconds`       | no       | `21600`      | Lazy contents cache TTL; instance floor is 300s.               |
+| `video_format`               | no       | 720p default | yt-dlp selector for the video+audio rendition.                 |
+| `sync_metadata`              | no       | `false`      | Run MusicBrainz enrichment on imported tracks.                 |
+| `max_requests_per_second`    | no       | provider     | Throttle for YouTube API calls.                                |
+| `request_timeout_seconds`    | no       | provider     | HTTP timeout for API calls and token refresh (default 30s).    |
+
+*Either OAuth credentials or a pasted browser session is required; the
+device-auth flow supplies the former.
 
 #### Visibility, sharing, and secret redaction
 
@@ -2256,7 +2334,8 @@ the HTTP routes.
   `federation_object_id` so every post is a distinct remote object.
 - `Delete(Tombstone)` is sent when a track is made non-public or deleted.
 - Tracks backed by metadata-only providers (providers declaring
-  `capabilities.limits["federate_audio"] = False`, currently `tidal`)
+  `capabilities.limits["federate_audio"] = False`, currently `tidal` and
+  `youtube`)
   federate without Songhive-hosted audio: `track_to_audio_object` and
   `track_to_note_object` suppress the stream/download URL and emit a
   provider browse link instead (e.g. a `Link` to

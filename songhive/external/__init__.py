@@ -38,3 +38,12 @@ try:
     _register_tidal()
 except ImportError:
     logger.warning("tidalapi is not installed; the 'tidal' external provider is unavailable")
+
+# YouTube support needs ``ytmusicapi`` and ``yt-dlp``; both are optional so a
+# broken install disables only this provider.
+try:
+    from ._youtube import register as _register_youtube
+
+    _register_youtube()
+except ImportError:
+    logger.warning("ytmusicapi or yt-dlp is not installed; the 'youtube' external provider is unavailable")

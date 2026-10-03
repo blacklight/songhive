@@ -138,6 +138,9 @@ class TrackResponse(BaseModel):
     # Provider-declared list of locally-editable fields (e.g. TIDAL allows
     # only genres/tags); ``None`` for local or unrestricted tracks.
     editable_fields: Optional[List[str]] = None
+    # Stream renditions the provider can serve (e.g. YouTube's
+    # ``["audio", "video"]``); ``None`` for local or single-variant tracks.
+    stream_variants: Optional[List[str]] = None
     # Exposed so list consumers can interleave remote entities under the
     # ``created_at``/``updated_at`` sort fields.
     created_at: Optional[datetime] = None

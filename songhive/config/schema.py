@@ -790,6 +790,84 @@ class TidalConfig(BaseSettings):
     )
 
 
+class YouTubeConfig(BaseSettings):
+    """Instance-level defaults for the YouTube external-library provider."""
+
+    client_id: str = Field(
+        default="",
+        description=(
+            "Google OAuth client id for the device-authorization flow "
+            "(an OAuth client of the 'TVs and limited input devices' type "
+            "with the YouTube Data API enabled). Empty disables the "
+            "'Connect YouTube' button; cookie-based auth still works."
+        ),
+    )
+    client_secret: str = Field(
+        default="",
+        description="Corresponding Google OAuth client secret.",
+    )
+    stream_policy: str = Field(
+        default="owner",
+        description=(
+            "Who may stream YouTube items: 'owner' (library owner only), "
+            "'listener_account' (each listener streams through their own "
+            "YouTube library), or 'anyone' (any ACL-authorized local user "
+            "streams through the owner's credentials)."
+        ),
+    )
+    video_playback: bool = Field(
+        default=True,
+        description="Allow streaming YouTube items as video+audio instead of audio-only.",
+    )
+    video_format: str = Field(
+        default="best[height<=720][acodec!=none][vcodec!=none]/best",
+        description="yt-dlp format selector used for video+audio playback.",
+    )
+    allow_downloads: bool = Field(
+        default=False,
+        description="Whether YouTube items may be downloaded via yt-dlp. Off by default for ToS safety.",
+    )
+    download_format: str = Field(
+        default="audio",
+        description="Default download mode: 'audio' (audio-only) or 'video' (video+audio).",
+    )
+    playlist_ttl_seconds: int = Field(
+        default=21600,
+        ge=0,
+        description="Default TTL for cached playlist contents (lazy fetch refresh interval).",
+    )
+    minimum_playlist_ttl_seconds: int = Field(
+        default=300,
+        ge=0,
+        description="Lower bound a library-level playlist_ttl_seconds override may set.",
+    )
+    catalog_ttl_seconds: int = Field(
+        default=2592000,
+        ge=0,
+        description="TTL for catalog playlist/channel payloads; video payloads are immutable.",
+    )
+    max_requests_per_second: float = Field(
+        default=5.0,
+        gt=0,
+        description="Per-account client-side throttle for outbound YouTube API calls.",
+    )
+    request_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        description="HTTP timeout applied to outbound YouTube API requests, including token refresh.",
+    )
+    stream_url_ttl_seconds: int = Field(
+        default=300,
+        ge=0,
+        description="How long resolved yt-dlp stream URLs are cached in Redis.",
+    )
+    download_timeout_seconds: float = Field(
+        default=600.0,
+        gt=0,
+        description="Timeout for yt-dlp downloads and format resolution.",
+    )
+
+
 class ExternalLibrariesConfig(BaseSettings):
     """External library configuration."""
 
@@ -850,6 +928,10 @@ class ExternalLibrariesConfig(BaseSettings):
     tidal: TidalConfig = Field(
         default_factory=TidalConfig,
         description="Instance-level defaults for the TIDAL provider.",
+    )
+    youtube: YouTubeConfig = Field(
+        default_factory=YouTubeConfig,
+        description="Instance-level defaults for the YouTube provider.",
     )
 
     @field_validator("allowed_user_providers", "denied_user_providers", "local_roots", mode="before")

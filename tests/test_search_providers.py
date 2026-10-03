@@ -254,6 +254,25 @@ async def test_provider_search_isolates_timeouts(
 
 
 @pytest.mark.asyncio
+async def test_provider_search_url_query_gets_wider_timeout(
+    client, db_session, regular_user, auth_headers, _make_search_library, monkeypatch
+):
+    """URL lookups get the wider single-entity budget, not the text timeout."""
+    monkeypatch.setattr("songhive.api.routes.search._PROVIDER_SEARCH_TIMEOUT", 0.05)
+    monkeypatch.setattr("songhive.api.routes.search._PROVIDER_SEARCH_URL_TIMEOUT", 5.0)
+    await _make_search_library(regular_user, config={"search_behavior": "slow", "delay": 0.5})
+
+    response = client.get(
+        "/api/v1/search/providers",
+        params={"q": "https://provider.invalid/watch?v=x"},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    group = response.json()["providers"][0]
+    assert group["error"] is None
+
+
+@pytest.mark.asyncio
 async def test_provider_search_persists_nothing(client, db_session, regular_user, auth_headers, _make_search_library):
     await _make_search_library(regular_user, config={"results": [_result("ghost")]})
     response = client.get(

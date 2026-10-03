@@ -407,11 +407,14 @@ async def _load_external_stream_request(
     range_header: Optional[str],
     *,
     user=None,
+    variant: str = "audio",
 ) -> Optional[tuple[Track, Union[ExternalTrack, ExternalItem], dict, Any, ExternalItemRef, Optional[tuple[int, int]]]]:
     """Load the track, external reference, adapter, and optional byte range.
 
     ``user`` is the requesting local user; provider stream policies
     (``external_libraries.<provider>.stream_policy``) are enforced against it.
+    ``variant`` selects the rendition for multi-rendition providers
+    (``audio`` default; ``video`` asks for video+audio).
     """
     result = await session.execute(
         select(Track)
@@ -499,6 +502,7 @@ async def _load_external_stream_request(
         mime_type=track.audio_mime_type or provider_mime_type,
         checksum=checksum,
         sha256=sha256,
+        variant=variant,
     )
 
     capabilities = external_library.capabilities or {}
@@ -518,9 +522,10 @@ async def resolve_external_stream(
     range_header: Optional[str] = None,
     *,
     user=None,
+    variant: str = "audio",
 ) -> Optional[ExternalStream]:
     """Resolve an external byte stream for the given track, or return None."""
-    loaded = await _load_external_stream_request(session, track_id, range_header, user=user)
+    loaded = await _load_external_stream_request(session, track_id, range_header, user=user, variant=variant)
     if loaded is None:
         return None
     track, external_ref, config, adapter, item, range_tuple = loaded
@@ -530,7 +535,7 @@ async def resolve_external_stream(
         await _mark_unavailable(session, external_ref.external_library, external_ref, exc)
         raise
     # Adopt the provider-reported content type the first time we see it.
-    if stream is not None and stream.content_type and not track.audio_mime_type:
+    if stream is not None and stream.content_type and not track.audio_mime_type and variant == "audio":
         try:
             async with session.begin_nested():
                 track.audio_mime_type = stream.content_type

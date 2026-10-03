@@ -1193,6 +1193,56 @@
             }
           }
         },
+        "youtube": {
+          "help": "Conecta una cuenta de Google para importar tus vídeos guardados (con «Me gusta»), listas de reproducción, suscripciones a canales y — con YouTube Music Premium — álbumes guardados como elementos de biblioteca de primera clase. Usa el botón Connect de abajo: Songhive utiliza la autorización de dispositivo de Google, de modo que apruebas el acceso en la página de Google y las credenciales se rellenan automáticamente.\nEl flujo de dispositivo necesita un cliente OAuth de tipo «Televisores y dispositivos de entrada limitada» (consola de Google Cloud en {appConsole} con la API de datos de YouTube v3 activada) configurado en esta instancia; si no hay ninguno, pega en el campo de abajo las cabeceras de una petición de una sesión de navegador con sesión iniciada en music.youtube.com: sus cookies se guardan cifradas y se pasan a yt-dlp para que los vídeos restringidos sigan reproduciéndose.\nLos vídeos se reproducen solo como audio por defecto; «Ver vídeo» en una pista muestra el vídeo completo. Los contenidos de listas y álbumes se obtienen al abrirlos.",
+          "fields": {
+            "request_headers": {
+              "label": "Cabeceras de sesión del navegador",
+              "description": "Alternativa a Connect cuando no hay cliente OAuth configurado: copia las cabeceras de una petición autenticada de music.youtube.com (herramientas de desarrollo → Red → cualquier petición → copiar cabeceras, o solo la línea Cookie). Se guardan cifradas y sus cookies también se pasan a yt-dlp para descargas y vídeos restringidos."
+            },
+            "api_mode": {
+              "label": "API utilizada",
+              "description": "Qué API de YouTube sirve los datos de la biblioteca. «auto» detecta YouTube Music Premium y usa las internas de YouTube Music, con la API de datos de YouTube como alternativa. La autenticación por sesión de navegador siempre usa YouTube Music.",
+              "options": {
+                "auto": "Detección automática (recomendado)",
+                "music": "YouTube Music",
+                "youtube": "API de datos de YouTube"
+              }
+            },
+            "include_tracks": {
+              "label": "Importar vídeos guardados",
+              "description": "Importa los vídeos que te gustaron en YouTube como pistas de primera clase."
+            },
+            "include_playlists": {
+              "label": "Importar listas de reproducción",
+              "description": "Importa tus listas de YouTube. Los contenidos se obtienen al abrir la lista."
+            },
+            "include_subscriptions": {
+              "label": "Importar suscripciones",
+              "description": "Importa tus suscripciones a canales como artistas."
+            },
+            "include_albums": {
+              "label": "Importar álbumes guardados",
+              "description": "Importa los álbumes guardados en tu biblioteca de YouTube Music. Solo aplica a cuentas de YouTube Music."
+            },
+            "playlist_ttl_seconds": {
+              "label": "TTL de caché de listas/álbumes (segundos)",
+              "description": "Cuánto tiempo permanecen frescos los contenidos en caché antes de volverse a pedir. Mínimo 300."
+            },
+            "download_format": {
+              "label": "Formato de descarga",
+              "description": "Formato de las descargas de yt-dlp: solo audio o vídeo con audio. Las descargas deben estar activadas en la configuración de la instancia.",
+              "options": {
+                "audio": "Solo audio",
+                "video": "Vídeo + audio"
+              }
+            },
+            "sync_metadata": {
+              "label": "Enriquecer metadatos",
+              "description": "Ejecuta también el enriquecimiento de MusicBrainz sobre los vídeos importados. Desactivado por defecto — los metadatos del proveedor son la referencia."
+            }
+          }
+        },
         "local": {
           "fields": {
             "root": {
@@ -1818,6 +1868,8 @@
       "actions": "Acciones",
       "tags": "Etiquetas",
       "playAll": "Reproducir todo",
+      "watchVideo": "Ver vídeo",
+      "hideVideo": "Ocultar vídeo",
       "shufflePlay": "Reproducción aleatoria",
       "shuffleEmpty": "No hay canciones que reproducir.",
       "trackCount": "Sin pistas | {count} pista | {count} pistas",

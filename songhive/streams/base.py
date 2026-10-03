@@ -25,7 +25,7 @@ class AudioOutput(ABC):
     # By default, redact any key that looks like a secret-bearing field.  A
     # subclass may override this with a set of exact field names instead.
     _REDACTED_KEYS: ClassVar[Any] = re.compile(
-        r"(secret|password|token|key|credential)",
+        r"(secret|password|token|key|credential|cookie|header)",
         re.IGNORECASE,
     )
 

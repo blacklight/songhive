@@ -155,10 +155,12 @@ mobile](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-federate
   SFTP, WebDAV, Dropbox, cloud adapters) to Songhive libraries; index, stream,
   and write metadata back to the provider. OAuth-capable providers (Dropbox
   today) connect straight from the settings form — no manual token juggling.
-  Entity-backed providers (Jellyfin, TIDAL) import remote collections —
-  tracks, albums, artists and playlists — as first-class library entries with
-  lazily-fetched contents and provider-managed metadata. TIDAL connects via
-  device authorization (or PKCE for Hi-Res) right from the settings form.
+  Entity-backed providers (Jellyfin, TIDAL, YouTube) import remote
+  collections — tracks, albums, artists and playlists — as first-class
+  library entries with lazily-fetched contents and provider-managed
+  metadata. TIDAL and YouTube connect via device authorization (or PKCE for
+  TIDAL Hi-Res) right from the settings form; YouTube items play audio-only
+  by default with an optional embedded video player for the full video.
   See [docs/ARCHITECTURE.md#external-libraries](docs/ARCHITECTURE.md#external-libraries).
 - 🏷️ **Metadata enrichment**: automatic MusicBrainz MBID lookup, cover art from
   the Cover Art Archive, and artist image fetching; tags are written back to

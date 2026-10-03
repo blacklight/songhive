@@ -1193,6 +1193,56 @@
             }
           }
         },
+        "youtube": {
+          "help": "Connect a Google account to import your saved (liked) videos, playlists, channel subscriptions and — for YouTube Music Premium accounts — saved albums as first-class library entries. Use the Connect button below: Songhive uses Google's device authorization, so you approve access on Google's page and the credentials are filled in automatically.\nThe device flow needs an OAuth client of the \"TVs and limited input devices\" type (Google Cloud console at {appConsole} with the YouTube Data API v3 enabled) configured on this instance — when none is set up, paste the request headers of a logged-in music.youtube.com browser session into the field below instead; its cookies are stored encrypted and handed to yt-dlp so restricted videos keep playing.\nVideo tracks play as audio-only by default; \"Watch video\" on a track shows the full video. Playlist and album contents are fetched lazily when opened.",
+          "fields": {
+            "request_headers": {
+              "label": "Browser session headers",
+              "description": "Alternative to Connect when no OAuth client is configured: copy the request headers of an authenticated music.youtube.com request (browser dev tools → Network → any request → copy request headers, or just the Cookie line). Stored encrypted; the cookies are also passed to yt-dlp for downloads and restricted videos."
+            },
+            "api_mode": {
+              "label": "API surface",
+              "description": "Which YouTube API serves library data. \"auto\" detects YouTube Music Premium and uses YouTube Music internals, falling back to the YouTube Data API. Browser-session auth always uses YouTube Music.",
+              "options": {
+                "auto": "Auto-detect (recommended)",
+                "music": "YouTube Music",
+                "youtube": "YouTube Data API"
+              }
+            },
+            "include_tracks": {
+              "label": "Import saved videos",
+              "description": "Import videos you liked on YouTube as first-class tracks."
+            },
+            "include_playlists": {
+              "label": "Import playlists",
+              "description": "Import your YouTube playlists. Contents are fetched lazily when the playlist is opened."
+            },
+            "include_subscriptions": {
+              "label": "Import subscriptions",
+              "description": "Import your channel subscriptions as artists."
+            },
+            "include_albums": {
+              "label": "Import saved albums",
+              "description": "Import albums saved in your YouTube Music library. Only applies to YouTube Music accounts."
+            },
+            "playlist_ttl_seconds": {
+              "label": "Playlist/album cache TTL (seconds)",
+              "description": "How long cached playlist and album contents stay fresh before being lazily refetched. Minimum 300."
+            },
+            "download_format": {
+              "label": "Download format",
+              "description": "Format for yt-dlp downloads: audio-only or video+audio. Downloads must be enabled in the instance configuration.",
+              "options": {
+                "audio": "Audio only",
+                "video": "Video + audio"
+              }
+            },
+            "sync_metadata": {
+              "label": "Enrich metadata",
+              "description": "Also run Songhive-side MusicBrainz enrichment on imported videos. Off by default — provider metadata is authoritative."
+            }
+          }
+        },
         "local": {
           "fields": {
             "root": {
@@ -1818,6 +1868,8 @@
       "actions": "Actions",
       "tags": "Tags",
       "playAll": "Play all",
+      "watchVideo": "Watch video",
+      "hideVideo": "Hide video",
       "shufflePlay": "Shuffle play",
       "shuffleEmpty": "No playable tracks to shuffle.",
       "trackCount": "No tracks | {count} track | {count} tracks",

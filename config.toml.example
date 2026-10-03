@@ -511,6 +511,49 @@ download_format = "flac"
 remote_cache_max_bytes = 524288000
 remote_cache_retention_seconds = 604800
 
+[external_libraries.youtube]
+# Instance-level defaults for the YouTube provider. Users connect their
+# Google account via the "Connect YouTube" device-code flow or by pasting
+# the request headers of a browser session (whose cookies are saved and
+# automatically handed to yt-dlp for gated/age-restricted content).
+#
+# The device flow needs a Google OAuth client of the "TVs and limited input
+# devices" type with the YouTube Data API v3 enabled; create one at
+# https://console.cloud.google.com/apis/credentials. Both empty disables the
+# Connect button — pasted browser session headers still work.
+# client_id = ""
+# client_secret = ""
+
+# Who may stream YouTube items owned by another user's library:
+#   "owner"            - only the library owner (and admins); recommended.
+#   "listener_account" - non-owners stream through their own YouTube library.
+#   "anyone"           - any ACL-authorized local user uses the owner's session.
+stream_policy = "owner"
+
+# Playback of the full video+audio rendition (audio-only is the default).
+video_playback = true
+# yt-dlp format selector for video+audio playback.
+video_format = "best[height<=720][acodec!=none][vcodec!=none]/best"
+
+# yt-dlp downloads (audio-only or video+audio). Off by default: YouTube
+# content is for personal use under YouTube's terms of service.
+allow_downloads = false
+download_format = "audio"
+
+# Lazy playlist contents + catalog caching.
+playlist_ttl_seconds = 21600
+minimum_playlist_ttl_seconds = 300
+catalog_ttl_seconds = 2592000
+
+# Per-account client-side throttle + HTTP timeouts for YouTube API calls.
+max_requests_per_second = 5
+request_timeout_seconds = 30
+
+# How long resolved yt-dlp stream URLs stay cached in Redis, and the
+# timeout for yt-dlp format resolution/downloads.
+stream_url_ttl_seconds = 300
+download_timeout_seconds = 600
+
 [subsonic]
 # Subsonic/OpenSubsonic-compatible API adapter mounted at /rest. When
 # enabled, Subsonic clients (DSub, Tempo, Symfonium, ...) can browse and

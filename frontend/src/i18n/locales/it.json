@@ -1193,6 +1193,56 @@
             }
           }
         },
+        "youtube": {
+          "help": "Collega un account Google per importare i video salvati (i «Mi piace»), le playlist, le iscrizioni ai canali e — per gli account YouTube Music Premium — gli album salvati come elementi di libreria di primo livello. Usa il pulsante Connect qui sotto: Songhive usa l'autorizzazione su dispositivo di Google, quindi approvi l'accesso sulla pagina di Google e le credenziali vengono compilate automaticamente.\nIl flusso su dispositivo richiede un client OAuth di tipo «TV e dispositivi a input limitato» (console Google Cloud su {appConsole} con la YouTube Data API v3 abilitata) configurato su questa istanza; in sua assenza incolla nel campo sottostante le intestazioni di una richiesta di una sessione browser autenticata su music.youtube.com: i cookie vengono salvati cifrati e passati a yt-dlp perché i video con restrizioni continuino a funzionare.\nI video vengono riprodotti solo come audio per impostazione predefinita; «Guarda video» su una traccia mostra il video completo. I contenuti di playlist e album vengono scaricati all'apertura.",
+          "fields": {
+            "request_headers": {
+              "label": "Intestazioni di sessione del browser",
+              "description": "Alternativa a Connect quando nessun client OAuth è configurato: copia le intestazioni di una richiesta autenticata di music.youtube.com (strumenti per sviluppatori → Rete → qualsiasi richiesta → copia intestazioni o la riga Cookie). Salvate cifrate; i cookie vengono passati anche a yt-dlp per download e video con restrizioni."
+            },
+            "api_mode": {
+              "label": "API utilizzata",
+              "description": "Quale API di YouTube serve i dati della libreria. «auto» rileva YouTube Music Premium e usa gli internals di YouTube Music, altrimenti la YouTube Data API. L'autenticazione da sessione browser usa sempre YouTube Music.",
+              "options": {
+                "auto": "Rilevamento automatico (consigliato)",
+                "music": "YouTube Music",
+                "youtube": "YouTube Data API"
+              }
+            },
+            "include_tracks": {
+              "label": "Importa video salvati",
+              "description": "Importa i video a cui hai messo Mi piace su YouTube come tracce di primo livello."
+            },
+            "include_playlists": {
+              "label": "Importa playlist",
+              "description": "Importa le tue playlist di YouTube. I contenuti vengono scaricati all'apertura della playlist."
+            },
+            "include_subscriptions": {
+              "label": "Importa iscrizioni",
+              "description": "Importa le iscrizioni ai canali come artisti."
+            },
+            "include_albums": {
+              "label": "Importa album salvati",
+              "description": "Importa gli album salvati nella tua libreria di YouTube Music. Vale solo per gli account YouTube Music."
+            },
+            "playlist_ttl_seconds": {
+              "label": "TTL cache playlist/album (secondi)",
+              "description": "Per quanto i contenuti memorizzati restano freschi prima di essere scaricati di nuovo. Minimo 300."
+            },
+            "download_format": {
+              "label": "Formato di download",
+              "description": "Formato dei download yt-dlp: solo audio o video+audio. I download devono essere abilitati nella configurazione dell'istanza.",
+              "options": {
+                "audio": "Solo audio",
+                "video": "Video + audio"
+              }
+            },
+            "sync_metadata": {
+              "label": "Arricchisci metadati",
+              "description": "Esegue anche l'arricchimento MusicBrainz sui video importati. Disattivato di default — i metadati del provider fanno fede."
+            }
+          }
+        },
         "local": {
           "fields": {
             "root": {
@@ -1818,6 +1868,8 @@
       "actions": "Azioni",
       "tags": "Tag",
       "playAll": "Riproduci tutto",
+      "watchVideo": "Guarda video",
+      "hideVideo": "Nascondi video",
       "shufflePlay": "Riproduzione casuale",
       "shuffleEmpty": "Nessun brano riproducibile.",
       "trackCount": "Nessun brano | {count} brano | {count} brani",

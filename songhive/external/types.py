@@ -54,6 +54,9 @@ class ExternalItemRef:
     # Entity-backed providers attach the full metadata inline so the sync
     # never needs a separate ``read_metadata`` call.
     metadata: Optional[ExternalTrackMetadata] = None
+    # Requested rendition for providers serving multiple media kinds
+    # (e.g. YouTube: ``audio`` default, ``video`` for video+audio).
+    variant: str = "audio"
 
 
 @dataclass(frozen=True)

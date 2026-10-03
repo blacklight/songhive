@@ -524,6 +524,122 @@ export const providerTemplates: Record<string, ProviderTemplate> = {
       },
     ],
   },
+  youtube: {
+    providerType: "youtube",
+    helpI18nKey: "pages.externalLibraries.providers.youtube.help",
+    helpLinkUrl: "https://console.cloud.google.com/apis/credentials",
+    fields: [
+      {
+        name: "request_headers",
+        type: "textarea",
+        labelI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.request_headers.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.request_headers.description",
+      },
+      {
+        name: "api_mode",
+        type: "enum",
+        labelI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.api_mode.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.api_mode.description",
+        default: "auto",
+        options: [
+          {
+            value: "auto",
+            labelI18nKey:
+              "pages.externalLibraries.providers.youtube.fields.api_mode.options.auto",
+          },
+          {
+            value: "music",
+            labelI18nKey:
+              "pages.externalLibraries.providers.youtube.fields.api_mode.options.music",
+          },
+          {
+            value: "youtube",
+            labelI18nKey:
+              "pages.externalLibraries.providers.youtube.fields.api_mode.options.youtube",
+          },
+        ],
+      },
+      {
+        name: "include_tracks",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.include_tracks.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.include_tracks.description",
+        default: true,
+      },
+      {
+        name: "include_playlists",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.include_playlists.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.include_playlists.description",
+        default: true,
+      },
+      {
+        name: "include_subscriptions",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.include_subscriptions.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.include_subscriptions.description",
+        default: true,
+      },
+      {
+        name: "include_albums",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.include_albums.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.include_albums.description",
+        default: true,
+      },
+      {
+        name: "playlist_ttl_seconds",
+        type: "number",
+        labelI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.playlist_ttl_seconds.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.playlist_ttl_seconds.description",
+        default: 21600,
+      },
+      {
+        name: "download_format",
+        type: "enum",
+        labelI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.download_format.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.download_format.description",
+        default: "audio",
+        options: [
+          {
+            value: "audio",
+            labelI18nKey:
+              "pages.externalLibraries.providers.youtube.fields.download_format.options.audio",
+          },
+          {
+            value: "video",
+            labelI18nKey:
+              "pages.externalLibraries.providers.youtube.fields.download_format.options.video",
+          },
+        ],
+      },
+      {
+        name: "sync_metadata",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.sync_metadata.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.sync_metadata.description",
+        default: false,
+      },
+    ],
+  },
   local: {
     providerType: "local",
     fields: [

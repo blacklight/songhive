@@ -948,6 +948,10 @@ class ProviderSearchResponse(BaseModel):
 
 
 _PROVIDER_SEARCH_TIMEOUT = 3.0
+# URL lookups are single-entity resolutions the caller explicitly asked
+# for; providers may need several upstream round-trips (or a yt-dlp
+# extraction fallback) to answer them, so they get a wider budget.
+_PROVIDER_SEARCH_URL_TIMEOUT = 12.0
 
 
 @router.get("/providers", response_model=ProviderSearchResponse)
@@ -972,6 +976,8 @@ async def search_providers(
     term = (q or "").strip()
     if not term:
         return ProviderSearchResponse(query=term, providers=[])
+
+    timeout = _PROVIDER_SEARCH_URL_TIMEOUT if re.match(r"^https?://\S+$", term) else _PROVIDER_SEARCH_TIMEOUT
 
     rows = (
         (
@@ -1010,7 +1016,7 @@ async def search_providers(
             adapter = adapter_cls()
             raw = await asyncio.wait_for(
                 adapter.search(config, term, limit=limit),
-                timeout=_PROVIDER_SEARCH_TIMEOUT,
+                timeout=timeout,
             )
             for item in raw or []:
                 if not isinstance(item, dict) or not item.get("provider_key"):

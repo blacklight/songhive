@@ -28,7 +28,7 @@ class ExternalLibraryAdapter(ABC):
     provider_type: ClassVar[str] = ""
     user_configurable: ClassVar[bool] = False
 
-    _REDACTED_KEYS = re.compile(r"(secret|password|token|key|credential)", re.IGNORECASE)
+    _REDACTED_KEYS = re.compile(r"(secret|password|token|key|credential|cookie|header)", re.IGNORECASE)
 
     def __init__(self) -> None:
         self._capabilities: Optional[ExternalLibraryCapabilities] = None

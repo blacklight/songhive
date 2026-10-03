@@ -13,7 +13,7 @@ from typing import Any
 
 _fernet: Any = None
 
-_SECRET_NAME_TOKENS = frozenset(["secret", "password", "token", "key", "credential"])
+_SECRET_NAME_TOKENS = frozenset(["secret", "password", "token", "key", "credential", "cookie", "header"])
 
 
 def _import_fernet() -> Any:

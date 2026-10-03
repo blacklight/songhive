@@ -1375,6 +1375,8 @@ def _catalog_ttl_seconds(provider_type: str, config: dict) -> Optional[int]:
         return None
     if provider_type == "tidal":
         return songhive_config.external_libraries.tidal.catalog_ttl_seconds
+    if provider_type == "youtube":
+        return songhive_config.external_libraries.youtube.catalog_ttl_seconds
     return None
 
 

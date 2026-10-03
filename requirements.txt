@@ -41,6 +41,8 @@ musicbrainzngs>=0.7.1
 
 # External library providers
 tidalapi==0.8.10
+ytmusicapi>=1.10.0
+yt-dlp>=2025.6.9
 
 # Federation
 pubby>=0.3.11

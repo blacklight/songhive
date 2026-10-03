@@ -689,6 +689,11 @@ class StreamHandler(tornado.web.RequestHandler):
         config = self._config
         storage_backend = get_storage(config.storage)
         range_header = self.request.headers.get("Range")
+        # Multi-rendition providers (YouTube): ?variant=video serves
+        # video+audio; anything else stays on the audio-only default.
+        variant = self.get_query_argument("variant", "audio")
+        if variant not in ("audio", "video"):
+            variant = "audio"
 
         async with get_session() as session:
             user = await self._authenticate(session)
@@ -720,7 +725,9 @@ class StreamHandler(tornado.web.RequestHandler):
             external_stream: Optional[ExternalStream] = None
             if stored_file is None:
                 try:
-                    external_stream = await resolve_external_stream(session, track_id, range_header, user=user)
+                    external_stream = await resolve_external_stream(
+                        session, track_id, range_header, user=user, variant=variant
+                    )
                 except ExternalItemNotFound as exc:
                     self._not_found(str(exc))
                     return

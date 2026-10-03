@@ -7,11 +7,17 @@ import { buildUrl } from "./config";
 // attachments) that has no local track to stream through the endpoint.
 export function streamUrl(
   track: { id: string; stream_url?: string | null },
-  opts?: { format?: "mp3" | "ogg" | "flac" | "aac" | "opus"; bitrate?: number },
+  opts?: {
+    format?: "mp3" | "ogg" | "flac" | "aac" | "opus";
+    bitrate?: number;
+    // Multi-rendition providers (e.g. YouTube) serve video+audio on demand.
+    variant?: "audio" | "video";
+  },
 ): string {
   if (track.stream_url) return track.stream_url;
   const query: Record<string, string | number | undefined | null> = {};
   if (opts?.format) query.format = opts.format;
   if (opts?.bitrate !== undefined) query.bitrate = opts.bitrate;
+  if (opts?.variant) query.variant = opts.variant;
   return buildUrl(`/api/v1/stream/${track.id}`, query);
 }

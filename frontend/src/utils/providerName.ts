@@ -7,6 +7,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   jellyfin: "Jellyfin",
   gdrive: "Google Drive",
   local: "Local files",
+  youtube: "YouTube",
 };
 
 export function providerDisplayName(
