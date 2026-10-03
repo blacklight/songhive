@@ -2,6 +2,45 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `streams`: Stream status and now-playing updates are now pushed to
+  clients over WebSocket — public mounts broadcast on the streams
+  topic and private mounts go to their owner only — and the streams
+  page refreshes live, with a 30 s polling fallback.
+  ([`6baf4dd`](https://git.platypush.tech/blacklight/songhive/commit/6baf4dd4717fb87c19c22300cdd186f924429eb9)).
+- `streams`: User profile pages gained a Streams tab listing that
+  user's visible mounts, backed by a new `owner_username` filter on
+  the stream directory endpoint; the stream card is now a shared
+  component reused by the directory and profile views.
+  ([`1fdda97`](https://git.platypush.tech/blacklight/songhive/commit/1fdda9775d20ffaa5695d8c55e73dd4414787246)).
+- `player`: The play queue can now be saved as a playlist — a modal
+  prompts for a name and visibility and persists the queued items in
+  order, the save action hides when there is nothing saveable, and
+  the queue panel gained a maximize toggle.
+  ([`a550cd0`](https://git.platypush.tech/blacklight/songhive/commit/a550cd0ca727fccd22a87ef711828b548abdf3f2)).
+
+### Fixed
+
+- `streams`: Fixed intermittent playback stops at track changes on
+  local HTTP streams — failed source advances now retry idempotently
+  (pausing into silence on exhaustion), mount liveness and listener
+  presence are refreshed on timers so they no longer expire mid-flow,
+  encoder restarts no longer splice a new container into open
+  responses, and the web player auto-reconnects ended or errored live
+  audio with bounded backoff.
+  ([`207c871`](https://git.platypush.tech/blacklight/songhive/commit/207c87167dd9aadb8715ac9b363d977e195ed1d2)).
+- `queue`: Queue edits no longer interrupt playback on remote or
+  shared outputs — removing a track or choosing "play next" used to
+  restart the output on a stale index and resume paused sessions, and
+  clearing the queue no longer leaves the stored queue behind. Rapid
+  back-to-back edits compose on the in-flight queue, duplicate track
+  rows no longer mis-target removals, and Enter on a row's remove
+  button no longer also triggers the row's play action.
+  ([`ca370a7`](https://git.platypush.tech/blacklight/songhive/commit/ca370a785d4f9db58900be03f585efa24112c8ba)).
+
 ## 0.4.3
 
 ### Fixed
