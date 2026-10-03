@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 from pathlib import Path
+from typing import Optional
 
 import pytest
 
@@ -15,6 +16,7 @@ from songhive.streams.http import (
     stream_meta_key,
 )
 from songhive.streams.types import AudioSource, TrackMeta
+from songhive.ws.events import WS_EVENTS_CHANNEL
 
 
 def _valid_config() -> dict:
@@ -288,3 +290,118 @@ async def test_http_driver_publishes_now_playing(fake_redis):
     entries = await fake_redis.xrange(stream_data_key("radio"))
     meta_entries = [json.loads(fields["m"]) for _id, fields in entries if fields.get("m")]
     assert [m["song"] for m in meta_entries] == ["Artist - Song", "Artist - Next"]
+
+
+async def _read_ws_envelope(pubsub, attempts: int = 50) -> Optional[dict]:
+    """Read the next envelope off the WS pub/sub channel, or None."""
+    for _ in range(attempts):
+        message = await pubsub.get_message(ignore_subscribe_messages=True)
+        if message:
+            return json.loads(message["data"])
+        await asyncio.sleep(0.01)
+    return None
+
+
+@pytest.mark.asyncio
+async def test_http_driver_broadcasts_stream_update(fake_redis):
+    """update_metadata fans out a ``stream_update`` event on the WS channel."""
+    provider = HttpStreamOutput()
+    config = _valid_config()
+    await provider.validate_config(config)
+    config["_redis"] = fake_redis
+    driver = HttpStreamDriver(config)
+
+    pubsub = fake_redis.pubsub()
+    await pubsub.subscribe(WS_EVENTS_CHANNEL)
+    try:
+        await driver.update_metadata(TrackMeta(track_id="t1", title="Song", artist="Artist", album="LP"))
+
+        envelope = await _read_ws_envelope(pubsub)
+        assert envelope is not None
+        assert envelope["kind"] == "broadcast"
+        assert envelope["type"] == "stream_update"
+        assert envelope["topic"] == "streams"
+        data = envelope["data"]
+        assert data["mount"] == "radio"
+        assert data["online"] is True
+        assert data["now_playing"] == {
+            "track_id": "t1",
+            "title": "Song",
+            "artist": "Artist",
+            "album": "LP",
+        }
+
+        # An unchanged song is deduplicated and emits no second event.
+        await driver.update_metadata(TrackMeta(track_id="t1", title="Song", artist="Artist", album="LP"))
+        assert await _read_ws_envelope(pubsub) is None
+    finally:
+        await pubsub.aclose()
+
+
+@pytest.mark.asyncio
+async def test_http_driver_stop_broadcasts_offline(fake_redis):
+    """stop() tells the directory page the mount went offline."""
+    provider = HttpStreamOutput()
+    config = _valid_config()
+    await provider.validate_config(config)
+    config["_redis"] = fake_redis
+    driver = HttpStreamDriver(config)
+
+    pubsub = fake_redis.pubsub()
+    await pubsub.subscribe(WS_EVENTS_CHANNEL)
+    try:
+        await driver.stop()
+
+        envelope = await _read_ws_envelope(pubsub)
+        assert envelope is not None
+        assert envelope["type"] == "stream_update"
+        assert envelope["data"]["mount"] == "radio"
+        assert envelope["data"]["online"] is False
+        assert envelope["data"]["now_playing"] is None
+    finally:
+        await pubsub.aclose()
+
+
+@pytest.mark.asyncio
+async def test_http_driver_private_mount_targets_owner(fake_redis):
+    """listen_token mounts deliver ``stream_update`` only to the owner."""
+    provider = HttpStreamOutput()
+    config = _valid_config()
+    config["listen_token"] = "s3cret"
+    await provider.validate_config(config)
+    config["_redis"] = fake_redis
+    config["_owner_user_id"] = "owner-1"
+    driver = HttpStreamDriver(config)
+
+    pubsub = fake_redis.pubsub()
+    await pubsub.subscribe(WS_EVENTS_CHANNEL)
+    try:
+        await driver.update_metadata(TrackMeta(track_id="t1", title="Song", artist="Artist"))
+
+        envelope = await _read_ws_envelope(pubsub)
+        assert envelope is not None
+        assert envelope["kind"] == "user"
+        assert envelope["user_id"] == "owner-1"
+        assert envelope["type"] == "stream_update"
+        assert envelope["data"]["mount"] == "radio"
+    finally:
+        await pubsub.aclose()
+
+
+@pytest.mark.asyncio
+async def test_http_driver_private_mount_without_owner_stays_silent(fake_redis):
+    """A private mount with no known owner must not leak into broadcasts."""
+    provider = HttpStreamOutput()
+    config = _valid_config()
+    config["listen_token"] = "s3cret"
+    await provider.validate_config(config)
+    config["_redis"] = fake_redis
+    driver = HttpStreamDriver(config)
+
+    pubsub = fake_redis.pubsub()
+    await pubsub.subscribe(WS_EVENTS_CHANNEL)
+    try:
+        await driver.update_metadata(TrackMeta(track_id="t1", title="Song", artist="Artist"))
+        assert await _read_ws_envelope(pubsub) is None
+    finally:
+        await pubsub.aclose()

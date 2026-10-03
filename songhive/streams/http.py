@@ -21,6 +21,12 @@ Redis keys per mount:
 - ``songhive:stream:listener:{mount}:{id}`` — per-listener TTL keys written
   by the web process so the driver can report ``listener_count`` for idle
   shutdown.
+
+Track changes, starts and stops also emit a ``stream_update`` event on the
+WebSocket fan-out channel (``songhive:ws-events``, see ``ws.events``) so the
+``/streams`` directory page updates live. Public mounts broadcast on the
+``streams`` topic; ``listen_token`` mounts are private and the event is
+delivered only to the owner's connections.
 """
 
 import asyncio
@@ -237,6 +243,54 @@ class HttpStreamDriver(IcecastDriver):
         except Exception:
             logger.warning("Failed to refresh stream meta for mount %s", self._mount)
 
+    def _now_playing_payload(self) -> Optional[dict]:
+        """Return the REST-shaped now-playing block for the current metadata."""
+        track = self._current_metadata
+        if not track.song:
+            return None
+        return {
+            "track_id": track.track_id or None,
+            "title": track.title or None,
+            "artist": track.artist or None,
+            "album": track.album or None,
+        }
+
+    async def _publish_ws_update(self, *, online: bool) -> None:
+        """Fan out a ``stream_update`` event so the streams page stays live.
+
+        The stream worker process holds no WebSocket connections, so the
+        event goes through ``EventWebSocket``'s Redis pub/sub fan-out — the
+        same channel Celery tasks publish on — and the Tornado process
+        delivers it to connected clients. Public mounts broadcast on the
+        ``streams`` topic; ``listen_token`` mounts are private, so their
+        events only reach the owner's connections (the worker injects the
+        owner's id into the driver config as ``_owner_user_id``).
+        """
+        data = {
+            "mount": self._mount,
+            "online": online,
+            "now_playing": self._now_playing_payload() if online else None,
+        }
+        try:
+            from ..ws.events import EventWebSocket
+
+            if self.config.get("listen_token"):
+                owner_id = str(self.config.get("_owner_user_id") or "")
+                if not owner_id:
+                    # A private mount with no known owner must not leak its
+                    # metadata into the public broadcast.
+                    return
+                await asyncio.to_thread(EventWebSocket.send_to_user, owner_id, "stream_update", data)
+            else:
+                await asyncio.to_thread(
+                    EventWebSocket.broadcast,
+                    "stream_update",
+                    data,
+                    topic="streams",
+                )
+        except Exception:
+            logger.warning("Failed to publish stream_update event for mount %s", self._mount)
+
     async def _run_publish(self, proc: asyncio.subprocess.Process) -> None:
         """Copy encoder stdout chunks into the mount's Redis stream."""
         stdout = proc.stdout
@@ -272,6 +326,7 @@ class HttpStreamDriver(IcecastDriver):
             raise RuntimeError("HttpStreamDriver requires a '_redis' client in the driver config")
         await super().start()
         await self._publish_meta()
+        await self._publish_ws_update(online=True)
 
     async def stop(self) -> None:
         """Signal listeners to disconnect and stop the pipeline."""
@@ -282,6 +337,7 @@ class HttpStreamDriver(IcecastDriver):
                 await self._redis.delete(stream_meta_key(self._mount))
             except Exception:
                 logger.warning("Failed to publish stream end for mount %s", self._mount)
+            await self._publish_ws_update(online=False)
         if self._publish_task is not None:
             self._publish_task.cancel()
             try:
@@ -327,6 +383,7 @@ class HttpStreamDriver(IcecastDriver):
                 logger.warning("Failed to publish metadata entry for mount %s", self._mount)
                 return
             await self._publish_meta()
+            await self._publish_ws_update(online=True)
         self._pushed_song = song
 
     async def listener_count(self) -> int:

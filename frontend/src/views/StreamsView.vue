@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink } from "vue-router";
-import { listStreams, type StreamResponse } from "@/api/streams";
+import {
+  listStreams,
+  type StreamResponse,
+  type StreamUpdateEvent,
+} from "@/api/streams";
+import { eventBus, type WsEvent } from "@/api/ws";
+import { useAuthStore } from "@/stores/auth";
 import type { ActivityAttachment } from "@/api/activities";
 import { getApiErrorMessage } from "@/api/client";
 import ActivityAudioPlayer from "@/components/activities/ActivityAudioPlayer.vue";
@@ -13,10 +19,21 @@ import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 
 const { t } = useI18n();
+const auth = useAuthStore();
 
 const streams = ref<StreamResponse[]>([]);
 const loading = ref(false);
 const error = ref<string | null>(null);
+
+// The ``stream_update`` WebSocket event delivers track/online changes
+// instantly, but only for authenticated users — the WS endpoint requires a
+// session. The poll is both the anonymous users' update path and the
+// reconciliation net for whatever events cannot cover (a driver crash
+// expires the mount's meta key without an event; listener counts and
+// directory membership only change on a reload anyway).
+const WS_EVENT = "stream_update";
+const POLL_INTERVAL_MS = 30_000;
+let pollTimer: ReturnType<typeof setInterval> | null = null;
 
 async function load() {
   if (loading.value) return;
@@ -79,7 +96,44 @@ function attachmentFor(stream: StreamResponse): ActivityAttachment {
 
 const hasStreams = computed(() => streams.value.length > 0);
 
-onMounted(load);
+function onStreamUpdate(event: WsEvent) {
+  const data = event.data as StreamUpdateEvent | undefined;
+  if (!data || typeof data.mount !== "string") return;
+  const stream = streams.value.find((s) => s.mount === data.mount);
+  if (!stream) return;
+  if (typeof data.online === "boolean") stream.online = data.online;
+  if (data.now_playing !== undefined) {
+    stream.now_playing = data.now_playing ?? null;
+  }
+}
+
+// Silent re-fetch for the poll: transient failures keep the last good
+// listing instead of flashing the error banner over live data.
+async function refresh() {
+  try {
+    streams.value = await listStreams();
+    error.value = null;
+  } catch {
+    // The next poll tick retries.
+  }
+}
+
+onMounted(() => {
+  void load();
+  pollTimer = setInterval(() => void refresh(), POLL_INTERVAL_MS);
+  if (auth.isAuthenticated) {
+    eventBus.on(WS_EVENT, onStreamUpdate);
+    eventBus.connect();
+  }
+});
+
+onUnmounted(() => {
+  if (pollTimer !== null) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+  eventBus.off(WS_EVENT, onStreamUpdate);
+});
 </script>
 
 <template>

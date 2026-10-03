@@ -40,6 +40,16 @@ export interface StreamResponse {
   created_at: string;
 }
 
+/**
+ * Payload of the ``stream_update`` WebSocket event the stream worker
+ * publishes when a mount's online state or now-playing metadata changes.
+ */
+export interface StreamUpdateEvent {
+  mount: string;
+  online: boolean;
+  now_playing?: StreamNowPlaying | null;
+}
+
 export function listStreams(): Promise<StreamResponse[]> {
   return apiRequest<StreamResponse[]>("/streams/");
 }

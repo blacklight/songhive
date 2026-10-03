@@ -247,10 +247,13 @@ class SessionDriver:
 
             # Native HTTP mounts are served from the web process; the driver
             # publishes encoded audio to a Redis stream, so it needs the
-            # worker's Redis client and the configured backlog size.
+            # worker's Redis client and the configured backlog size. The
+            # owner id lets the driver target ``stream_update`` WebSocket
+            # events at the owner of listen-token (private) mounts.
             if output_stream.provider_type == "http":
                 config["_redis"] = self.worker.redis
                 config["_stream_max_entries"] = self.worker.config.streams.http_stream_max_entries
+                config["_owner_user_id"] = output_stream.user_id
 
             self.driver = provider.create_driver(config)
             await self.driver.start()

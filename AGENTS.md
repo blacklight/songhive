@@ -762,6 +762,14 @@ async def update_library(
   muxer can't update ICY in flight) and republishes after an encoder
   reconnect. `snapcast` stays a no-op: snapserver's control API has no
   metadata setter — only a `controlscript` stream plugin can supply it.
+  Track changes plus driver start/stop also emit a `stream_update`
+  WebSocket event (`{mount, online, now_playing}`) so the `/streams` page
+  updates live: tokenless mounts broadcast on the `streams` topic, while
+  `listen_token` mounts `send_to_user` the owner (the worker injects
+  `OutputStream.user_id` as `config["_owner_user_id"]`) — never broadcast a
+  private mount's metadata. The page still polls every 30 s: the WS
+  endpoint needs auth (anonymous visitors have no socket), and a crashed
+  driver only expires its meta key without emitting an event.
 - The `snapcast` provider (`songhive/streams/snapcast.py`) casts to a
   snapserver via an ffmpeg *passthrough* encoder that copies raw s16le PCM to
   a `pipe://` source FIFO (`mode=fifo`, auto-created with `mkfifo`; existing

@@ -1931,7 +1931,17 @@ the controlling tab closes.
   mirrored into the meta blob; listeners that send `Icy-MetaData: 1` get an
   `icy-metaint` header and `StreamTitle` blocks interleaved into the audio
   every `streams.http_stream_metaint_bytes` bytes, so track changes update
-  the title in audio order. Mount slugs must be unique across `http`
+  the title in audio order. Track changes, driver starts and stops also emit
+  a `stream_update` event (`{mount, online, now_playing}`) on the WebSocket
+  fan-out channel so the `/streams` directory page updates live — public
+  mounts broadcast on the `streams` topic, while `listen_token` mounts are
+  private and the event is delivered only to the owner's connections (the
+  worker injects `OutputStream.user_id` into the driver config as
+  `_owner_user_id`). The page additionally polls `GET /api/v1/streams/`
+  every 30 s, both as the update path for anonymous visitors (the WS
+  endpoint requires authentication) and to reconcile states no event can
+  carry — a crashed driver only expires its meta key, and listener counts
+  change constantly. Mount slugs must be unique across `http`
   outputs; an optional `listen_token` field gates listeners via
   `?token=`/`Bearer`. No external server or extra port is needed.
 - **Snapcast provider** (`streams/snapcast.py`) — same driver machinery, but

@@ -11,6 +11,38 @@ vi.mock("@/api/streams", () => ({
   listStreams: vi.fn(),
 }));
 
+type BusHandler = (event: { type: string; data: unknown }) => void;
+
+const { busHandlers, eventBus } = vi.hoisted(() => {
+  const handlers = new Map<string, Set<BusHandler>>();
+  return {
+    busHandlers: handlers,
+    eventBus: {
+      on(type: string, handler: BusHandler) {
+        if (!handlers.has(type)) handlers.set(type, new Set());
+        handlers.get(type)!.add(handler);
+      },
+      off(type: string, handler: BusHandler) {
+        handlers.get(type)?.delete(handler);
+      },
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      subscribe: vi.fn(),
+      unsubscribe: vi.fn(),
+      playbackControl: vi.fn(),
+      status: { value: "closed" },
+    },
+  };
+});
+
+vi.mock("@/api/ws", () => ({ eventBus }));
+
+function emitStreamUpdate(data: unknown) {
+  busHandlers
+    .get("stream_update")
+    ?.forEach((h) => h({ type: "stream_update", data }));
+}
+
 function createTestRouter() {
   return createRouter({
     history: createMemoryHistory(),
@@ -58,9 +90,12 @@ describe("StreamsView", () => {
     setActivePinia(createPinia());
     vi.resetAllMocks();
     vi.mocked(streamsApi.listStreams).mockResolvedValue([]);
+    busHandlers.clear();
+    localStorage.clear();
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     wrapper?.unmount();
     document.body.innerHTML = "";
   });
@@ -200,5 +235,77 @@ describe("StreamsView", () => {
 
     expect(wrapper.text()).toContain("Test Radio");
     expect(wrapper.text()).not.toContain("network failure");
+  });
+
+  it("applies stream_update events live without refetching", async () => {
+    localStorage.setItem(
+      "songhive.auth.user",
+      JSON.stringify({ id: "u1", username: "bob" }),
+    );
+    vi.mocked(streamsApi.listStreams).mockResolvedValue([
+      createStream({
+        now_playing: { track_id: "t1", title: "Song", artist: "Artist" },
+      }),
+    ]);
+
+    await mountView();
+
+    expect(eventBus.connect).toHaveBeenCalled();
+    expect(busHandlers.get("stream_update")?.size).toBe(1);
+    expect(wrapper.text()).toContain("Artist - Song");
+
+    // A track change lands as a WS event and patches the card in place.
+    emitStreamUpdate({
+      mount: "radio",
+      online: true,
+      now_playing: { track_id: "t2", title: "Next", artist: "Artist" },
+    });
+    await flushPromises();
+
+    const link = wrapper.find(".streams-view__now-playing-link");
+    expect(link.exists()).toBe(true);
+    expect(link.text()).toBe("Artist - Next");
+    expect(link.attributes("href")).toBe("/tracks/t2");
+    expect(streamsApi.listStreams).toHaveBeenCalledTimes(1);
+
+    // Going offline clears the now-playing row and flips the badge.
+    emitStreamUpdate({ mount: "radio", online: false, now_playing: null });
+    await flushPromises();
+
+    expect(wrapper.find(".streams-view__now-playing").exists()).toBe(false);
+    expect(wrapper.text()).toContain(i18n.global.t("pages.streams.offline"));
+
+    // Events for mounts not in the listing are ignored.
+    emitStreamUpdate({
+      mount: "other",
+      online: true,
+      now_playing: { title: "Elsewhere" },
+    });
+    await flushPromises();
+    expect(streamsApi.listStreams).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not open a WebSocket for anonymous visitors", async () => {
+    await mountView();
+
+    expect(eventBus.connect).not.toHaveBeenCalled();
+    expect(busHandlers.size).toBe(0);
+  });
+
+  it("polls the directory periodically to reconcile state", async () => {
+    vi.useFakeTimers();
+    vi.mocked(streamsApi.listStreams).mockResolvedValue([createStream()]);
+
+    await mountView();
+    expect(streamsApi.listStreams).toHaveBeenCalledTimes(1);
+
+    vi.mocked(streamsApi.listStreams).mockResolvedValue([
+      createStream({ online: false }),
+    ]);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await flushPromises();
+
+    expect(streamsApi.listStreams).toHaveBeenCalledTimes(2);
+    expect(wrapper.text()).toContain(i18n.global.t("pages.streams.offline"));
   });
 });
