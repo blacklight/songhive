@@ -35,7 +35,13 @@ from ..errors import (
 from .conf import api_mode as configured_api_mode
 from .conf import max_rps, request_timeout_seconds
 from .mapping import account_menu_is_premium
-from .session import _config_fingerprint, auth_mode, valid_access_token, ytmusic_for_config
+from .session import (
+    _config_fingerprint,
+    anonymous_ytmusic,
+    auth_mode,
+    valid_access_token,
+    ytmusic_for_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +199,7 @@ class YouTubeClient:
         self._fingerprint = _config_fingerprint(config)
         self._throttle = _TokenBucketThrottle(redis, self._fingerprint, max_rps(config)) if redis is not None else None
         self._ytmusic: Optional[Any] = None
+        self._ytmusic_anon: Optional[Any] = None
         self._data: Optional[_DataApiClient] = None
         self._mode: Optional[str] = None
 
@@ -202,6 +209,22 @@ class YouTubeClient:
         if self._ytmusic is None:
             self._ytmusic = await ytmusic_for_config(self.config, self.redis)
         return self._ytmusic
+
+    async def _search_client(self) -> Any:
+        """
+        Client for public catalog search.
+
+        Google's innertube rejects OAuth Bearer tokens on WEB_REMIX with
+        HTTP 400 "Request contains an invalid argument" (ytmusicapi
+        #676/#813/#814, since 2025-08-29), so OAuth sessions must search
+        anonymously — the catalog is public anyway. Browser sessions still
+        authenticate fine and keep their personalized results.
+        """
+        if auth_mode(self.config) == "browser":
+            return await self._ytmusic_client()
+        if self._ytmusic_anon is None:
+            self._ytmusic_anon = await anonymous_ytmusic(self.config)
+        return self._ytmusic_anon
 
     async def api_mode(self) -> str:
         """Resolve ``music`` or ``youtube`` for this credential set."""
@@ -436,7 +459,7 @@ class YouTubeClient:
         ``_kind`` hint (track/album/artist/playlist) so the adapter can
         route them to the right mapper.
         """
-        ytm = await self._ytmusic_client()
+        ytm = await self._search_client()
         try:
             results = await asyncio.to_thread(ytm.search, query, limit=limit)
         except Exception as exc:

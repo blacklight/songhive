@@ -727,6 +727,63 @@ async def _fake_search(query, limit=20):
 
 
 @pytest.mark.asyncio
+async def test_search_text_uses_anonymous_client_for_oauth(monkeypatch):
+    """OAuth sessions must not authenticate innertube search calls."""
+    from songhive.external._youtube.api import YouTubeClient
+
+    authed_calls: list = []
+
+    class _FakeYTM:
+        def search(self, query, limit=20):
+            return [
+                {
+                    "videoId": "s9",
+                    "resultType": "song",
+                    "title": "Hit",
+                    "artists": [{"name": "Singer"}],
+                }
+            ]
+
+    async def _fake_anon(config):
+        return _FakeYTM()
+
+    async def _no_authed(config, redis=None):
+        authed_calls.append(config)
+        raise AssertionError("oauth search must not build an authenticated client")
+
+    monkeypatch.setattr("songhive.external._youtube.api.anonymous_ytmusic", _fake_anon)
+    monkeypatch.setattr("songhive.external._youtube.api.ytmusic_for_config", _no_authed)
+
+    client = YouTubeClient(_oauth_config())
+    results = await client.search("hit me")
+    assert [r["videoId"] for r in results] == ["s9"]
+    assert results[0]["_kind"] == "track"
+    assert authed_calls == []
+
+
+@pytest.mark.asyncio
+async def test_search_text_uses_authed_client_for_browser(monkeypatch):
+    """Browser-cookie sessions still authenticate innertube calls fine."""
+    from songhive.external._youtube.api import YouTubeClient
+
+    class _FakeYTM:
+        def search(self, query, limit=20):
+            return []
+
+    async def _fake_authed(config, redis=None):
+        return _FakeYTM()
+
+    async def _no_anon(config):
+        raise AssertionError("browser search should reuse the authenticated client")
+
+    monkeypatch.setattr("songhive.external._youtube.api.ytmusic_for_config", _fake_authed)
+    monkeypatch.setattr("songhive.external._youtube.api.anonymous_ytmusic", _no_anon)
+
+    client = YouTubeClient(_browser_config())
+    assert await client.search("hit me") == []
+
+
+@pytest.mark.asyncio
 async def test_search_foreign_url_returns_empty(monkeypatch):
     """A non-YouTube URL is a lookup, not a text query — no catalog search."""
     adapter = YouTubeExternalAdapter()

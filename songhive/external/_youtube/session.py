@@ -258,6 +258,20 @@ async def ytmusic_for_config(config: dict, redis: Optional[Redis] = None) -> Any
     )
 
 
+async def anonymous_ytmusic(config: dict) -> Any:
+    """
+    Build an *unauthenticated* ``YTMusic`` client.
+
+    Public catalog endpoints (search) need no credentials — and since
+    2025-08-29 Google's innertube rejects OAuth Bearer tokens on WEB_REMIX
+    with HTTP 400 "Request contains an invalid argument" (ytmusicapi
+    #676/#813/#814), so OAuth sessions must not authenticate these calls.
+    """
+    YTMusic, _ = _import_ytmusicapi()
+    session = _timeout_session(request_timeout_seconds(config))
+    return await asyncio.to_thread(YTMusic, requests_session=session)
+
+
 def credential_fragment_from_token(
     token: dict,
     *,
