@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `payments`: Stripe Connect account creation no longer fails on
+  unapproved platforms — the controller combination shipped in 0.4.6
+  (`express` dashboard with `losses_collector=stripe`) is gated behind
+  Stripe's Express + Stripe-managed-liability preview, and
+  `losses_collector=application` requires platform-managed-risk
+  approval. The new `payments.stripe_dashboard` setting
+  (`express`|`full`, default `full`) pins a responsibilities
+  combination Stripe accepts for each dashboard: `full` uses
+  `stripe`/`stripe` (the self-serve path), while `express` uses
+  `application` fees plus the configurable losses collector for
+  approved platforms.
+  ([`9791c0f`](https://git.platypush.tech/blacklight/songhive/commit/9791c0ff2791fad2a94a4c27109a1ed7cde5582c)).
+
 ## 0.4.6
 
 ### Added
