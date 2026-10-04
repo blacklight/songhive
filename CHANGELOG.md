@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `youtube`: Free-text search works again for OAuth-connected YouTube
+  libraries — catalog queries no longer authenticate innertube calls
+  with the OAuth Bearer token, which YouTube rejects with HTTP 400
+  "Request contains an invalid argument" (direct URL lookups were
+  unaffected); browser sessions keep authenticated search.
+  ([`2c7b4dc`](https://git.platypush.tech/blacklight/songhive/commit/2c7b4dc6c621111147c890c78eb3b54f6024ce9b)).
+
 ## 0.4.7
 
 ### Fixed
