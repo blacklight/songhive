@@ -38,6 +38,7 @@ import re
 import time
 from typing import Any, ClassVar, Optional
 
+from .base import RECORD_LISTENS_FIELD
 from .driver import OutputDriver
 from .icecast import _FORMAT_SPECS, IcecastDriver, IcecastOutput
 from .registry import register_output
@@ -116,6 +117,7 @@ class HttpStreamOutput(IcecastOutput):
             "label": "Listen token",
             "help": "Optional token listeners must supply as ?token= to connect",
         },
+        RECORD_LISTENS_FIELD,
     ]
 
     _REDACTED_KEYS: ClassVar[set[str]] = {"listen_token"}

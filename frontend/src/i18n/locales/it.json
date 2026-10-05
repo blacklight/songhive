@@ -2505,6 +2505,8 @@
     "name": "Nome",
     "provider": "Provider",
     "enabled": "Attiva",
+    "recordListens": "Scrobbling e statistiche",
+    "recordListensHint": "Registra le riproduzioni di questo stream nella cronologia di ascolto e nelle statistiche, e le invia come scrobble. Disattivalo per gli stream sempre attivi.",
     "status": "Stato",
     "streamUrl": "URL dello stream",
     "ok": "OK",

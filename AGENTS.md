@@ -782,6 +782,17 @@ async def update_library(
   private mount's metadata. The page still polls every 30 s: the WS
   endpoint needs auth (anonymous visitors have no socket), and a crashed
   driver only expires its meta key without emitting an event.
+- Per-output listen recording: the `record_listens` boolean config key
+  (shared `RECORD_LISTENS_FIELD` spec in `streams/base.py`, advertised by the
+  `http`/`icecast`/`snapcast` providers) gates `record_server_listen` in
+  `SessionDriver._on_source_ended` via `listen_recording_enabled(config)` —
+  off means no `listening_history` row, no `play_count` bump and no scrobble
+  for plays through that output (intended for 24/7 streams). It defaults on,
+  lives in the encrypted output config (not secret, so it round-trips the
+  redacted-config API unchanged), and `update_output`'s `reload_output`
+  notification makes toggles reach a running driver. The OutputsView form
+  renders it as a dedicated i18n'd checkbox (`outputs.recordListens`) for
+  providers that declare the field, filtered out of the generic field loop.
 - Track-boundary resilience: `SessionDriver._on_source_ended` retries a
   failed advance a few times (`_ADVANCE_RETRY_DELAY_S`/`_ADVANCE_MAX_RETRIES`)
   and is idempotent — if the index update already committed it resyncs the

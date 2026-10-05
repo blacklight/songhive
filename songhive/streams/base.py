@@ -9,6 +9,37 @@ from typing import Any, ClassVar, Optional
 from .driver import OutputDriver
 from .types import OutputCapabilities
 
+# Shared provider-field spec for the per-output listen recording toggle.
+# Providers that funnel plays through ``record_server_listen`` (HTTP mounts,
+# Icecast, Snapcast) advertise it in their ``FIELDS`` so the output form
+# renders the option; the stream worker reads it back out of the decrypted
+# config. 24/7 streams would otherwise pollute the owner's listening history,
+# stats and scrobbles.
+RECORD_LISTENS_FIELD: dict = {
+    "name": "record_listens",
+    "type": "boolean",
+    "required": False,
+    "label": "Scrobbling & stats",
+    "default": True,
+    "help": "Record plays through this stream in listening history and stats, and scrobble them.",
+}
+
+
+def listen_recording_enabled(config: dict) -> bool:
+    """
+    Return whether plays through this output should be recorded/scrobbled.
+
+    Defaults to True so outputs created before the option existed keep
+    recording. Values arriving as strings (e.g. from hand-edited configs) are
+    coerced leniently.
+    """
+    value = config.get("record_listens")
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value.strip().lower() not in ("", "0", "false", "no", "off")
+    return bool(value)
+
 
 class AudioOutput(ABC):
     """Abstract base class for an audio output provider (e.g. Icecast, Fake)."""

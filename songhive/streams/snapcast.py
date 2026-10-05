@@ -39,7 +39,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any, ClassVar, Optional
 
-from .base import AudioOutput
+from .base import RECORD_LISTENS_FIELD, AudioOutput
 from .driver import OutputDriver
 from .icecast import _INT_RE, IcecastDriver
 from .registry import register_output
@@ -142,6 +142,7 @@ class SnapcastOutput(AudioOutput):
                 "count as listeners."
             ),
         },
+        RECORD_LISTENS_FIELD,
     ]
 
     @staticmethod

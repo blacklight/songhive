@@ -25,9 +25,12 @@ const isTesting = ref(false);
 const formError = ref<string | null>(null);
 const testResult = ref<string | null>(null);
 
+const RECORD_LISTENS_FIELD = "record_listens";
+
 const name = ref("");
 const providerType = ref("");
 const enabled = ref(true);
+const recordListens = ref(true);
 const config = reactive<Record<string, unknown>>({});
 const redactedKeys = ref<Set<string>>(new Set());
 
@@ -41,10 +44,22 @@ const providerOptions = computed(() =>
 );
 
 const provider = computed(() =>
-  store.providers.find((p) => p.provider_type === providerType.value),
+  store.providers.find(
+    (p: { provider_type: string }) => p.provider_type === providerType.value,
+  ),
 );
 
-const fields = computed<ProviderField[]>(() => provider.value?.fields || []);
+const fields = computed<ProviderField[]>(() =>
+  (provider.value?.fields || []).filter(
+    (field: { name: string }) => field.name !== RECORD_LISTENS_FIELD,
+  ),
+);
+
+const supportsRecordListens = computed(() =>
+  (provider.value?.fields || []).some(
+    (field) => field.name === RECORD_LISTENS_FIELD,
+  ),
+);
 
 const canCreate = computed(() => providerOptions.value.length > 0);
 
@@ -140,6 +155,9 @@ function resetForm(output?: OutputResponse | null) {
     name.value = output.name;
     providerType.value = output.provider_type;
     enabled.value = output.enabled;
+    const recordListensValue = output.config[RECORD_LISTENS_FIELD];
+    recordListens.value =
+      recordListensValue !== false && recordListensValue !== "false";
     const cfg = output.config;
     for (const key of Object.keys(config)) {
       delete config[key];
@@ -167,6 +185,7 @@ function resetForm(output?: OutputResponse | null) {
   name.value = "";
   providerType.value = providerOptions.value[0]?.value || "";
   enabled.value = true;
+  recordListens.value = recordListensDefault();
   for (const key of Object.keys(config)) {
     delete config[key];
   }
@@ -179,6 +198,13 @@ function resetForm(output?: OutputResponse | null) {
       config[field.name] = "";
     }
   }
+}
+
+function recordListensDefault(): boolean {
+  const field = provider.value?.fields.find(
+    (f) => f.name === RECORD_LISTENS_FIELD,
+  );
+  return field?.default !== false;
 }
 
 function startNew() {
@@ -210,6 +236,9 @@ function validateForm(): Record<string, unknown> | null {
       return null;
     }
     cfg[field.name] = value;
+  }
+  if (supportsRecordListens.value) {
+    cfg[RECORD_LISTENS_FIELD] = recordListens.value;
   }
   return cfg;
 }
@@ -311,6 +340,7 @@ async function onDelete(output: OutputResponse) {
 
 function onProviderTypeChanged(value: string) {
   providerType.value = value;
+  recordListens.value = recordListensDefault();
   for (const key of Object.keys(config)) {
     delete config[key];
   }
@@ -410,6 +440,14 @@ onMounted(async () => {
           <AppCheckbox
             v-model="enabled"
             :label="t('outputs.enabled')"
+            :disabled="isSaving"
+          />
+
+          <AppCheckbox
+            v-if="supportsRecordListens"
+            v-model="recordListens"
+            :label="t('outputs.recordListens')"
+            :hint="t('outputs.recordListensHint')"
             :disabled="isSaving"
           />
 

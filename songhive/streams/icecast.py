@@ -13,7 +13,7 @@ from typing import Any, ClassVar, Optional
 import aiofiles
 import httpx
 
-from .base import AudioOutput
+from .base import RECORD_LISTENS_FIELD, AudioOutput
 from .driver import OutputDriver
 from .registry import register_output
 from .types import AudioSource, OutputCapabilities, OutputHealth, TrackMeta
@@ -66,6 +66,7 @@ class IcecastOutput(AudioOutput):
         {"name": "description", "type": "text", "required": False, "label": "Description"},
         {"name": "genre", "type": "text", "required": False, "label": "Genre"},
         {"name": "public", "type": "boolean", "required": False, "label": "Public", "default": False},
+        RECORD_LISTENS_FIELD,
     ]
 
     _REDACTED_KEYS: ClassVar[set[str]] = {"password"}

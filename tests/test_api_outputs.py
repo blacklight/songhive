@@ -24,6 +24,47 @@ async def test_list_providers(client, regular_user, auth_headers, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_stream_providers_advertise_record_listens(client, regular_user, auth_headers):
+    """The HTTP, Icecast and Snapcast providers expose the record_listens toggle."""
+    client.app.state.config.streams.allow_user_created_outputs = True
+    response = client.get(
+        "/api/v1/outputs/providers",
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == status.HTTP_200_OK
+    fields_by_type = {p["provider_type"]: {f["name"] for f in p["fields"]} for p in response.json()}
+    for provider_type in ("http", "icecast", "snapcast"):
+        assert "record_listens" in fields_by_type[provider_type]
+
+
+@pytest.mark.asyncio
+async def test_record_listens_round_trip(client, regular_user, auth_headers):
+    """The record_listens flag survives create/read/patch without redaction."""
+    client.app.state.config.streams.allow_user_created_outputs = True
+    cfg = {"mount": "radio", "format": "mp3", "bitrate": "128k", "sample_rate": 44100}
+    create_resp = client.post(
+        "/api/v1/outputs",
+        headers=auth_headers(regular_user),
+        json={
+            "provider_type": "http",
+            "name": "quiet mount",
+            "config": {**cfg, "record_listens": False},
+        },
+    )
+    assert create_resp.status_code == status.HTTP_201_CREATED
+    data = create_resp.json()
+    assert data["config"]["record_listens"] is False
+
+    patch_resp = client.patch(
+        f"/api/v1/outputs/{data['id']}",
+        headers=auth_headers(regular_user),
+        json={"config": {**cfg, "record_listens": True}},
+    )
+    assert patch_resp.status_code == status.HTTP_200_OK
+    assert patch_resp.json()["config"]["record_listens"] is True
+
+
+@pytest.mark.asyncio
 async def test_create_output_redacts_secrets(client, regular_user, auth_headers, db_session):
     """POST /outputs encrypts secrets and redacts them in the response."""
     client.app.state.config.streams.allow_user_created_outputs = True

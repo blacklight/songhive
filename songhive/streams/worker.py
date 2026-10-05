@@ -44,6 +44,7 @@ from ..services.redis import create_redis_client
 from ..services.secrets import decrypt_json
 from ..services.streaming import resolve_external_stream, resolve_track_file
 from ..storage import get_storage
+from ..streams.base import listen_recording_enabled
 from ..streams.driver import OutputDriver
 from ..streams.registry import get_output
 from ..streams.types import AudioSource, TrackMeta
@@ -197,6 +198,7 @@ class SessionDriver:
         self._shutting_down = False
         self._idle_since: Optional[float] = None
         self._active_track_id: Optional[str] = None
+        self._record_listens = True
         self._advance_retry_at: Optional[float] = None
         self._advance_retry_event: Optional[dict] = None
         self._advance_retry_count = 0
@@ -249,6 +251,11 @@ class SessionDriver:
             provider = provider_cls()
             config = decrypt_json(output_stream.config)
             await provider.validate_config(config)
+
+            # A stream opted out of listen recording (e.g. a 24/7 radio mount)
+            # still advances and broadcasts metadata; its plays just never
+            # reach listening history, stats or scrobbles.
+            self._record_listens = listen_recording_enabled(config)
 
             # Allow provider configs to fall back to the configured ffmpeg path.
             if output_stream.provider_type in ("icecast", "http", "snapcast") and not config.get("ffmpeg_path"):
@@ -737,7 +744,7 @@ class SessionDriver:
                 finished = _current_track_id(session)
                 advance_pending = not (event or {}).get("_advanced")
                 if advance_pending and (self._active_track_id is None or finished == self._active_track_id):
-                    if finished:
+                    if finished and self._record_listens:
                         await record_server_listen(db, session, finished)
 
                     # Always advance autonomously: the controller only sends

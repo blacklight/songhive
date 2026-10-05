@@ -2505,6 +2505,8 @@
     "name": "Name",
     "provider": "Provider",
     "enabled": "Enabled",
+    "recordListens": "Scrobbling & stats",
+    "recordListensHint": "Record plays through this stream in listening history and stats, and scrobble them. Turn off for always-on streams.",
     "status": "Status",
     "streamUrl": "Stream URL",
     "ok": "OK",

@@ -5,8 +5,10 @@ from contextlib import asynccontextmanager
 
 import pytest
 from fakeredis.aioredis import FakeRedis
+from sqlalchemy import func, select
 
 from songhive.models.base import get_session, init_db
+from songhive.models.history import ListeningHistory
 from songhive.models.playback_session import PlaybackSession
 from songhive.services.outputs import create_output, update_output
 from songhive.services.playback import (
@@ -117,14 +119,14 @@ def make_worker(worker_config, fake_redis_server, monkeypatch):
 def make_session_output(db_session, worker_config, regular_user, make_worker):
     """Factory for a PlaybackSession with a fake stream output attached."""
 
-    async def _make(queue: list[dict], state: str = "idle"):
+    async def _make(queue: list[dict], state: str = "idle", output_cfg: dict | None = None):
         output = await create_output(
             db_session,
             regular_user,
             worker_config,
             provider_type="fake",
             name="fake output",
-            cfg={"items": {}},
+            cfg=output_cfg or {"items": {}},
         )
         await db_session.flush()
 
@@ -974,6 +976,79 @@ async def test_source_ended_committed_advance_resyncs(
         refreshed = await db.get(PlaybackSession, session.id)
         assert refreshed is not None
         assert refreshed.current_index == 1
+
+
+async def _listen_count(session_user_id: str) -> int:
+    """Count listening-history rows recorded for the session owner."""
+    async with get_session() as db:
+        return (
+            await db.scalar(select(func.count(ListeningHistory.id)).where(ListeningHistory.user_id == session_user_id))
+            or 0
+        )
+
+
+@pytest.mark.asyncio
+async def test_source_ended_records_listen_by_default(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """A track played past the threshold on a stream output records a listen."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    # Past the 30s default threshold so the finished track counts as a listen.
+    session.position_seconds = 45.0
+    await db_session.commit()
+
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    fake.trigger_source_ended()
+    assert await _wait_until(lambda: len(_set_source_commands(fake)) >= 2)
+
+    await _stop_driver_task(driver, task)
+
+    assert await _listen_count(str(session.user_id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_record_listens_disabled_skips_listen(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """An output with record_listens off advances the queue without recording."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+
+    session, output = await make_session_output(
+        _sample_queue(),
+        state="playing",
+        output_cfg={"items": {}, "record_listens": False},
+    )
+    session.position_seconds = 45.0
+    await db_session.commit()
+
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    assert driver._record_listens is False
+
+    fake.trigger_source_ended()
+    # The second set_source lands after the listen decision, so reaching it
+    # proves the skip rather than a still-pending write.
+    assert await _wait_until(lambda: len(_set_source_commands(fake)) >= 2)
+
+    await _stop_driver_task(driver, task)
+
+    assert _set_source_commands(fake)[-1][3].track_id == "t2"
+    assert await _listen_count(str(session.user_id)) == 0
 
 
 @pytest.mark.asyncio
