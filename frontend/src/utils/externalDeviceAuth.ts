@@ -70,12 +70,23 @@ export async function beginDeviceAuth(
       external_library_id: opts.externalLibraryId,
       mode: opts.mode,
     });
+
+  const verificationUris = [
+    response.verification_uri,
+    response.verification_uri_complete,
+  ].map((uri) => {
+    if (uri?.length && !/^https?:\/\//.test(uri)) {
+      return `https://${uri}`;
+    }
+    return uri;
+  });
+
   return {
     state: response.state,
     mode: response.mode,
     userCode: response.user_code ?? null,
-    verificationUri: response.verification_uri ?? null,
-    verificationUriComplete: response.verification_uri_complete ?? null,
+    verificationUri: verificationUris[0] ?? null,
+    verificationUriComplete: verificationUris[1] ?? null,
     authorizeUrl: response.authorize_url ?? null,
     expiresIn: response.expires_in ?? DEFAULT_EXPIRES_IN,
     interval: response.interval ?? DEFAULT_INTERVAL,
