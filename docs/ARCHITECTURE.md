@@ -1635,7 +1635,11 @@ keys such as WebDAV's `verify_ssl`, where the optional CA-bundle text field
 shares the key with the verification toggle and overrides it when non-empty.
 `ExternalLibraryEditView` switches the displayed fields whenever the provider
 `<select>` changes, and falls back to a plain JSON textarea for providers that do
-not have a template yet.
+not have a template yet. Template forms only emit their declared fields, so on
+update the view also echoes back every stored config key the template doesn't
+manage (`carriedStoredConfig`) — device-auth/OAuth credential fragments such as
+`access_token`, `user_id` or `auth_mode` would otherwise be dropped by the
+PATCH's full-config replacement and the save would fail validation.
 
 Sync and tasks:
 

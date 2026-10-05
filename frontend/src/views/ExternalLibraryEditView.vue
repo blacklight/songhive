@@ -390,13 +390,38 @@ function validateConfig(): Record<string, unknown> | null {
   }
 }
 
+function carriedStoredConfig(): Record<string, unknown> {
+  // Template-driven forms only emit their declared fields, so keys written
+  // outside the form — device-auth/OAuth credential fragments like
+  // access_token or user_id — would be dropped by the PATCH's full-config
+  // replacement. Carry them over from the stored config; secrets arrive as
+  // the "<redacted>" sentinel, which the backend resolves back to the real
+  // values on update.
+  if (isNew.value || !hasProviderTemplate.value || !library.value) return {};
+  const managedKeys = new Set(
+    providerTemplate.value.fields.flatMap((field) =>
+      field.configKey ? [field.name, field.configKey] : [field.name],
+    ),
+  );
+  const carried: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(library.value.config ?? {})) {
+    if (!managedKeys.has(key)) carried[key] = value;
+  }
+  return carried;
+}
+
 async function onSubmit() {
   configError.value = null;
   const validated = validateConfig();
   if (!validated) return;
-  // Keep granted values not covered by the form fields (e.g. account_id);
-  // explicit field edits always win over the granted fragment.
-  const config = { ...oauthGrantedConfig.value, ...validated };
+  // Keep stored/granted values not covered by the form fields (e.g.
+  // device-auth credentials, account_id); explicit field edits always win
+  // over both.
+  const config = {
+    ...carriedStoredConfig(),
+    ...oauthGrantedConfig.value,
+    ...validated,
+  };
 
   isSaving.value = true;
   error.value = null;
@@ -467,7 +492,7 @@ async function onConnectOAuth() {
   try {
     const result = await beginExternalOAuth({
       provider_type: providerType.value,
-      config,
+      config: { ...carriedStoredConfig(), ...config },
       external_library_id: libraryId.value || undefined,
       return_to: route.path,
     });
@@ -616,7 +641,7 @@ async function onConnectDeviceAuth() {
   try {
     const prompt = await beginDeviceAuth(
       providerType.value,
-      { ...oauthGrantedConfig.value, ...validated },
+      { ...carriedStoredConfig(), ...oauthGrantedConfig.value, ...validated },
       {
         externalLibraryId: libraryId.value || undefined,
         mode: pkceMode.value && pkceSupported.value ? "pkce" : "device",

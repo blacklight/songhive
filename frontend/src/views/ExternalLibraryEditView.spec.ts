@@ -583,6 +583,174 @@ describe("ExternalLibraryEditView", () => {
     expect(body.config.api_key).toBe("<redacted>");
   });
 
+  it("carries non-template credential keys on update", async () => {
+    // Device-auth providers (tidal, youtube) store granted credential
+    // fragments — tokens, account ids — that no template field covers.
+    // Saving the form must echo them back so the PATCH's full-config
+    // replacement doesn't strip them.
+    vi.mocked(externalLibrariesApi.listUserProviders).mockResolvedValue([
+      {
+        provider_type: "tidal",
+        user_configurable: true,
+        capabilities_summary: {},
+        device_auth_supported: true,
+      },
+    ]);
+    const storedConfig = {
+      access_token: "<redacted>",
+      refresh_token: "<redacted>",
+      token_type: "<redacted>",
+      user_id: "42",
+      session_id: "sess-1",
+      country_code: "US",
+      is_pkce: false,
+      expiry_time: "2030-01-01T00:00:00+00:00",
+      quality: "LOSSLESS",
+      include_tracks: true,
+    };
+    vi.mocked(externalLibrariesApi.getUserExternalLibrary).mockResolvedValue({
+      id: "el1",
+      library_id: "lib1",
+      provider_type: "tidal",
+      scope: "user",
+      name: "TIDAL Library",
+      config: storedConfig,
+      enabled: true,
+      include_in_library_index: false,
+      sync_enabled: true,
+      sync_interval_seconds: null,
+      can_manage: true,
+      can_sync: true,
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+    });
+    vi.mocked(externalLibrariesApi.updateUserExternalLibrary).mockResolvedValue(
+      {
+        id: "el1",
+        library_id: "lib1",
+        provider_type: "tidal",
+        scope: "user",
+        name: "TIDAL Library",
+        config: storedConfig,
+        enabled: true,
+        include_in_library_index: false,
+        sync_enabled: true,
+        sync_interval_seconds: null,
+        can_manage: true,
+        can_sync: true,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+    );
+
+    const router = createTestRouter("/settings/external-libraries/el1");
+    await router.isReady();
+    wrapper = mount(ExternalLibraryEditView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) =>
+      (b.textContent ?? "").includes(
+        i18n.global.t("pages.externalLibraries.save"),
+      ),
+    );
+    expect(saveButton).toBeDefined();
+    await saveButton?.click();
+    await flushPromises();
+
+    const body = (externalLibrariesApi.updateUserExternalLibrary as Mock).mock
+      .calls[0][1];
+    expect(body.config).toEqual(
+      expect.objectContaining({
+        access_token: "<redacted>",
+        refresh_token: "<redacted>",
+        user_id: "42",
+        session_id: "sess-1",
+        is_pkce: false,
+        quality: "LOSSLESS",
+        include_tracks: true,
+      }),
+    );
+  });
+
+  it("does not resurrect template-managed keys the user cleared", async () => {
+    // Carrying stored keys must not defeat clearing an optional field: the
+    // template builder omits emptied optional fields, so a cleared value
+    // stays absent from the submitted config (PATCH replaces config).
+    vi.mocked(externalLibrariesApi.getUserExternalLibrary).mockResolvedValue({
+      id: "el1",
+      library_id: "lib1",
+      provider_type: "s3",
+      scope: "user",
+      name: "S3 Library",
+      config: { bucket: "music", prefix: "old/" },
+      enabled: true,
+      include_in_library_index: false,
+      sync_enabled: true,
+      sync_interval_seconds: null,
+      can_manage: true,
+      can_sync: true,
+      created_at: "2024-01-01T00:00:00Z",
+      updated_at: "2024-01-01T00:00:00Z",
+    });
+    vi.mocked(externalLibrariesApi.updateUserExternalLibrary).mockResolvedValue(
+      {
+        id: "el1",
+        library_id: "lib1",
+        provider_type: "s3",
+        scope: "user",
+        name: "S3 Library",
+        config: { bucket: "music" },
+        enabled: true,
+        include_in_library_index: false,
+        sync_enabled: true,
+        sync_interval_seconds: null,
+        can_manage: true,
+        can_sync: true,
+        created_at: "2024-01-01T00:00:00Z",
+        updated_at: "2024-01-01T00:00:00Z",
+      },
+    );
+
+    const router = createTestRouter("/settings/external-libraries/el1");
+    await router.isReady();
+    wrapper = mount(ExternalLibraryEditView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+    await flushPromises();
+
+    const prefixInput = getInputByLabel(
+      i18n.global.t("pages.externalLibraries.providers.s3.fields.prefix.label"),
+    );
+    expect(prefixInput).not.toBeNull();
+    prefixInput!.value = "";
+    prefixInput!.dispatchEvent(new Event("input"));
+    await flushPromises();
+
+    const saveButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) =>
+      (b.textContent ?? "").includes(
+        i18n.global.t("pages.externalLibraries.save"),
+      ),
+    );
+    expect(saveButton).toBeDefined();
+    await saveButton?.click();
+    await flushPromises();
+
+    const body = (externalLibrariesApi.updateUserExternalLibrary as Mock).mock
+      .calls[0][1];
+    expect(body.config.bucket).toBe("music");
+    expect(body.config).not.toHaveProperty("prefix");
+  });
+
   it("renders the dropbox provider form and submits a structured config", async () => {
     vi.mocked(externalLibrariesApi.listUserProviders).mockResolvedValue([
       {
