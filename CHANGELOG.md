@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `ui`: External library badges and library views now show
+  provider-specific icons — a new `ProviderIcon` component maps each
+  provider to its brand or solid icon (with an inline SVG for
+  Jellyfin) across track badges, playlist cards and detail views.
+  ([`13625be`](https://git.platypush.tech/blacklight/songhive/commit/13625bec241e541f938c5c727ca901a0f4085491)).
+
+### Fixed
+
+- Device authorization verification URIs returned by external
+  providers are now normalized — `https://` is prefixed when the URI
+  is missing a scheme, fixing broken "verify device" links.
+  ([`914beed`](https://git.platypush.tech/blacklight/songhive/commit/914beedc78f5a6e24ee5a19d96934bfb6f504ca6)).
+- `external-libraries`: Editing an external library no longer drops
+  stored config keys the provider template doesn't manage — saves,
+  OAuth and device-auth flows now echo back unmanaged keys such as
+  `access_token`, `user_id` and `auth_mode`, which the full-config
+  PATCH replacement previously discarded, failing validation.
+  ([`55ed786`](https://git.platypush.tech/blacklight/songhive/commit/55ed786ccbc55b6ca056ae665b003bb933403ae8)).
+
 ## 0.4.8
 
 ### Added
