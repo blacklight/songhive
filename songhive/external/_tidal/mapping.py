@@ -37,6 +37,53 @@ def browse_url(kind: str, provider_key: str) -> str:
     return f"{_BROWSE_BASE}/{kind}/{provider_key}"
 
 
+_BROWSE_KINDS = {
+    "track": "track",
+    "album": "album",
+    "artist": "artist",
+    "playlist": "playlist",
+}
+
+
+def parse_tidal_url(text: str) -> Optional[tuple[str, str]]:
+    """
+    Parse a TIDAL URL into ``(kind, provider_key)``.
+
+    Accepts both the canonical ``/browse/{kind}/{id}`` shape and the
+    share-link ``/{kind}/{id}`` shape on ``tidal.com`` and its subdomains
+    (``www.``, ``listen.``, ...); trailing path segments (e.g. the ``/u``
+    share suffix) and query strings are ignored. Returns ``None`` for
+    non-TIDAL input, unsupported kinds (``mix``, ``video``, ...) or
+    unparseable URLs.
+    """
+    if not isinstance(text, str):
+        return None
+    text = text.strip()
+    if not text:
+        return None
+
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(text)
+    except ValueError:
+        return None
+    host = (parts.hostname or "").lower()
+    if not (host == "tidal.com" or host.endswith(".tidal.com")):
+        return None
+
+    segments = [seg for seg in (parts.path or "").split("/") if seg]
+    if segments and segments[0].lower() == "browse":
+        segments = segments[1:]
+    if len(segments) < 2:
+        return None
+    kind = _BROWSE_KINDS.get(segments[0].lower())
+    provider_key = segments[1]
+    if kind is None or not provider_key:
+        return None
+    return kind, provider_key
+
+
 def _num(value: Any) -> Optional[int]:
     try:
         return int(value) if value is not None else None

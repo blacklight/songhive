@@ -14,6 +14,7 @@ from songhive.external._tidal.mapping import (
     map_playlist,
     map_playlist_items,
     map_track,
+    parse_tidal_url,
     track_display_path,
 )
 from songhive.external._tidal.session import effective_quality
@@ -101,6 +102,57 @@ def _adapter_with_session(session: FakeTidalSession, monkeypatch) -> TidalExtern
 
 async def _async_return(value):
     return value
+
+
+# ----------------------------------------------------------------------
+# URL parsing
+# ----------------------------------------------------------------------
+
+
+def test_parse_tidal_url_browse_and_share_variants():
+    assert parse_tidal_url("https://tidal.com/browse/track/75293876") == (
+        "track",
+        "75293876",
+    )
+    assert parse_tidal_url("https://tidal.com/track/75293876") == ("track", "75293876")
+    assert parse_tidal_url("https://listen.tidal.com/album/543374400") == (
+        "album",
+        "543374400",
+    )
+    assert parse_tidal_url("https://www.tidal.com/browse/artist/1566") == (
+        "artist",
+        "1566",
+    )
+    assert parse_tidal_url("https://tidal.com/browse/playlist/6a3e4c33-aaaa-bbbb") == (
+        "playlist",
+        "6a3e4c33-aaaa-bbbb",
+    )
+    assert parse_tidal_url("https://tidal.com/playlist/6a3e4c33-aaaa-bbbb") == (
+        "playlist",
+        "6a3e4c33-aaaa-bbbb",
+    )
+
+
+def test_parse_tidal_url_ignores_trailing_segments_and_query():
+    assert parse_tidal_url("https://tidal.com/browse/track/75293876/u") == (
+        "track",
+        "75293876",
+    )
+    assert parse_tidal_url("https://tidal.com/browse/album/543374400?foo=bar") == (
+        "album",
+        "543374400",
+    )
+
+
+def test_parse_tidal_url_rejects_non_tidal_and_unsupported():
+    assert parse_tidal_url("https://tidal.com/browse/mix/000abc") is None
+    assert parse_tidal_url("https://tidal.com/browse/video/123") is None
+    assert parse_tidal_url("https://tidal.com/") is None
+    assert parse_tidal_url("https://tidal.com/browse/track/") is None
+    assert parse_tidal_url("https://example.com/track/1") is None
+    assert parse_tidal_url("just some text") is None
+    assert parse_tidal_url("") is None
+    assert parse_tidal_url(None) is None
 
 
 # ----------------------------------------------------------------------
@@ -433,6 +485,136 @@ async def test_iter_contents_album_path(monkeypatch):
     assert [e.provider_key for e in contents.entries] == ["10", "11"]
     method, path, _ = session.request.calls[0]
     assert path == "albums/77/items"
+
+
+# ----------------------------------------------------------------------
+# search() — direct URL lookups and catalog text search
+# ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_search_url_resolves_track(monkeypatch):
+    session = FakeTidalSession({"tracks/12345": _FakeResponse(_track_json())})
+    adapter = _adapter_with_session(session, monkeypatch)
+
+    results = await adapter.search(_config(), "https://tidal.com/browse/track/12345")
+    assert results == [
+        {
+            "kind": "track",
+            "provider_key": "12345",
+            "title": "Song",
+            "subtitle": "Main Artist",
+            "image_url": "https://resources.tidal.com/images/abc/def/123/1280x1280.jpg",
+            "external_url": "https://tidal.com/browse/track/12345",
+        }
+    ]
+    # Direct lookup — the catalog search endpoint is never hit.
+    assert all(path != "search" for _, path, _ in session.request.calls)
+
+
+@pytest.mark.asyncio
+async def test_search_url_resolves_playlist_album_artist(monkeypatch):
+    session = FakeTidalSession(
+        {
+            "albums/99": _FakeResponse(
+                {
+                    "id": 99,
+                    "title": "Alb",
+                    "cover": "c1-c2",
+                    "artists": [{"id": 7, "name": "A", "type": "MAIN"}],
+                }
+            ),
+            "artists/7": _FakeResponse({"id": 7, "name": "A", "picture": "p1-p2"}),
+            "playlists/pl-1": _FakeResponse(
+                {
+                    "uuid": "pl-1",
+                    "title": "Mix",
+                    "squareImage": "s1-s2",
+                    "creator": {"id": 4242, "name": "me"},
+                }
+            ),
+        }
+    )
+    adapter = _adapter_with_session(session, monkeypatch)
+
+    album = await adapter.search(_config(), "https://tidal.com/album/99")
+    assert album[0]["kind"] == "album"
+    assert album[0]["provider_key"] == "99"
+    assert album[0]["title"] == "Alb"
+    assert album[0]["subtitle"] == "A"
+
+    artist = await adapter.search(_config(), "https://listen.tidal.com/artist/7")
+    assert artist[0]["kind"] == "artist"
+    assert artist[0]["title"] == "A"
+    assert artist[0]["image_url"] == "https://resources.tidal.com/images/p1/p2/750x750.jpg"
+
+    playlist = await adapter.search(_config(), "https://tidal.com/browse/playlist/pl-1")
+    assert playlist[0]["kind"] == "playlist"
+    assert playlist[0]["title"] == "Mix"
+    assert playlist[0]["subtitle"] == "me"
+
+
+@pytest.mark.asyncio
+async def test_search_url_unknown_entity_returns_empty(monkeypatch):
+    session = FakeTidalSession()  # every path 404s
+    adapter = _adapter_with_session(session, monkeypatch)
+
+    results = await adapter.search(_config(), "https://tidal.com/browse/track/999999")
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_search_foreign_url_returns_empty_without_api(monkeypatch):
+    session = FakeTidalSession()
+    adapter = _adapter_with_session(session, monkeypatch)
+
+    results = await adapter.search(_config(), "https://example.com/track/1")
+    assert results == []
+    assert session.request.calls == []
+
+
+@pytest.mark.asyncio
+async def test_search_text_uses_catalog(monkeypatch):
+    session = FakeTidalSession(
+        {
+            "search": _FakeResponse(
+                {
+                    "tracks": {"items": [_track_json(id=1)]},
+                    "albums": {
+                        "items": [
+                            {
+                                "id": 99,
+                                "title": "Alb",
+                                "cover": "c1-c2",
+                                "artists": [{"id": 7, "name": "A"}],
+                            }
+                        ]
+                    },
+                    "artists": {"items": [{"id": 7, "name": "A", "picture": "p1-p2"}]},
+                    "playlists": {
+                        "items": [
+                            {
+                                "uuid": "pl-1",
+                                "title": "Mix",
+                                "squareImage": "s1-s2",
+                                "creator": {"name": "me"},
+                            }
+                        ]
+                    },
+                }
+            )
+        }
+    )
+    adapter = _adapter_with_session(session, monkeypatch)
+
+    results = await adapter.search(_config(), "song")
+    assert [r["kind"] for r in results] == ["track", "album", "artist", "playlist"]
+    assert results[0]["provider_key"] == "1"
+    assert results[0]["title"] == "Song"
+    assert results[0]["external_url"] == "https://tidal.com/browse/track/1"
+    method, path, params = session.request.calls[0]
+    assert path == "search"
+    assert params["query"] == "song"
 
 
 # ----------------------------------------------------------------------

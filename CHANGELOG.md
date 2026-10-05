@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## Unreleased
 
+### Added
+
+- `external`: TIDAL provider search now resolves direct `tidal.com` URLs —
+  pasting a track, album, artist or playlist link (canonical `/browse/…`
+  or share-link form, on `tidal.com` or its subdomains) looks the entity
+  up by id instead of text-searching the catalog.
+
 ### Fixed
 
 - `youtube`: Free-text search works again for OAuth-connected YouTube

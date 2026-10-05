@@ -1497,6 +1497,14 @@ image, tag, and genre endpoints; responses expose `editable_fields` and
 `external_provider_type` so the SPA locks provider-owned inputs while keeping
 tags, genres, and visibility editable.
 
+**Search.** `adapter.search` resolves `tidal.com` URLs directly —
+`mapping.parse_tidal_url` accepts both the canonical `/browse/{kind}/{id}`
+shape and the share-link `/{kind}/{id}` shape (track, album, artist,
+playlist) on `tidal.com` and its subdomains, and the entity is fetched by
+id instead of text-searched. Non-TIDAL URLs and unsupported kinds
+(`mix`, `video`, ...) return no results; plain text goes through the
+catalog `search` endpoint.
+
 A TIDAL external library stores the following adapter config:
 
 | Key                          | Required | Default      | Description                                                    |

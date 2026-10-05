@@ -34,7 +34,7 @@ from ..types import (
 )
 from .api import TidalApiClient
 from .conf import download_format, downloads_allowed, max_rps, playlist_ttl
-from .mapping import map_album, map_artist, map_playlist, map_track_ref
+from .mapping import map_album, map_artist, map_playlist, map_track_ref, parse_tidal_url
 from .session import effective_quality, session_for_config
 
 logger = logging.getLogger(__name__)
@@ -307,8 +307,29 @@ class TidalExternalAdapter(ExternalLibraryAdapter):
         *,
         limit: int = 20,
     ) -> list[dict]:
-        """Search the TIDAL catalog; results are transient metadata dicts."""
+        """
+        Provider search — tidal.com URLs resolve by id, other text searches.
+
+        ``tidal.com`` URLs (canonical ``/browse/{kind}/{id}`` and share-link
+        ``/{kind}/{id}`` shapes) are looked up directly; other queries go
+        through the catalog search endpoint.
+        """
         from .mapping import image_url
+
+        results: list[dict] = []
+        parsed = parse_tidal_url(query)
+        if parsed is not None:
+            kind, provider_key = parsed
+            payload = await self.fetch_entity_payload(config, kind, provider_key)
+            entity = self.entity_from_payload(config, kind, payload) if payload else None
+            if entity is not None:
+                results.append(self._search_result_for(kind, provider_key, entity))
+            return results
+
+        if query.strip().lower().startswith(("http://", "https://")):
+            # A foreign URL is a lookup, not a text query — fuzzy-searching
+            # the catalog for a URL string only produces noise.
+            return results
 
         client = await self._client(config)
         response = await client.get_json(
@@ -316,7 +337,6 @@ class TidalExternalAdapter(ExternalLibraryAdapter):
             params={"query": query, "limit": limit, "types": "TRACKS,ALBUMS,ARTISTS,PLAYLISTS"},
         )
         data = response.data if isinstance(response.data, dict) else {}
-        results: list[dict] = []
 
         def _items(section: str) -> list[dict]:
             block = data.get(section)
@@ -389,6 +409,35 @@ class TidalExternalAdapter(ExternalLibraryAdapter):
                 }
             )
         return results
+
+    def _search_result_for(self, kind: str, provider_key: str, entity: Any) -> dict:
+        """Normalize a mapped entity into the transient search-result shape."""
+        if isinstance(entity, ExternalItemRef):
+            entity = entity.metadata
+        if kind == "track":
+            title = getattr(entity, "title", provider_key)
+            subtitle = getattr(entity, "artist", None) or None
+            image = getattr(entity, "cover_url", None)
+        elif kind == "album":
+            title = getattr(entity, "title", provider_key)
+            subtitle = ", ".join(getattr(entity, "artist_names", ()) or ()) or None
+            image = getattr(entity, "cover_url", None)
+        elif kind == "artist":
+            title = getattr(entity, "name", provider_key)
+            subtitle = None
+            image = getattr(entity, "image_url", None)
+        else:
+            title = getattr(entity, "title", provider_key)
+            subtitle = getattr(entity, "owner_name", None)
+            image = getattr(entity, "cover_url", None)
+        return {
+            "kind": kind,
+            "provider_key": provider_key,
+            "title": str(title),
+            "subtitle": subtitle,
+            "image_url": image,
+            "external_url": self.external_url(kind, provider_key),
+        }
 
     def entity_from_payload(
         self,
