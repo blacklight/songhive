@@ -10,6 +10,16 @@ All notable changes to this project will be documented in this file.
   pasting a track, album, artist or playlist link (canonical `/browse/…`
   or share-link form, on `tidal.com` or its subdomains) looks the entity
   up by id instead of text-searching the catalog.
+  ([`126ceb1`](https://git.platypush.tech/blacklight/songhive/commit/126ceb1d1376cf788be3f20138dc3b8f832fa6ca)).
+- `homepage`: Add a standalone Songhive project homepage — a static
+  landing page introducing the platform and its features.
+  ([`fb3ff31`](https://git.platypush.tech/blacklight/songhive/commit/fb3ff31db55cb1a75e87f8e01fb2a3e45b6cbcdf)).
+- `playlists`: Playlists synced from external providers now report
+  their backing provider type in the API, and the web UI shows a
+  provider badge on playlist cards and in the playlist detail header —
+  same-named playlists from different providers are no longer
+  indistinguishable.
+  ([`557459a`](https://git.platypush.tech/blacklight/songhive/commit/557459a3cb17e9539878aa811013cf0e3fca3c4d)).
 
 ### Fixed
 
@@ -19,6 +29,13 @@ All notable changes to this project will be documented in this file.
   "Request contains an invalid argument" (direct URL lookups were
   unaffected); browser sessions keep authenticated search.
   ([`2c7b4dc`](https://git.platypush.tech/blacklight/songhive/commit/2c7b4dc6c621111147c890c78eb3b54f6024ce9b)).
+- `external`: YouTube playlist imports no longer credit the playlist
+  owner as the track artist — `playlistItems` payloads now map the
+  uploader channel (`videoOwnerChannelTitle`), and re-syncs re-point
+  `artist_id` on tracks materialized before the fix (immutable
+  providers never rewrite payloads, so the stale artist survived every
+  re-sync). Tracks with local metadata edits are left alone.
+  ([`dbef6f7`](https://git.platypush.tech/blacklight/songhive/commit/dbef6f722620fb7626020c4b23d73edd4f4767a6)).
 
 ## 0.4.7
 
