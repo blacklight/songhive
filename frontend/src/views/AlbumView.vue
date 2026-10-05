@@ -47,6 +47,7 @@ import PurchasePanel from "@/components/payments/PurchasePanel.vue";
 import { activityFeedUrls } from "@/utils/feeds";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import CollectionStats from "@/components/library/CollectionStats.vue";
+import ProviderIcon from "@/components/external-libraries/ProviderIcon.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
 import AddToCollectionDialog from "@/components/library/AddToCollectionDialog.vue";
@@ -535,7 +536,7 @@ watch(
                   providerSync.state === 'error',
               }"
             >
-              <i class="fa-solid fa-cloud" aria-hidden="true" />
+              <ProviderIcon :provider="providerSync.provider_type" />
               {{ providerSyncText }}
             </span>
             <AppButton

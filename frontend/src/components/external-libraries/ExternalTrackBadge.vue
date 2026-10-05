@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import AppIcon from "@/components/ui/AppIcon.vue";
+import ProviderIcon from "@/components/external-libraries/ProviderIcon.vue";
+import { providerDisplayName } from "@/utils/providerName";
 
 export interface Props {
   provider?: string | null;
@@ -9,34 +10,20 @@ export interface Props {
 
 const props = defineProps<Props>();
 
-interface IconDescriptor {
-  name: string;
-  variant?: "solid" | "brand";
-  label: string;
-}
-
-const providerIconMap: Record<string, IconDescriptor> = {
-  local: { name: "hard-drive", label: "Local storage" },
-  s3: { name: "aws", variant: "brand", label: "Amazon S3" },
-  tidal: { name: "cloud", label: "TIDAL" },
+const PROVIDER_BADGE_LABELS: Record<string, string> = {
+  local: "Local storage",
+  s3: "Amazon S3",
 };
 
-function formatLabel(provider: string): string {
-  return provider ? provider[0].toUpperCase() + provider.slice(1) : "External";
-}
-
-const badge = computed<IconDescriptor | null>(() => {
+const badge = computed(() => {
   const provider = props.provider?.toLowerCase() ?? "";
-  if (provider && providerIconMap[provider]) {
-    return providerIconMap[provider];
-  }
-  if (props.isExternal || provider) {
-    return {
-      name: "cloud",
-      label: provider ? formatLabel(provider) : "External",
-    };
-  }
-  return null;
+  if (!provider && !props.isExternal) return null;
+  return {
+    provider: provider || null,
+    label:
+      PROVIDER_BADGE_LABELS[provider] ??
+      (provider ? providerDisplayName(provider) : "External"),
+  };
 });
 </script>
 
@@ -48,7 +35,7 @@ const badge = computed<IconDescriptor | null>(() => {
     :aria-label="badge.label"
     role="img"
   >
-    <AppIcon :name="badge.name" :variant="badge.variant" />
+    <ProviderIcon :provider="badge.provider" />
   </span>
 </template>
 

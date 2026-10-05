@@ -26,6 +26,7 @@ import AppInput from "@/components/ui/AppInput.vue";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import ImageUploadField from "@/components/ui/ImageUploadField.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import ProviderIcon from "@/components/external-libraries/ProviderIcon.vue";
 
 const { t } = useI18n();
 const route = useRoute();
@@ -268,7 +269,7 @@ watch(
         class="artist-edit-view__provider-note"
         role="note"
       >
-        <i class="fa-solid fa-cloud" aria-hidden="true" />
+        <ProviderIcon :provider="artist.external_provider_type" />
         {{ t("browse.edit.providerManaged", { provider: managedByLabel }) }}
       </p>
 

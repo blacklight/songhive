@@ -32,6 +32,32 @@ describe("ExternalTrackBadge", () => {
     expect(icon.classes()).toContain("fa-aws");
   });
 
+  it("uses the TIDAL brand icon for TIDAL tracks", () => {
+    const wrapper = mountBadge({ isExternal: true, provider: "tidal" });
+    const badge = wrapper.find("[role='img']");
+    expect(badge.attributes("aria-label")).toBe("TIDAL");
+    const icon = wrapper.find("i");
+    expect(icon.classes()).toContain("fa-brands");
+    expect(icon.classes()).toContain("fa-tidal");
+  });
+
+  it("uses the YouTube brand icon for YouTube tracks", () => {
+    const wrapper = mountBadge({ isExternal: true, provider: "youtube" });
+    const badge = wrapper.find("[role='img']");
+    expect(badge.attributes("aria-label")).toBe("YouTube");
+    const icon = wrapper.find("i");
+    expect(icon.classes()).toContain("fa-brands");
+    expect(icon.classes()).toContain("fa-youtube");
+  });
+
+  it("renders an inline SVG for Jellyfin tracks", () => {
+    const wrapper = mountBadge({ isExternal: true, provider: "jellyfin" });
+    const badge = wrapper.find("[role='img']");
+    expect(badge.attributes("aria-label")).toBe("Jellyfin");
+    expect(badge.find("svg.provider-icon").exists()).toBe(true);
+    expect(badge.find("i").exists()).toBe(false);
+  });
+
   it("falls back to a cloud icon with the provider as label", () => {
     const wrapper = mountBadge({ isExternal: true, provider: "unknown" });
     const badge = wrapper.find("[role='img']");

@@ -30,6 +30,7 @@ import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import ImageUploadField from "@/components/ui/ImageUploadField.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import SaleEditor from "@/components/payments/SaleEditor.vue";
+import ProviderIcon from "@/components/external-libraries/ProviderIcon.vue";
 import { useInstanceStore } from "@/stores/instance";
 
 const { t } = useI18n();
@@ -254,7 +255,7 @@ watch(
         class="album-edit-view__provider-note"
         role="note"
       >
-        <i class="fa-solid fa-cloud" aria-hidden="true" />
+        <ProviderIcon :provider="album.external_provider_type" />
         {{ t("browse.edit.providerManaged", { provider: managedByLabel }) }}
       </p>
 

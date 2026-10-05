@@ -26,6 +26,7 @@ import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import ImageUploadField from "@/components/ui/ImageUploadField.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import TrackMetadataForm from "@/components/library/TrackMetadataForm.vue";
+import ProviderIcon from "@/components/external-libraries/ProviderIcon.vue";
 import SaleEditor from "@/components/payments/SaleEditor.vue";
 
 const { t } = useI18n();
@@ -316,7 +317,7 @@ watch(
         class="track-edit-view__provider-note"
         role="note"
       >
-        <i class="fa-solid fa-cloud" aria-hidden="true" />
+        <ProviderIcon :provider="track.external_provider_type" />
         {{ t("browse.edit.providerManaged", { provider: managedByLabel }) }}
       </p>
 

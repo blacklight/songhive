@@ -7,6 +7,7 @@ import { providerDisplayName } from "@/utils/providerName";
 import type { PlaylistResponse } from "@/api/playlists";
 import UserLink from "@/components/user/UserLink.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
+import ProviderIcon from "@/components/external-libraries/ProviderIcon.vue";
 
 export interface Props {
   playlist: PlaylistResponse;
@@ -58,16 +59,14 @@ const providerTitle = computed(() =>
         size="sm"
         :owner="owner"
       />
-      <span
-        v-if="providerLabel"
-        :title="providerTitle"
-        class="playlist-card__provider"
-      >
-        <i class="fa-solid fa-cloud" aria-hidden="true" />
-        {{ providerLabel }}
-      </span>
       <span :title="visibilityText" class="playlist-card__visibility">
         <i :class="visibilityIcon" />
+      </span>
+    </div>
+    <div v-if="providerLabel">
+      <span :title="providerTitle" class="playlist-card__provider">
+        <ProviderIcon :provider="props.playlist.provider_type" />
+        {{ providerLabel }}
       </span>
     </div>
   </RouterLink>
@@ -109,13 +108,17 @@ const providerTitle = computed(() =>
   word-break: break-word;
 }
 
-.playlist-card__meta {
-  display: flex;
+.playlist-card__meta,
+.playlist-card__provider {
   font-size: 0.75rem;
   opacity: 0.85;
+  color: var(--color-text-muted);
+}
+
+.playlist-card__meta {
+  display: flex;
   flex-wrap: wrap;
   gap: calc(0.5 * var(--space-1));
-  color: var(--color-text-muted);
   margin: var(--space-2) 0;
 }
 

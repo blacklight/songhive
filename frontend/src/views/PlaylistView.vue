@@ -43,6 +43,7 @@ import FeedButton from "@/components/ui/FeedButton.vue";
 import { playlistFeedUrls } from "@/utils/feeds";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import CollectionStats from "@/components/library/CollectionStats.vue";
+import ProviderIcon from "@/components/external-libraries/ProviderIcon.vue";
 import TrackList from "@/components/library/TrackList.vue";
 import SearchBar from "@/components/ui/SearchBar.vue";
 import ShareDialog from "@/components/share/ShareDialog.vue";
@@ -156,11 +157,11 @@ const {
   onError: (message) => toastStore.push({ type: "error", message }),
 });
 
-const providerLabel = computed(() =>
-  providerDisplayName(
-    playlist.value?.provider_type ?? providerSync.value?.provider_type,
-  ),
+const providerType = computed(
+  () => playlist.value?.provider_type ?? providerSync.value?.provider_type,
 );
+
+const providerLabel = computed(() => providerDisplayName(providerType.value));
 
 const providerTitle = computed(() =>
   providerLabel.value
@@ -469,7 +470,7 @@ watch(
             :title="providerTitle"
             class="playlist-view__provider"
           >
-            <i class="fa-solid fa-cloud" aria-hidden="true" />
+            <ProviderIcon :provider="providerType" />
             {{ providerLabel }}
           </span>
           <span
@@ -480,7 +481,7 @@ watch(
                 providerSync.state === 'error',
             }"
           >
-            <i class="fa-solid fa-cloud" aria-hidden="true" />
+            <ProviderIcon :provider="providerSync.provider_type" />
             {{ providerSyncText }}
           </span>
           <AppButton
