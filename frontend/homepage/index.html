@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Songhive</title>
+  <meta name="description" content="Songhive is a self-hosted, federated music streaming and sharing platform. Your library lives on your hardware — and travels across the Fediverse.">
+
+  <meta property="og:title" content="Songhive">
+  <meta property="og:description" content="A self-hosted, ActivityPub-federated music streaming and sharing platform. Funkwhale meets Mastodon.">
+  <meta property="og:type" content="website">
+  <meta property="og:image" content="https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-full.png">
+
+  <meta name="theme-color" media="(prefers-color-scheme: light)" content="#faf8f3">
+  <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0d1420">
+
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath d='M 235.00 45.12 Q 256.00 33.00 277.00 45.12 L 428.12 132.38 Q 449.12 144.50 449.12 168.75 L 449.12 343.25 Q 449.12 367.50 428.12 379.62 L 277.00 466.88 Q 256.00 479.00 235.00 466.88 L 83.88 379.62 Q 62.88 367.50 62.88 343.25 L 62.88 168.75 Q 62.88 144.50 83.88 132.38 L 235.00 45.12 Z' fill='%23FDAB00' fill-opacity='0.824'/%3E%3Cpath d='M 223.00 25.05 Q 256.00 6.00 289.00 25.05 L 439.51 111.95 Q 472.51 131.00 472.51 169.11 L 472.51 342.89 Q 472.51 381.00 439.51 400.05 L 289.00 486.95 Q 256.00 506.00 223.00 486.95 L 72.49 400.05 Q 39.49 381.00 39.49 342.89 L 39.49 169.11 Q 39.49 131.00 72.49 111.95 L 223.00 25.05 Z M 235.00 47.12 Q 256.00 35.00 277.00 47.12 L 426.39 133.38 Q 447.39 145.50 447.39 169.75 L 447.39 342.25 Q 447.39 366.50 426.39 378.62 L 277.00 464.88 Q 256.00 477.00 235.00 464.88 L 85.61 378.62 Q 64.61 366.50 64.61 342.25 L 64.61 169.75 Q 64.61 145.50 85.61 133.38 L 235.00 47.12 Z' fill='%231D0B00' fill-rule='evenodd'/%3E%3Cpath d='M 165.00 160.26 Q 165.00 148.00 175.93 153.56 L 377.93 256.38 Q 387.00 261.00 377.93 265.62 L 175.93 368.44 Q 165.00 374.00 165.00 361.74 L 165.00 160.26 Z' fill='%23000000'/%3E%3C/svg%3E">
+
+  <style>
+    /* ---------- Theme tokens ---------- */
+    :root {
+      --bg: #faf8f3;
+      --bg-trans: rgba(250, 248, 243, 0.82);
+      --surface: #ffffff;
+      --surface-2: #f2eee4;
+      --text: #1a2332;
+      --muted: #5b6573;
+      --border: #e6e0d2;
+      --accent: #f5b700;
+      --accent-strong: #dda100;
+      --accent-ink: #211800;
+      --accent-soft: rgba(245, 183, 0, 0.14);
+      --code-bg: #131a26;
+      --code-text: #d8e2f0;
+      --code-border: #26314a;
+      --shadow-lg: 0 24px 60px -18px rgba(26, 35, 50, 0.28);
+      --shadow-sm: 0 8px 24px -10px rgba(26, 35, 50, 0.25);
+      --radius: 14px;
+      color-scheme: light;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1420;
+        --bg-trans: rgba(13, 20, 32, 0.82);
+        --surface: #151e2e;
+        --surface-2: #0f1726;
+        --text: #e7edf6;
+        --muted: #9aa7ba;
+        --border: #273349;
+        --accent: #f5b700;
+        --accent-strong: #ffc81f;
+        --accent-ink: #211800;
+        --accent-soft: rgba(245, 183, 0, 0.16);
+        --code-bg: #0a0f18;
+        --code-text: #d8e2f0;
+        --code-border: #273349;
+        --shadow-lg: 0 24px 60px -18px rgba(0, 0, 0, 0.65);
+        --shadow-sm: 0 8px 24px -10px rgba(0, 0, 0, 0.55);
+        color-scheme: dark;
+      }
+    }
+
+    /* ---------- Base ---------- */
+    *, *::before, *::after { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+    }
+
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+                   "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    img { max-width: 100%; display: block; }
+    a { color: inherit; }
+
+    .container {
+      width: min(1120px, 100% - 3rem);
+      margin-inline: auto;
+    }
+
+    /* ---------- Header ---------- */
+    .site-header {
+      position: sticky;
+      top: 0;
+      z-index: 20;
+      background: var(--bg-trans);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .site-header .container {
+      display: flex;
+      align-items: center;
+      gap: 1.5rem;
+      min-height: 4rem;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      font-weight: 800;
+      font-size: 1.15rem;
+      letter-spacing: -0.01em;
+      text-decoration: none;
+      margin-right: auto;
+    }
+
+    .brand svg { width: 30px; height: 30px; flex: none; }
+
+    .nav {
+      display: flex;
+      gap: 1.4rem;
+      font-size: 0.95rem;
+      color: var(--muted);
+    }
+
+    .nav a { text-decoration: none; }
+    .nav a:hover { color: var(--text); }
+
+    .header-actions { display: flex; gap: 0.6rem; }
+
+    /* ---------- Buttons ---------- */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.55rem 1.15rem;
+      border-radius: 999px;
+      border: 1px solid transparent;
+      font-weight: 650;
+      font-size: 0.95rem;
+      text-decoration: none;
+      cursor: pointer;
+      transition: transform 0.15s ease, box-shadow 0.15s ease,
+                  background 0.15s ease, border-color 0.15s ease;
+      white-space: nowrap;
+    }
+
+    .btn--primary {
+      background: var(--accent);
+      color: var(--accent-ink);
+      box-shadow: var(--shadow-sm);
+    }
+    .btn--primary:hover { background: var(--accent-strong); transform: translateY(-1px); }
+
+    .btn--ghost {
+      background: transparent;
+      color: var(--text);
+      border-color: var(--border);
+    }
+    .btn--ghost:hover { border-color: var(--muted); transform: translateY(-1px); }
+
+    .btn svg { width: 1em; height: 1em; }
+
+    /* ---------- Hero ---------- */
+    .hero {
+      padding: 5.5rem 0 4rem;
+      text-align: center;
+      background:
+        radial-gradient(52rem 22rem at 50% -8rem, var(--accent-soft), transparent 70%);
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      padding: 0.3rem 0.9rem;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--surface);
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: var(--muted);
+    }
+
+    .badge .dot {
+      width: 0.5rem; height: 0.5rem;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+
+    .hero h1 {
+      margin: 1.4rem auto 1rem;
+      max-width: 16ch;
+      font-size: clamp(2.5rem, 6.5vw, 4.2rem);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+      font-weight: 850;
+    }
+
+    .hero .lede {
+      margin: 0 auto 2.2rem;
+      max-width: 58ch;
+      font-size: 1.15rem;
+      color: var(--muted);
+    }
+
+    .hero .cta {
+      display: flex;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 0.8rem;
+    }
+
+    .hero .meta {
+      margin-top: 1.4rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+    }
+
+    .hero-figure {
+      margin: 3.5rem auto 0;
+      max-width: 980px;
+    }
+
+    /* Browser frame around screenshots */
+    .browser {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--surface);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .browser__bar {
+      display: flex;
+      align-items: center;
+      gap: 0.8rem;
+      padding: 0.65rem 0.9rem;
+      background: var(--surface-2);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .browser__dots { display: flex; gap: 0.4rem; }
+    .browser__dots span {
+      width: 0.65rem; height: 0.65rem;
+      border-radius: 50%;
+      background: var(--border);
+    }
+
+    .browser__url {
+      flex: 1;
+      padding: 0.2rem 0.8rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-align: left;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .browser img { width: 100%; }
+
+    /* ---------- Sections ---------- */
+    section { padding: 5rem 0; }
+
+    .band { background: var(--surface-2); border-block: 1px solid var(--border); }
+
+    .split {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: clamp(2rem, 5vw, 4.5rem);
+      align-items: center;
+    }
+
+    .split--rev .split__media { order: -1; }
+
+    .eyebrow {
+      display: inline-block;
+      margin-bottom: 0.9rem;
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--accent-strong);
+    }
+
+    .split h2, .center h2 {
+      margin: 0 0 1rem;
+      font-size: clamp(1.7rem, 3.5vw, 2.4rem);
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+    }
+
+    .split p, .center p { color: var(--muted); margin: 0 0 1.4rem; }
+
+    .features { list-style: none; margin: 0; padding: 0; }
+    .features li {
+      position: relative;
+      padding-left: 2rem;
+      margin-bottom: 0.8rem;
+    }
+
+    .features li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0.22em;
+      width: 1.25rem;
+      height: 1.25rem;
+      border-radius: 50%;
+      background: var(--accent-soft) center / 0.72rem no-repeat
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M13.2 4.3 6.5 11 2.8 7.3' fill='none' stroke='%23b98700' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+      border: 1px solid var(--accent);
+    }
+
+    .features strong { font-weight: 700; }
+
+    .shot {
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      background: var(--surface);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .shot img { width: 100%; height: auto; }
+
+    /* Tall phone screenshots */
+    .device {
+      max-width: 340px;
+      margin-inline: auto;
+      border: 1px solid var(--border);
+      border-radius: 28px;
+      overflow: hidden;
+      background: var(--surface);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .device img {
+      width: 100%;
+      max-height: 560px;
+      object-fit: cover;
+      object-position: top;
+    }
+
+    /* Two screenshots in one figure */
+    .shots {
+      display: grid;
+      gap: 1rem;
+      align-items: start;
+    }
+    .shots--duo { grid-template-columns: 1.55fr 1fr; }
+    .shots--stack { grid-template-columns: 1fr; }
+
+    /* ---------- "More" grid ---------- */
+    .center { text-align: center; max-width: 46rem; margin-inline: auto; }
+
+    .grid {
+      margin-top: 3rem;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+      gap: 1rem;
+      text-align: left;
+    }
+
+    .card {
+      padding: 1.4rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--surface);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .card:hover { transform: translateY(-3px); box-shadow: var(--shadow-sm); }
+
+    .card .icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 2.4rem;
+      height: 2.4rem;
+      border-radius: 10px;
+      background: var(--accent-soft);
+      border: 1px solid var(--accent);
+      font-size: 1.15rem;
+      margin-bottom: 0.8rem;
+    }
+
+    .card h3 { margin: 0 0 0.35rem; font-size: 1.02rem; }
+    .card p { margin: 0; font-size: 0.9rem; color: var(--muted); }
+
+    /* ---------- Self-host ---------- */
+    .install {
+      margin-top: 2.6rem;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.2rem;
+      text-align: left;
+    }
+
+    .install figure {
+      margin: 0;
+      border: 1px solid var(--code-border);
+      border-radius: var(--radius);
+      background: var(--code-bg);
+      overflow: hidden;
+    }
+
+    .install figcaption {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.75rem 1.1rem;
+      color: var(--accent);
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--code-border);
+    }
+
+    .install pre {
+      margin: 0;
+      padding: 1.1rem 1.2rem;
+      overflow-x: auto;
+      color: var(--code-text);
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+                  "Liberation Mono", monospace;
+      font-size: 0.82rem;
+      line-height: 1.7;
+    }
+
+    .install .comment { color: #7c8aa0; }
+
+    /* ---------- Footer ---------- */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 3.5rem 0 2.5rem;
+      background: var(--surface-2);
+    }
+
+    .footer-grid {
+      display: grid;
+      grid-template-columns: 1.4fr 1fr 1fr;
+      gap: 2.5rem;
+    }
+
+    .footer-brand { display: flex; align-items: center; gap: 0.6rem; font-weight: 800; }
+    .footer-brand svg { width: 26px; height: 26px; }
+    footer p { color: var(--muted); font-size: 0.9rem; margin: 0.8rem 0 0; }
+
+    footer h4 {
+      margin: 0 0 0.8rem;
+      font-size: 0.8rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    footer ul { list-style: none; margin: 0; padding: 0; }
+    footer li { margin-bottom: 0.5rem; font-size: 0.92rem; }
+    footer a { color: var(--text); text-decoration: none; }
+    footer a:hover { color: var(--accent-strong); }
+
+    .license {
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.82rem;
+      color: var(--muted);
+      display: flex;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.8rem;
+    }
+
+    /* ---------- Responsive ---------- */
+    @media (max-width: 880px) {
+      .nav { display: none; }
+      .split { grid-template-columns: 1fr; }
+      .split--rev .split__media { order: 0; }
+      .split__media { order: -1; }
+      .install { grid-template-columns: 1fr; }
+      .footer-grid { grid-template-columns: 1fr; gap: 1.8rem; }
+      section { padding: 3.5rem 0; }
+      .hero { padding-top: 4rem; }
+    }
+
+    @media (max-width: 560px) {
+      .shots--duo { grid-template-columns: 1fr; }
+      .header-actions .btn span.label { display: none; }
+      .header-actions .btn { padding: 0.55rem 0.8rem; }
+    }
+  </style>
+</head>
+
+<body>
+  <!-- ===== Header ===== -->
+  <header class="site-header">
+    <div class="container">
+      <a class="brand" href="#top" aria-label="Songhive home">
+        <svg viewBox="0 0 512 512" aria-hidden="true">
+          <path d="M 235.00 45.12 Q 256.00 33.00 277.00 45.12 L 428.12 132.38 Q 449.12 144.50 449.12 168.75 L 449.12 343.25 Q 449.12 367.50 428.12 379.62 L 277.00 466.88 Q 256.00 479.00 235.00 466.88 L 83.88 379.62 Q 62.88 367.50 62.88 343.25 L 62.88 168.75 Q 62.88 144.50 83.88 132.38 L 235.00 45.12 Z" fill="#FDAB00" fill-opacity="0.824"/>
+          <path d="M 223.00 25.05 Q 256.00 6.00 289.00 25.05 L 439.51 111.95 Q 472.51 131.00 472.51 169.11 L 472.51 342.89 Q 472.51 381.00 439.51 400.05 L 289.00 486.95 Q 256.00 506.00 223.00 486.95 L 72.49 400.05 Q 39.49 381.00 39.49 342.89 L 39.49 169.11 Q 39.49 131.00 72.49 111.95 L 223.00 25.05 Z M 235.00 47.12 Q 256.00 35.00 277.00 47.12 L 426.39 133.38 Q 447.39 145.50 447.39 169.75 L 447.39 342.25 Q 447.39 366.50 426.39 378.62 L 277.00 464.88 Q 256.00 477.00 235.00 464.88 L 85.61 378.62 Q 64.61 366.50 64.61 342.25 L 64.61 169.75 Q 64.61 145.50 85.61 133.38 L 235.00 47.12 Z" fill="#1D0B00" fill-rule="evenodd"/>
+          <path d="M 165.00 160.26 Q 165.00 148.00 175.93 153.56 L 377.93 256.38 Q 387.00 261.00 377.93 265.62 L 175.93 368.44 Q 165.00 374.00 165.00 361.74 L 165.00 160.26 Z" fill="#000000"/>
+        </svg>
+        Songhive
+      </a>
+
+      <nav class="nav" aria-label="Sections">
+        <a href="#features">Features</a>
+        <a href="#federation">Federation</a>
+        <a href="#sharing">Sharing</a>
+        <a href="#clients">Clients</a>
+        <a href="#self-host">Self-host</a>
+      </nav>
+
+      <div class="header-actions">
+        <a class="btn btn--ghost" href="https://github.com/blacklight/songhive" rel="noopener">
+          <svg viewBox="0 0 16 16" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+          <span class="label">GitHub</span>
+        </a>
+        <a class="btn btn--primary" href="https://git.fabiomanganiello.com/songhive" rel="noopener">
+          <span class="label">Source code</span>
+        </a>
+      </div>
+    </div>
+  </header>
+
+  <main id="top">
+    <!-- ===== Hero ===== -->
+    <section class="hero">
+      <div class="container">
+        <span class="badge"><span class="dot"></span> Self-hosted · ActivityPub · AGPL-3.0</span>
+        <h1>Your music. Your server. Your rules.</h1>
+        <p class="lede">
+          Songhive is a self-hosted music streaming and sharing platform — think
+          Funkwhale meets Mastodon. Your library lives on <em>your</em> hardware,
+          but your music travels across the Fediverse.
+        </p>
+        <div class="cta">
+          <a class="btn btn--primary" href="#self-host">Get started</a>
+          <a class="btn btn--ghost" href="https://git.fabiomanganiello.com/songhive" rel="noopener">Source code</a>
+          <a class="btn btn--ghost" href="https://github.com/blacklight/songhive" rel="noopener">GitHub mirror</a>
+        </div>
+        <p class="meta">Free and open source · PostgreSQL or SQLite · Docker or pip</p>
+
+        <figure class="hero-figure">
+          <div class="browser">
+            <div class="browser__bar" aria-hidden="true">
+              <span class="browser__dots"><span></span><span></span><span></span></span>
+              <span class="browser__url">https://music.example.com</span>
+            </div>
+            <img src="https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-full.png"
+                 width="977" height="707" fetchpriority="high" decoding="async"
+                 alt="The Songhive home page: a dark sidebar with library navigation, album cards under 'Jump back in' and 'Your favorites', and a persistent player bar">
+          </div>
+        </figure>
+      </div>
+    </section>
+
+    <!-- ===== Library ===== -->
+    <section id="features">
+      <div class="container split">
+        <div>
+          <span class="eyebrow">Library &amp; streaming</span>
+          <h2>A real music library, not a folder of files</h2>
+          <p>
+            Upload, organize and stream artists, albums and tracks — Songhive
+            takes care of the metadata so you can take care of the listening.
+          </p>
+          <ul class="features">
+            <li><strong>Automatic tag extraction</strong> and duplicate detection on upload</li>
+            <li><strong>MusicBrainz enrichment</strong> — MBIDs, Cover Art Archive artwork and artist images, written back to the audio files</li>
+            <li><strong>On-the-fly transcoding</strong> to MP3, OGG, FLAC, AAC and Opus, with range requests and per-role bitrate caps</li>
+            <li><strong>Playlists and dynamic radios</strong>, plus a responsive web player that works on any screen</li>
+          </ul>
+        </div>
+        <div class="split__media">
+          <div class="device">
+            <img src="https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-mobile.png"
+                 width="308" height="686" loading="lazy" decoding="async"
+                 alt="Songhive on mobile: album and track cards with a mini player pinned to the bottom">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Federation ===== -->
+    <section id="federation" class="band">
+      <div class="container split split--rev">
+        <div>
+          <span class="eyebrow">Social &amp; federated</span>
+          <h2>Music as social content</h2>
+          <p>
+            Tracks, albums and playlists are first-class ActivityPub objects.
+            Publish, follow, reply, boost and quote — from Songhive or from your
+            Mastodon client.
+          </p>
+          <ul class="features">
+            <li><strong>Full ActivityPub federation</strong> — interoperates with Mastodon, Funkwhale and other Songhive instances</li>
+            <li><strong>Mastodon-style posts</strong> with mentions, hashtags, Markdown, threaded replies, quotes and link preview cards</li>
+            <li><strong>Federated music entities</strong> — follow remote libraries and artists, add remote tracks to your collection</li>
+            <li><strong>Real-time notifications</strong> over WebSocket, with per-type email and daily-digest options</li>
+          </ul>
+        </div>
+        <div class="split__media">
+          <div class="device">
+            <img src="https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-federated.png"
+                 width="308" height="683" loading="lazy" decoding="async"
+                 alt="A federated activity feed in Songhive: posts with embedded track players, link preview cards and reply/boost/like actions">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Embeds ===== -->
+    <section>
+      <div class="container split">
+        <div>
+          <span class="eyebrow">Embeds, feeds &amp; Webmentions</span>
+          <h2>Plays anywhere on the web</h2>
+          <p>
+            A public Songhive link is never a dead link — it's a player. Share a
+            track on Mastodon and it renders with a working play button, right in
+            the timeline.
+          </p>
+          <ul class="features">
+            <li><strong>Embeddable players</strong> via <code>&lt;audio&gt;</code>, Markdown, <code>&lt;script&gt;</code> widgets or iframes — CORS-enabled for Fediverse clients</li>
+            <li><strong>Webmentions</strong> in both directions — get notified when blogs link your music, and ping sources you link to</li>
+            <li><strong>RSS 2.0 and Atom feeds</strong> for every profile, artist, playlist, library, tag and genre</li>
+            <li><strong>Rich link previews</strong> — OpenGraph cards for tracks, albums, artists and profiles</li>
+          </ul>
+        </div>
+        <div class="split__media">
+          <div class="shot">
+            <img src="https://s3.fabiomanganiello.com/fabio/screenshots/songhive/mastodon-integration.png"
+                 width="587" height="587" loading="lazy" decoding="async"
+                 alt="A Songhive track shared on Mastodon, rendered as an embedded audio player with cover art, play button and seek controls">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Sharing ===== -->
+    <section id="sharing" class="band">
+      <div class="container split split--rev">
+        <div>
+          <span class="eyebrow">Sharing &amp; privacy</span>
+          <h2>Share on your terms</h2>
+          <p>
+            Every track, album, playlist and library carries its own visibility —
+            and every share is revocable.
+          </p>
+          <ul class="features">
+            <li><strong>Fine-grained visibility</strong> — private, instance-only or public, per item</li>
+            <li><strong>Share grants</strong> for specific users, or revocable short links that open a preview page with a player</li>
+            <li><strong>Fediverse-aware sharing</strong> — public tracks federate; private ones stay home</li>
+            <li><strong>Mastodon-style moderation</strong> — mutes, blocks, reports, actor suspension and per-instance defederation</li>
+          </ul>
+        </div>
+        <div class="split__media">
+          <div class="shot">
+            <img src="https://s3.fabiomanganiello.com/fabio/screenshots/songhive/track-share.png"
+                 width="650" height="400" loading="lazy" decoding="async"
+                 alt="The share dialog for a track, with tabs for sharing with users, public links, the Fediverse, embed snippets and a public URL">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Listening stats ===== -->
+    <section>
+      <div class="container split">
+        <div>
+          <span class="eyebrow">History, stats &amp; scrobbling</span>
+          <h2>Every play counts</h2>
+          <p>
+            Songhive records your listening history out of the box and turns it
+            into stats you'll actually want to look at.
+          </p>
+          <ul class="features">
+            <li><strong>Personal listening stats</strong> — top artists, albums and tracks over any date range</li>
+            <li><strong>Release-decade histograms</strong> and a listening clock that maps your plays around the day</li>
+            <li><strong>Last.fm and Libre.fm scrobbling</strong> built in — no browser extensions needed</li>
+            <li><strong>Favorites and history</strong> synced across web, Subsonic clients and remote tracks alike</li>
+          </ul>
+        </div>
+        <div class="split__media">
+          <div class="shots shots--duo">
+            <div class="shot">
+              <img src="https://s3.fabiomanganiello.com/fabio/screenshots/songhive/listening-stats-1.png"
+                   width="1006" height="673" loading="lazy" decoding="async"
+                   alt="Listening stats: ranked tables of top artists and top albums with play counts">
+            </div>
+            <div class="shot">
+              <img src="https://s3.fabiomanganiello.com/fabio/screenshots/songhive/listening-stats-2.png"
+                   width="397" height="724" loading="lazy" decoding="async"
+                   alt="Listening stats: a release-decade bar chart and a radial listening-clock chart">
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Clients ===== -->
+    <section id="clients" class="band">
+      <div class="container split split--rev">
+        <div>
+          <span class="eyebrow">Clients &amp; integrations</span>
+          <h2>Your apps already speak Songhive</h2>
+          <p>
+            A full Subsonic/OpenSubsonic compatibility layer means the player you
+            already use on your phone or desktop just works — point it at your
+            instance and log in with an API token.
+          </p>
+          <ul class="features">
+            <li><strong>Subsonic API</strong> under <code>/rest/*.view</code> — Substreamer, Tempus, Symfonium, Ultrasonic, Supersonic and more</li>
+            <li><strong>Mopidy extension</strong> — browse and play your library from any Mopidy server</li>
+            <li><strong>Server-side outputs</strong> — relay to Icecast, cast to Snapcast, or host native HTTP mountpoints that keep playing when you close the tab</li>
+            <li><strong>Podcasts</strong> — subscribe and listen without leaving your library</li>
+          </ul>
+        </div>
+        <div class="split__media">
+          <div class="device">
+            <img src="https://s3.fabiomanganiello.com/fabio/screenshots/songhive/subsonic-android.png"
+                 width="456" height="1023" loading="lazy" decoding="async"
+                 alt="A Songhive library browsed from a Subsonic-compatible Android client, showing frequently played albums and a mini player">
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Artists ===== -->
+    <section>
+      <div class="container split">
+        <div>
+          <span class="eyebrow">For artists</span>
+          <h2>Made for the people who make the music</h2>
+          <p>
+            Songhive isn't only a player — it's a place to publish. Optional
+            payments support lets artists sell tracks and albums, and instances
+            run paid memberships.
+          </p>
+          <ul class="features">
+            <li><strong>Sell tracks and albums</strong> — set a price, pick whether unpaid visitors stream, hear a sample, or get nothing</li>
+            <li><strong>Stripe Connect payouts</strong> — sellers onboard with their own account; money goes straight to them</li>
+            <li><strong>Paid memberships</strong> — gate an instance behind a subscription if you want a supporters-only space</li>
+            <li><strong>Entitlement-aware everywhere</strong> — purchases unlock downloads across the web UI, API and Subsonic clients</li>
+          </ul>
+        </div>
+        <div class="split__media">
+          <div class="shots shots--stack">
+            <div class="shot">
+              <img src="https://s3.fabiomanganiello.com/fabio/screenshots/songhive/artist-payment-form.png"
+                   width="780" height="298" loading="lazy" decoding="async"
+                   alt="The 'sell this item' panel: price and currency fields, an unpaid-visitors policy selector, and sample start/length settings">
+            </div>
+            <div class="shot">
+              <img src="https://s3.fabiomanganiello.com/fabio/screenshots/songhive/membership-form.png"
+                   width="462" height="418" loading="lazy" decoding="async"
+                   alt="The membership panel showing an active subscription and a Stripe Connect payout onboarding form">
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== More ===== -->
+    <section class="band">
+      <div class="container">
+        <div class="center">
+          <span class="eyebrow">And there's more</span>
+          <h2>Built like a platform, not a toy</h2>
+          <p>
+            The boring-but-essential pieces are already in place, so your
+            instance can grow from a personal library to a community hub.
+          </p>
+        </div>
+
+        <div class="grid">
+          <div class="card">
+            <span class="icon" aria-hidden="true">🗃️</span>
+            <h3>External libraries</h3>
+            <p>Attach local folders, S3, SFTP, WebDAV, Dropbox or Google Drive — or import collections from Jellyfin, TIDAL and YouTube.</p>
+          </div>
+          <div class="card">
+            <span class="icon" aria-hidden="true">🔑</span>
+            <h3>OAuth2 &amp; API tokens</h3>
+            <p>A built-in OAuth2 provider for third-party apps, plus revocable API tokens for scripts and Subsonic clients.</p>
+          </div>
+          <div class="card">
+            <span class="icon" aria-hidden="true">👥</span>
+            <h3>Multi-user by design</h3>
+            <p>Open, invite-only, approval-required or closed registration, public/local/private profiles, and admin tooling.</p>
+          </div>
+          <div class="card">
+            <span class="icon" aria-hidden="true">🔎</span>
+            <h3>Remote discovery</h3>
+            <p>Look up remote actors, posts and tracks by handle or URL — SSRF-guarded, domain-moderated and cached.</p>
+          </div>
+          <div class="card">
+            <span class="icon" aria-hidden="true">⚖️</span>
+            <h3>Moderation toolbox</h3>
+            <p>User mutes and blocks, reports forwarded over ActivityPub, actor limits and per-instance defederation.</p>
+          </div>
+          <div class="card">
+            <span class="icon" aria-hidden="true">💾</span>
+            <h3>Your storage, your rules</h3>
+            <p>Local filesystem or S3-compatible object storage, content-addressed files and per-user upload quotas.</p>
+          </div>
+          <div class="card">
+            <span class="icon" aria-hidden="true">🔔</span>
+            <h3>Real-time everything</h3>
+            <p>WebSocket notifications in-app, per-type email delivery, daily digests and optional push notifications.</p>
+          </div>
+          <div class="card">
+            <span class="icon" aria-hidden="true">🧩</span>
+            <h3>Open API</h3>
+            <p>A documented REST API under <code>/api/v1</code> with an OpenAPI spec and bundled Swagger UI.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Self-host ===== -->
+    <section id="self-host">
+      <div class="container">
+        <div class="center">
+          <span class="eyebrow">Self-host</span>
+          <h2>Running your own hive takes minutes</h2>
+          <p>
+            A single Docker Compose stack — or a plain <code>pip install</code> —
+            brings up the web UI, the API, background workers and federation.
+          </p>
+        </div>
+
+        <div class="install">
+          <figure>
+            <figcaption>🐳 &nbsp;Docker</figcaption>
+            <pre><code><span class="comment"># Bootstrap docker-compose.yml, nginx.conf,</span>
+<span class="comment"># config.toml and .env in one step</span>
+curl -fsSL https://git.fabiomanganiello.com/songhive/raw/branch/main/docker/bootstrap.sh | sh
+
+<span class="comment"># Start the stack</span>
+docker compose up -d</code></pre>
+          </figure>
+
+          <figure>
+            <figcaption>🐍 &nbsp;pip</figcaption>
+            <pre><code><span class="comment"># Install the latest stable release</span>
+pip install songhive
+
+<span class="comment"># Configure, then run</span>
+songhive -c /path/to/config.toml</code></pre>
+          </figure>
+        </div>
+
+        <div class="center" style="margin-top: 3rem">
+          <p>
+            Songhive is free software, released under the
+            <a href="https://git.fabiomanganiello.com/songhive/src/branch/main/LICENSE" rel="noopener"><strong>AGPL-3.0 license</strong></a>.
+            Hack on it, run it, federate it.
+          </p>
+          <div class="cta" style="display:flex; justify-content:center; gap:0.8rem; flex-wrap:wrap;">
+            <a class="btn btn--primary" href="https://git.fabiomanganiello.com/songhive" rel="noopener">Get the code</a>
+            <a class="btn btn--ghost" href="https://github.com/blacklight/songhive" rel="noopener">Star it on GitHub</a>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ===== Footer ===== -->
+  <footer>
+    <div class="container">
+      <div class="footer-grid">
+        <div>
+          <div class="footer-brand">
+            <svg viewBox="0 0 512 512" aria-hidden="true">
+              <path d="M 235.00 45.12 Q 256.00 33.00 277.00 45.12 L 428.12 132.38 Q 449.12 144.50 449.12 168.75 L 449.12 343.25 Q 449.12 367.50 428.12 379.62 L 277.00 466.88 Q 256.00 479.00 235.00 466.88 L 83.88 379.62 Q 62.88 367.50 62.88 343.25 L 62.88 168.75 Q 62.88 144.50 83.88 132.38 L 235.00 45.12 Z" fill="#FDAB00" fill-opacity="0.824"/>
+              <path d="M 223.00 25.05 Q 256.00 6.00 289.00 25.05 L 439.51 111.95 Q 472.51 131.00 472.51 169.11 L 472.51 342.89 Q 472.51 381.00 439.51 400.05 L 289.00 486.95 Q 256.00 506.00 223.00 486.95 L 72.49 400.05 Q 39.49 381.00 39.49 342.89 L 39.49 169.11 Q 39.49 131.00 72.49 111.95 L 223.00 25.05 Z M 235.00 47.12 Q 256.00 35.00 277.00 47.12 L 426.39 133.38 Q 447.39 145.50 447.39 169.75 L 447.39 342.25 Q 447.39 366.50 426.39 378.62 L 277.00 464.88 Q 256.00 477.00 235.00 464.88 L 85.61 378.62 Q 64.61 366.50 64.61 342.25 L 64.61 169.75 Q 64.61 145.50 85.61 133.38 L 235.00 47.12 Z" fill="#1D0B00" fill-rule="evenodd"/>
+              <path d="M 165.00 160.26 Q 165.00 148.00 175.93 153.56 L 377.93 256.38 Q 387.00 261.00 377.93 265.62 L 175.93 368.44 Q 165.00 374.00 165.00 361.74 L 165.00 160.26 Z" fill="#000000"/>
+            </svg>
+            Songhive
+          </div>
+          <p>
+            A federated, self-hosted music streaming and sharing platform.
+            Your library lives on your hardware — your music travels across
+            the Fediverse.
+          </p>
+        </div>
+
+        <div>
+          <h4>Source</h4>
+          <ul>
+            <li><a href="https://git.fabiomanganiello.com/songhive" rel="noopener">Main repository</a></li>
+            <li><a href="https://github.com/blacklight/songhive" rel="noopener">GitHub mirror</a></li>
+            <li><a href="https://git.fabiomanganiello.com/songhive/src/branch/main/docs/ARCHITECTURE.md" rel="noopener">Architecture docs</a></li>
+          </ul>
+        </div>
+
+        <div>
+          <h4>Ecosystem</h4>
+          <ul>
+            <li><a href="https://git.fabiomanganiello.com/mopidy-songhive" rel="noopener">mopidy-songhive</a></li>
+            <li><a href="https://github.com/blacklight/pubby" rel="noopener">pubby — ActivityPub library</a></li>
+            <li><a href="https://pypi.org/project/songhive/" rel="noopener">PyPI package</a></li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="license">
+        <span>Songhive is free software under the <a href="https://git.fabiomanganiello.com/songhive/src/branch/main/LICENSE" rel="noopener">AGPL-3.0 license</a>.</span>
+        <span>No JavaScript required to read this page. Naturally.</span>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
