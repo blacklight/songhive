@@ -9,6 +9,11 @@ import { remoteObjectToQueueTrack } from "@/utils/remoteObject";
 export type PlaylistResponse = components["schemas"]["PlaylistResponse"] & {
   /** Lazy-contents state for provider-backed playlists (see Section 6). */
   provider_sync?: ProviderSyncStatus | null;
+  /**
+   * Type of the backing external provider ("tidal", "youtube", …);
+   * null for local playlists (types.ts is regenerated separately).
+   */
+  provider_type?: string | null;
 };
 export type PlaylistCreate = components["schemas"]["PlaylistCreate"];
 export type PlaylistUpdate = components["schemas"]["PlaylistUpdate"];

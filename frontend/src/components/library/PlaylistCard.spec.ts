@@ -96,6 +96,33 @@ describe("PlaylistCard", () => {
     expect(wrapper.text()).not.toContain("user-1");
   });
 
+  it("shows the backing provider for provider-synced playlists", async () => {
+    const wrapper = mount(PlaylistCard, {
+      props: {
+        playlist: { ...createPlaylist(), provider_type: "tidal" },
+      },
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const provider = wrapper.find(".playlist-card__provider");
+    expect(provider.exists()).toBe(true);
+    expect(provider.text()).toContain("TIDAL");
+    expect(provider.attributes("title")).toBe(
+      i18n.global.t("browse.providerSync.from", { provider: "TIDAL" }),
+    );
+  });
+
+  it("hides the provider badge for local playlists", async () => {
+    const wrapper = mount(PlaylistCard, {
+      props: { playlist: createPlaylist() },
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    expect(wrapper.find(".playlist-card__provider").exists()).toBe(false);
+  });
+
   it("shows the response owner for playlists owned by other users", async () => {
     const playlist = {
       ...createPlaylist(),

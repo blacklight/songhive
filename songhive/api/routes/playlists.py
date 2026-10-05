@@ -3,7 +3,7 @@ Playlist routes.
 """
 
 from datetime import datetime
-from typing import List, Literal, Optional, Set
+from typing import Dict, List, Literal, Optional, Set
 
 from fastapi import (
     APIRouter,
@@ -19,12 +19,15 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
 from ...external.lazy import ensure_contents
 from ...models._enums import Visibility
 from ...models.audit_log import AuditTargetType
+from ...models.external_item import ExternalItem
+from ...models.external_library import ExternalLibrary
 from ...models.playlist import Playlist
 from ...models.podcast import PodcastEpisode
 from ...models.user import User
@@ -86,6 +89,10 @@ class PlaylistResponse(BaseModel):
     # provider-backed (``{"provider_type", "state", "fetched_at",
     # "ttl_seconds", "error"}``).
     provider_sync: Optional[dict] = None
+    # Provider backing this playlist via an entity-backed external library
+    # (``"tidal"``, ``"youtube"``, …); None for local playlists. Lets clients
+    # disambiguate same-named playlists synced from different providers.
+    provider_type: Optional[str] = None
 
 
 class PlaylistStatsResponse(BaseModel):
@@ -213,6 +220,39 @@ async def _playlist_cover_url(playlist: Playlist, storage: StorageService) -> Op
     return None
 
 
+async def _playlist_provider_types(db: AsyncSession, playlist_ids: List[str]) -> Dict[str, str]:
+    """
+    Map playlist ids to the type of their backing external provider.
+
+    Only active ``ExternalItem`` rows on enabled external libraries count —
+    mirrors the provenance semantics used for provider-backed tracks.
+    """
+    if not playlist_ids:
+        return {}
+
+    rows = (
+        await db.execute(
+            select(ExternalItem.playlist_id, ExternalLibrary.provider_type)
+            .join(
+                ExternalLibrary,
+                ExternalItem.external_library_id == ExternalLibrary.id,
+            )
+            .where(
+                ExternalItem.kind == "playlist",
+                ExternalItem.playlist_id.in_(playlist_ids),
+                ExternalItem.state == "active",
+                ExternalLibrary.enabled.is_(True),
+            )
+            .order_by(ExternalLibrary.provider_type)
+        )
+    ).all()
+
+    providers: Dict[str, str] = {}
+    for playlist_id, provider_type in rows:
+        providers.setdefault(str(playlist_id), provider_type)
+    return providers
+
+
 def _playlist_tags(playlist: Playlist) -> List[str]:
     """Return loaded tag names, avoiding a lazy load."""
     if not _is_loaded(playlist, "tags"):
@@ -228,6 +268,7 @@ async def _build_playlist_response(
     saved_ids: Optional[Set[str]] = None,
     db: Optional[AsyncSession] = None,
     provider_sync: Optional[dict] = None,
+    provider_type: Optional[str] = None,
 ) -> PlaylistResponse:
     """Build a PlaylistResponse with optional nested summaries."""
     owner = None
@@ -262,6 +303,7 @@ async def _build_playlist_response(
         created_at=playlist.created_at,
         updated_at=playlist.updated_at,
         provider_sync=provider_sync,
+        provider_type=provider_type,
     )
 
 
@@ -304,9 +346,23 @@ async def list_playlists(
         sort_by=sort.field,
         sort_dir=sort.direction,
     )
+
     pagination.set_total(response, total)
-    saved_ids = await collection.saved_item_ids(db, user, "playlist", [str(p.id) for p in rows])
-    return [await _build_playlist_response(p, user, storage, include, saved_ids, db=db) for p in rows]
+    playlist_ids = [str(p.id) for p in rows]
+    saved_ids = await collection.saved_item_ids(db, user, "playlist", playlist_ids)
+    provider_types = await _playlist_provider_types(db, playlist_ids)
+    return [
+        await _build_playlist_response(
+            p,
+            user,
+            storage,
+            include,
+            saved_ids,
+            db=db,
+            provider_type=provider_types.get(str(p.id)),
+        )
+        for p in rows
+    ]
 
 
 @router.post("/", response_model=PlaylistResponse, status_code=201)
@@ -358,6 +414,7 @@ async def get_playlist(
 
     saved_ids = await collection.saved_item_ids(db, user, "playlist", {playlist_id})
     provider_status = await ensure_contents(db, "playlist", playlist_id)
+    provider_types = await _playlist_provider_types(db, [playlist_id])
     return await _build_playlist_response(
         playlist,
         user,
@@ -366,6 +423,7 @@ async def get_playlist(
         saved_ids,
         db=db,
         provider_sync=provider_status.to_dict() if provider_status is not None else None,
+        provider_type=provider_types.get(playlist_id),
     )
 
 

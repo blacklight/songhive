@@ -10,7 +10,10 @@ import pytest
 from songhive.models._enums import Visibility
 from songhive.models.album import Album
 from songhive.models.artist import Artist
+from songhive.models.external_item import ExternalItem
+from songhive.models.external_library import ExternalLibrary
 from songhive.models.genre import Genre, GenreTrack
+from songhive.models.library import Library
 from songhive.models.playlist import Playlist, PlaylistTrack
 from songhive.models.tag import Tag, TagTrack
 from songhive.models.track import Track
@@ -575,3 +578,54 @@ def test_playlist_stats_missing_returns_404(client):
     """Requesting stats for a missing playlist returns 404."""
     response = client.get("/api/v1/playlists/00000000-0000-0000-0000-000000000000/stats")
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_playlist_responses_expose_provider_type(client, regular_user, db_session, auth_headers):
+    """List and detail responses report the backing external provider type."""
+    library = Library(
+        name="TIDAL library",
+        owner_id=regular_user.id,
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(library)
+    await db_session.flush()
+    external_library = ExternalLibrary(
+        library_id=str(library.id),
+        provider_type="tidal",
+        scope="user",
+        created_by_id=regular_user.id,
+    )
+    playlist = Playlist(
+        name="Provider playlist",
+        owner_id=regular_user.id,
+        visibility=Visibility.PRIVATE.value,
+    )
+    local = Playlist(
+        name="Local playlist",
+        owner_id=regular_user.id,
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add_all([external_library, playlist, local])
+    await db_session.flush()
+    db_session.add(
+        ExternalItem(
+            external_library_id=str(external_library.id),
+            kind="playlist",
+            provider_key="tidal-pl-1",
+            playlist_id=str(playlist.id),
+            state="active",
+        )
+    )
+    await db_session.flush()
+
+    headers = auth_headers(regular_user)
+    response = client.get("/api/v1/playlists/", headers=headers)
+    assert response.status_code == 200
+    by_name = {p["name"]: p for p in response.json()}
+    assert by_name["Provider playlist"]["provider_type"] == "tidal"
+    assert by_name["Local playlist"]["provider_type"] is None
+
+    detail = client.get(f"/api/v1/playlists/{playlist.id}", headers=headers)
+    assert detail.status_code == 200
+    assert detail.json()["provider_type"] == "tidal"

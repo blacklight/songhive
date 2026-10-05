@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { RouterLink } from "vue-router";
+import { useI18n } from "vue-i18n";
 import { useEntityMeta } from "@/composables/useEntityMeta";
+import { providerDisplayName } from "@/utils/providerName";
 import type { PlaylistResponse } from "@/api/playlists";
 import UserLink from "@/components/user/UserLink.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
@@ -12,8 +14,18 @@ export interface Props {
 
 const props = defineProps<Props>();
 const emit = defineEmits<{ click: [playlist: PlaylistResponse] }>();
+const { t } = useI18n();
 const { owner, visibilityText, visibilityIcon } = useEntityMeta(
   computed(() => props.playlist),
+);
+
+const providerLabel = computed(() =>
+  providerDisplayName(props.playlist.provider_type),
+);
+const providerTitle = computed(() =>
+  providerLabel.value
+    ? t("browse.providerSync.from", { provider: providerLabel.value })
+    : "",
 );
 </script>
 
@@ -46,6 +58,14 @@ const { owner, visibilityText, visibilityIcon } = useEntityMeta(
         size="sm"
         :owner="owner"
       />
+      <span
+        v-if="providerLabel"
+        :title="providerTitle"
+        class="playlist-card__provider"
+      >
+        <i class="fa-solid fa-cloud" aria-hidden="true" />
+        {{ providerLabel }}
+      </span>
       <span :title="visibilityText" class="playlist-card__visibility">
         <i :class="visibilityIcon" />
       </span>
@@ -100,11 +120,18 @@ const { owner, visibilityText, visibilityIcon } = useEntityMeta(
 }
 
 .playlist-card__visibility,
+.playlist-card__provider,
 .playlist-card__owner {
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.playlist-card__provider {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(0.5 * var(--space-1));
 }
 
 .playlist-card__owner {

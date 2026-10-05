@@ -157,7 +157,15 @@ const {
 });
 
 const providerLabel = computed(() =>
-  providerDisplayName(providerSync.value?.provider_type),
+  providerDisplayName(
+    playlist.value?.provider_type ?? providerSync.value?.provider_type,
+  ),
+);
+
+const providerTitle = computed(() =>
+  providerLabel.value
+    ? t("browse.providerSync.from", { provider: providerLabel.value })
+    : "",
 );
 
 const providerSyncText = computed(() => {
@@ -457,6 +465,14 @@ watch(
             :total-duration="stats.total_duration"
           />
           <span
+            v-if="providerLabel"
+            :title="providerTitle"
+            class="playlist-view__provider"
+          >
+            <i class="fa-solid fa-cloud" aria-hidden="true" />
+            {{ providerLabel }}
+          </span>
+          <span
             v-if="providerSync"
             class="playlist-view__provider-sync"
             :class="{
@@ -727,6 +743,7 @@ watch(
   max-width: 24rem;
 }
 
+.playlist-view__provider,
 .playlist-view__provider-sync {
   display: inline-flex;
   align-items: center;

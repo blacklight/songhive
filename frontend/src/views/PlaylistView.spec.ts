@@ -233,6 +233,26 @@ describe("PlaylistView", () => {
     expect(wrapper.text()).toContain("30:00");
   });
 
+  it("shows the backing provider in the header", async () => {
+    vi.mocked(playlistsApi.getPlaylist).mockResolvedValue({
+      ...createPlaylist("playlist-1", "Road Trip"),
+      provider_type: "tidal",
+    });
+
+    await mountAt("/playlists/playlist-1");
+
+    const provider = wrapper.find(".playlist-view__provider");
+    expect(provider.exists()).toBe(true);
+    expect(provider.text()).toContain("TIDAL");
+    expect(provider.attributes("title")).toBe("Provider: TIDAL");
+  });
+
+  it("hides the provider badge for local playlists", async () => {
+    await mountAt("/playlists/playlist-1");
+
+    expect(wrapper.find(".playlist-view__provider").exists()).toBe(false);
+  });
+
   it("shows an empty state when the playlist has no tracks", async () => {
     await mountAt("/playlists/playlist-1");
 
