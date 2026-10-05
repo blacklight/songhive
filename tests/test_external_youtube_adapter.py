@@ -200,6 +200,28 @@ def test_map_track_playlist_item_shape():
     assert meta.provider_ids == {"youtube": "vid003"}
 
 
+def test_map_track_playlist_item_prefers_video_owner_channel():
+    """``playlistItems`` ``channelTitle`` is the playlist owner, not the uploader."""
+    meta = map_track(
+        {
+            "snippet": {
+                "title": "Playlist Video",
+                "channelTitle": "Playlist Owner",
+                "channelId": "UCowner",
+                "videoOwnerChannelTitle": "Uploader Channel",
+                "videoOwnerChannelId": "UCuploader",
+                "resourceId": {"kind": "youtube#video", "videoId": "vid007"},
+            },
+            "contentDetails": {"videoId": "vid007"},
+            "_source": "youtube_api",
+        }
+    )
+    assert meta is not None
+    assert meta.artist == "Uploader Channel"
+    assert meta.artists == ("Uploader Channel",)
+    assert meta.artist_provider_key == "UCuploader"
+
+
 def test_map_track_ytdlp_shape():
     meta = map_track(
         {

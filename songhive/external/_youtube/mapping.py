@@ -295,8 +295,14 @@ def _map_data_api_video(item: dict) -> Optional[ExternalTrackMetadata]:
     if not isinstance(details, dict):
         details = {}
 
-    channel_title = snippet.get("channelTitle")
-    channel_id = snippet.get("channelId")
+    # ``playlistItems`` resources identify the channel that added the item
+    # under ``channelTitle``/``channelId`` — for the user's own playlists
+    # that's the playlist owner, not the video's uploader. The uploader
+    # channel lives in ``videoOwnerChannelTitle``/``videoOwnerChannelId``.
+    # ``videos`` resources lack the owner fields, so the plain fields stay
+    # the fallback.
+    channel_title = snippet.get("videoOwnerChannelTitle") or snippet.get("channelTitle")
+    channel_id = snippet.get("videoOwnerChannelId") or snippet.get("channelId")
     artists = (str(channel_title),) if channel_title else ()
 
     tags = snippet.get("tags")

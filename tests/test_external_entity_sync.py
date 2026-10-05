@@ -523,6 +523,65 @@ async def test_entity_track_cover_does_not_overwrite(db_session, fake_redis, _ma
 
 
 @pytest.mark.asyncio
+async def test_entity_track_heals_remapped_artist(db_session, fake_redis, _make_entity_library):
+    """An unchanged immutable re-sync re-points a wrongly mapped artist.
+
+    Tracks materialized before a provider-mapping fix keep the stale
+    artist reference — immutable providers never rewrite metadata and
+    the payload fingerprint does not change. The sync must heal the
+    artist when the freshly mapped name disagrees.
+    """
+    external_library, _, _ = await _make_entity_library(
+        {"tracks": [_track("jf-1", artist="Playlist Owner", artists=("Playlist Owner",))]},
+        {"immutable_tracks": True},
+    )
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+    track = (await db_session.execute(select(Track))).scalar_one()
+    await db_session.refresh(track, ["artist"])
+    assert track.artist.name == "Playlist Owner"
+
+    # Same etag and raw payload — only the mapped artist changes, as it
+    # would after a mapper fix.
+    config = secrets.decrypt_json(external_library.config)
+    config["entities"]["tracks"][0]["metadata"]["artist"] = "Uploader Channel"
+    config["entities"]["tracks"][0]["metadata"]["artists"] = ("Uploader Channel",)
+    external_library.config = secrets.encrypt_json(config)
+    await db_session.flush()
+
+    run = await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+    assert run.status == "success"
+    assert run.details["entities"].get("track_artists_healed") == 1
+    await db_session.refresh(track, ["artist"])
+    assert track.artist.name == "Uploader Channel"
+
+
+@pytest.mark.asyncio
+async def test_entity_track_heal_skips_locally_edited_artist(db_session, fake_redis, _make_entity_library):
+    """A track with local metadata edits is never re-pointed by the heal."""
+    from datetime import datetime, timezone
+
+    external_library, _, _ = await _make_entity_library(
+        {"tracks": [_track("jf-1", artist="Edited Artist", artists=("Edited Artist",))]},
+        {"immutable_tracks": True},
+    )
+    await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+    track = (await db_session.execute(select(Track))).scalar_one()
+    track.metadata_updated_at = datetime.now(timezone.utc)
+    await db_session.flush()
+
+    config = secrets.decrypt_json(external_library.config)
+    config["entities"]["tracks"][0]["metadata"]["artist"] = "Uploader Channel"
+    config["entities"]["tracks"][0]["metadata"]["artists"] = ("Uploader Channel",)
+    external_library.config = secrets.encrypt_json(config)
+    await db_session.flush()
+
+    run = await sync_external_library(db_session, str(external_library.id), triggered_by="manual", redis=fake_redis)
+    assert run.details["entities"].get("track_artists_healed", 0) == 0
+    await db_session.refresh(track, ["artist"])
+    assert track.artist.name == "Edited Artist"
+
+
+@pytest.mark.asyncio
 async def test_entity_track_artist_image_backfill(db_session, fake_redis, _make_entity_library):
     """Track-derived artists pick up their provider image after the pass.
 

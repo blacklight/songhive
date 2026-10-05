@@ -802,6 +802,47 @@ async def _find_entity_artist(
     return await _find_or_create_artist(session, name)
 
 
+async def _heal_entity_track_artist(
+    session: AsyncSession,
+    track: Track,
+    metadata: ExternalTrackMetadata,
+    counters: RunCounters,
+    *,
+    match_musicbrainz: bool = False,
+) -> None:
+    """
+    Re-point ``track.artist_id`` when freshly mapped metadata disagrees.
+
+    Provider-payload mappers occasionally get fixed after tracks were
+    materialized (e.g. YouTube ``playlistItems`` payloads exposed the
+    playlist owner's channel as the track artist). Immutable providers
+    never rewrite metadata and payload fingerprints do not change, so
+    the stale artist reference would otherwise survive every re-sync.
+    Tracks with local metadata edits and the ``"Unknown Artist"``
+    sentinel are left alone — healing must never clobber a user edit or
+    a good artist with a mapper fallback.
+    """
+    expected = (metadata.artist or "").strip()
+    if not expected or expected == "Unknown Artist" or not track.artist_id or track.metadata_updated_at is not None:
+        return
+
+    result = await session.execute(_lean(select(Artist.name)).where(Artist.id == track.artist_id))
+    current = result.scalar_one_or_none()
+    if current is None or current.lower() == expected.lower():
+        return
+
+    artist = await _find_entity_artist(
+        session,
+        expected,
+        musicbrainz_id=(metadata.provider_ids or {}).get("MusicBrainzArtist"),
+        match_musicbrainz=match_musicbrainz,
+    )
+    track.artist_id = str(artist.id)
+    track.extra_artists = list(metadata.artists[1:]) if len(metadata.artists) > 1 else None
+    _queue_artist_image(counters, str(artist.id), metadata.artist_provider_key)
+    _entity_bump(counters, "track_artists_healed")
+
+
 async def _find_entity_album(
     session: AsyncSession,
     *,
@@ -894,6 +935,7 @@ async def _apply_entity_track(
                     str(track.id),
                     added_by_id,
                 )
+            await _heal_entity_track_artist(session, track, metadata, counters, match_musicbrainz=match_musicbrainz)
             return track
         if external_item.state == "active" and _entity_unchanged(external_item, item.etag, fingerprint):
             external_item.last_seen_at = _utcnow()
@@ -911,6 +953,7 @@ async def _apply_entity_track(
                 )
             if config.get("sync_metadata") and track.musicbrainz_enriched_at is None:
                 counters.enrich_queue.add(str(track.id))
+            await _heal_entity_track_artist(session, track, metadata, counters, match_musicbrainz=match_musicbrainz)
             return track
 
     extra_artists = list(metadata.artists[1:]) if len(metadata.artists) > 1 else None
