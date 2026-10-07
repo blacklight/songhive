@@ -295,6 +295,14 @@ async def _require_manageable_playlist(ctx: _Ctx, playlist_id: Optional[str] = N
     return playlist
 
 
+async def _require_editable_playlist(ctx: _Ctx, playlist_id: Optional[str] = None) -> Playlist:
+    """Load a playlist the user may edit (owner, admin, or collaborator)."""
+    playlist = await _require_playlist(ctx, playlist_id)
+    if not await acl.can_edit(ctx.db, ctx.user, "playlist", playlist.id):
+        raise SubsonicError(NOT_AUTHORIZED, "Not authorized to modify this playlist")
+    return playlist
+
+
 async def _songs_payload(ctx: _Ctx, tracks: List[Track]) -> List[Dict[str, Any]]:
     """Serialize tracks, annotating starred timestamps for the requester."""
     stars = await favorite_map(ctx.db, ctx.user, [str(t.id) for t in tracks])
@@ -919,7 +927,7 @@ async def _create_playlist(ctx: _Ctx) -> Dict[str, Any]:
     playlist_id = ctx.params.get("playlistId")
 
     if playlist_id:
-        playlist = await _require_manageable_playlist(ctx, playlist_id)
+        playlist = await _require_editable_playlist(ctx, playlist_id)
         name = ctx.params.get("name")
         if name:
             playlist.name = name
@@ -935,7 +943,9 @@ async def _create_playlist(ctx: _Ctx) -> Dict[str, Any]:
             for row in existing.scalars().all():
                 await ctx.db.delete(row)
             await ctx.db.flush()
-            await music.add_playlist_tracks(ctx.db, str(playlist.id), song_ids, allow_duplicates=True)
+            await music.add_playlist_tracks(
+                ctx.db, str(playlist.id), song_ids, allow_duplicates=True, added_by_id=ctx.user.id
+            )
         action = "playlist.update"
     else:
         name = ctx.params.get("name")
@@ -949,7 +959,9 @@ async def _create_playlist(ctx: _Ctx) -> Dict[str, Any]:
         ctx.db.add(playlist)
         await ctx.db.flush()
         if song_ids:
-            await music.add_playlist_tracks(ctx.db, str(playlist.id), song_ids, allow_duplicates=True)
+            await music.add_playlist_tracks(
+                ctx.db, str(playlist.id), song_ids, allow_duplicates=True, added_by_id=ctx.user.id
+            )
         action = "playlist.create"
 
     await audit.log_action(
@@ -975,7 +987,7 @@ async def _create_playlist(ctx: _Ctx) -> Dict[str, Any]:
 
 @_endpoint("updatePlaylist")
 async def _update_playlist(ctx: _Ctx) -> Dict[str, Any]:
-    playlist = await _require_manageable_playlist(ctx)
+    playlist = await _require_editable_playlist(ctx)
 
     name = ctx.params.get("name")
     if name is not None:
@@ -984,6 +996,9 @@ async def _update_playlist(ctx: _Ctx) -> Dict[str, Any]:
     if comment is not None:
         playlist.description = comment
     if "public" in ctx.params:
+        # Visibility is owner/admin territory — collaborators may not touch it.
+        if not await acl.can_manage(ctx.db, ctx.user, "playlist", playlist.id):
+            raise SubsonicError(NOT_AUTHORIZED, "Not authorized to change playlist visibility")
         playlist.visibility = Visibility.PUBLIC.value if ctx.params.boolean("public") else Visibility.PRIVATE.value
 
     # songIndexToRemove may repeat; collect every occurrence.
@@ -1000,7 +1015,9 @@ async def _update_playlist(ctx: _Ctx) -> Dict[str, Any]:
     if song_ids_to_add:
         accessible = await acl.filter_accessible_track_ids(ctx.db, ctx.user, song_ids_to_add)
         ordered = [tid for tid in song_ids_to_add if tid in accessible]
-        added = await music.add_playlist_tracks(ctx.db, str(playlist.id), ordered, allow_duplicates=True)
+        added = await music.add_playlist_tracks(
+            ctx.db, str(playlist.id), ordered, allow_duplicates=True, added_by_id=ctx.user.id
+        )
 
     await audit.log_action(
         ctx.db,

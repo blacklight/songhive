@@ -21,6 +21,7 @@ import ShareDialog from "./ShareDialog.vue";
 vi.mock("@/api/shares", () => ({
   listShareGrants: vi.fn(),
   createShareGrant: vi.fn(),
+  updateShareGrant: vi.fn(),
   deleteShareGrant: vi.fn(),
   listShareUrls: vi.fn(),
   createShareUrl: vi.fn(),
@@ -241,7 +242,88 @@ describe("ShareDialog", () => {
       item_type: "album",
       item_id: "album-1",
       user_id: "user-2",
+      collaborator: false,
     });
+  });
+
+  it("creates a collaborator grant for a playlist", async () => {
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      itemType: "playlist",
+      itemId: "playlist-1",
+      ownerId: "user-1",
+    });
+    await flushPromises();
+
+    const checkbox = document.body.querySelector(
+      'input[type="checkbox"]',
+    ) as HTMLInputElement;
+    expect(checkbox).not.toBeNull();
+    checkbox.click();
+    await flushPromises();
+
+    vi.useFakeTimers();
+    const input = document.body.querySelector(
+      'input[type="search"]',
+    ) as HTMLInputElement;
+    expect(input).not.toBeNull();
+    input.value = "user-2";
+    input.dispatchEvent(new Event("input"));
+    vi.advanceTimersByTime(300);
+    await flushPromises();
+
+    const createButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find((b) => b.textContent === i18n.global.t("browse.share.createGrant"));
+    expect(createButton).toBeDefined();
+    await createButton?.click();
+    await flushPromises();
+
+    expect(sharesApi.createShareGrant).toHaveBeenCalledWith({
+      item_type: "playlist",
+      item_id: "playlist-1",
+      user_id: "user-2",
+      collaborator: true,
+    });
+  });
+
+  it("promotes a grant to collaborator and demotes it back", async () => {
+    const grant = createGrant("sg1", "user-2");
+    vi.mocked(sharesApi.listShareGrants).mockResolvedValue([
+      { ...grant, item_type: "playlist", item_id: "playlist-1" },
+    ]);
+
+    setAuthenticated("user-1");
+    wrapper = mountOpen({
+      itemType: "playlist",
+      itemId: "playlist-1",
+      ownerId: "user-1",
+    });
+    await flushPromises();
+
+    const promoteButton = Array.from(
+      document.body.querySelectorAll("button"),
+    ).find(
+      (b) => b.textContent === i18n.global.t("browse.share.makeCollaborator"),
+    );
+    expect(promoteButton).toBeDefined();
+    await promoteButton?.click();
+    await flushPromises();
+
+    expect(sharesApi.updateShareGrant).toHaveBeenCalledWith("sg1", {
+      collaborator: true,
+    });
+  });
+
+  it("hides collaborator controls for non-collection items", async () => {
+    setAuthenticated("user-1");
+    wrapper = mountOpen({ ownerId: "user-1" });
+    await flushPromises();
+
+    expect(document.body.querySelector('input[type="checkbox"]')).toBeNull();
+    expect(document.body.textContent).not.toContain(
+      i18n.global.t("browse.share.collaborator"),
+    );
   });
 
   it("revokes a share grant after confirmation", async () => {

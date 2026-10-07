@@ -143,8 +143,24 @@ def test_delete_share_grant(client, regular_user, other_user, auth_headers, priv
     assert list_response.json() == []
 
 
-def test_delete_share_grant_non_owner_forbidden(client, regular_user, other_user, auth_headers, private_file):
-    """A non-owner cannot enumerate or delete someone else's share grant."""
+@pytest.mark.asyncio
+async def test_delete_share_grant_non_owner_forbidden(
+    client, regular_user, other_user, make_user, auth_headers, private_file
+):
+    """A third party cannot enumerate or delete someone else's share grant."""
+    third_user = await make_user("third", email_verified=True)
+    created = client.post(
+        "/api/v1/shares",
+        json={"item_type": "file", "item_id": private_file["id"], "user_id": str(other_user.id)},
+        headers=auth_headers(regular_user),
+    ).json()
+
+    response = client.delete(f"/api/v1/shares/{created['id']}", headers=auth_headers(third_user))
+    assert response.status_code == 404
+
+
+def test_grantee_can_delete_own_share_grant(client, regular_user, other_user, auth_headers, private_file):
+    """The grantee may leave a share by deleting their own grant."""
     created = client.post(
         "/api/v1/shares",
         json={"item_type": "file", "item_id": private_file["id"], "user_id": str(other_user.id)},
@@ -152,7 +168,10 @@ def test_delete_share_grant_non_owner_forbidden(client, regular_user, other_user
     ).json()
 
     response = client.delete(f"/api/v1/shares/{created['id']}", headers=auth_headers(other_user))
-    assert response.status_code == 404
+    assert response.status_code == 204
+
+    denied = client.get(f"/api/v1/files/{private_file['id']}", headers=auth_headers(other_user))
+    assert denied.status_code == 403
 
 
 def test_delete_share_grant_missing(client, regular_user, auth_headers):
@@ -445,15 +464,17 @@ async def test_creator_can_delete_share_url_without_manage_rights(
     assert mine[0]["revoked_at"] is not None
 
 
-def test_non_creator_cannot_delete_grant(client, regular_user, other_user, auth_headers, private_file):
-    """A third party who neither owns the item nor created the grant gets a 404."""
+@pytest.mark.asyncio
+async def test_non_creator_cannot_delete_grant(client, regular_user, other_user, make_user, auth_headers, private_file):
+    """A third party who neither owns the item nor is the grantee gets a 404."""
+    third_user = await make_user("third", email_verified=True)
     created = client.post(
         "/api/v1/shares",
         json={"item_type": "file", "item_id": private_file["id"], "user_id": str(other_user.id)},
         headers=auth_headers(regular_user),
     ).json()
 
-    response = client.delete(f"/api/v1/shares/{created['id']}", headers=auth_headers(other_user))
+    response = client.delete(f"/api/v1/shares/{created['id']}", headers=auth_headers(third_user))
     assert response.status_code == 404
 
 

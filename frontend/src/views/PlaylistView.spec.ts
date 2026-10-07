@@ -65,6 +65,9 @@ function createPlaylist(id: string, name: string): PlaylistResponse {
     id,
     name,
     owner_id: "user-1",
+    can_write: true,
+    can_manage: true,
+    is_collaborator: false,
     description: "A mix for the highway.",
     visibility: "public",
     owner: {

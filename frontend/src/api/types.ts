@@ -7211,6 +7211,8 @@ export interface components {
       user_id?: string | null;
       /** Username */
       username?: string | null;
+      /** Collaborator */
+      collaborator?: boolean | null;
       /**
        * Created At
        * Format: date-time
@@ -8090,6 +8092,18 @@ export interface components {
        * @default []
        */
       tags: string[];
+      /**
+       * Can Manage
+       * @default false
+       */
+      can_manage: boolean;
+      /**
+       * Is Collaborator
+       * @default false
+       */
+      is_collaborator: boolean;
+      /** Share Grant Id */
+      share_grant_id?: string | null;
     };
     /**
      * LibraryStatsResponse
@@ -8098,6 +8112,15 @@ export interface components {
     LibraryStatsResponse: {
       /** Track Count */
       track_count: number;
+    };
+    /**
+     * LibraryTrackResponse
+     * @description A library member track with per-entry adder attribution.
+     */
+    LibraryTrackResponse: components["schemas"]["TrackResponse"] & {
+      /** Added By Id */
+      added_by_id?: string | null;
+      added_by?: components["schemas"]["UserSummary"] | null;
     };
     /**
      * LibraryUpdate
@@ -8604,6 +8627,9 @@ export interface components {
       track?: components["schemas"]["TrackResponse"] | null;
       episode?: components["schemas"]["PlaylistEpisodeItem"] | null;
       remote?: components["schemas"]["RemoteObjectResponse"] | null;
+      /** Added By Id */
+      added_by_id?: string | null;
+      added_by?: components["schemas"]["UserSummary"] | null;
     };
     /**
      * PlaylistResponse
@@ -8640,6 +8666,23 @@ export interface components {
        * @default []
        */
       tags: string[];
+      /**
+       * Can Write
+       * @default false
+       */
+      can_write: boolean;
+      /**
+       * Can Manage
+       * @default false
+       */
+      can_manage: boolean;
+      /**
+       * Is Collaborator
+       * @default false
+       */
+      is_collaborator: boolean;
+      /** Share Grant Id */
+      share_grant_id?: string | null;
       /** Created At */
       created_at?: string | null;
       /** Updated At */
@@ -9073,6 +9116,33 @@ export interface components {
        * @default false
        */
       in_collection: boolean;
+    };
+    /**
+     * ReceivedShareResponse
+     * @description A share grant the current user has received.
+     */
+    ReceivedShareResponse: {
+      /** Id */
+      id: string;
+      /** Item Type */
+      item_type: string;
+      /** Item Id */
+      item_id: string;
+      /** Item Title */
+      item_title?: string | null;
+      /** Item Url */
+      item_url?: string | null;
+      /**
+       * Collaborator
+       * @default false
+       */
+      collaborator: boolean;
+      shared_by?: components["schemas"]["UserSummary"] | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
     };
     /**
      * RecoveryCodesResponse
@@ -9769,6 +9839,11 @@ export interface components {
       item_id: string;
       /** User Id */
       user_id: string;
+      /**
+       * Collaborator
+       * @default false
+       */
+      collaborator?: boolean;
     };
     /**
      * ShareGrantResponse
@@ -9786,10 +9861,23 @@ export interface components {
       /** Username */
       username?: string | null;
       /**
+       * Collaborator
+       * @default false
+       */
+      collaborator: boolean;
+      /**
        * Created At
        * Format: date-time
        */
       created_at: string;
+    };
+    /**
+     * ShareGrantUpdate
+     * @description Payload for updating a share grant's role.
+     */
+    ShareGrantUpdate: {
+      /** Collaborator */
+      collaborator: boolean;
     };
     /**
      * ShareTokenCreate

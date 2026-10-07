@@ -389,6 +389,16 @@
       "unknownItem": "عنصر بلا عنوان",
       "anyoneWithLink": "أي شخص لديه الرابط",
       "expiresAt": "تنتهي الصلاحية {date}",
+      "tabs": {
+        "created": "مشاركاتي",
+        "received": "مُشارَكة معي"
+      },
+      "received": {
+        "sharedBy": "شاركه",
+        "allTypes": "كل الأنواع",
+        "filterType": "تصفية حسب النوع",
+        "empty": "لم يُشارَك معك شيء بعد."
+      },
       "columns": {
         "type": "النوع",
         "resource": "المورد",
@@ -2002,7 +2012,22 @@
       "embedFormatScript": "أداة JavaScript",
       "embedFormatIframe": "إطار HTML iframe",
       "embedLoading": "جار تحميل تفاصيل التضمين…",
-      "embedNotPublic": "يمكن تضمين العناصر العامة فقط. غيّر الظهور إلى عام أولا."
+      "embedNotPublic": "يمكن تضمين العناصر العامة فقط. غيّر الظهور إلى عام أولا.",
+      "collaborator": "متعاون",
+      "collaboratorHint": "يمكن للمتعاونين تعديل المحتوى والبيانات الوصفية.",
+      "role": "الدور",
+      "roleCollaborator": "متعاون",
+      "roleViewer": "مشاهِد",
+      "makeCollaborator": "اجعل متعاونًا",
+      "makeViewer": "اجعل مشاهِدًا",
+      "roleUpdateError": "تعذّر تحديث الدور: {message}",
+      "leave": "مغادرة",
+      "leaveConfirm": "مغادرة \"{name}\"؟ ستفقد وصولك المشترك.",
+      "leaveSelected": "مغادرة المحدد",
+      "leaveBulkConfirm": "مغادرة {count} عناصر مشتركة؟ ستفقد الوصول إليها.",
+      "left": "لقد غادرت المشاركة.",
+      "leftBulk": "غادرت {count} مشاركات.",
+      "leaveError": "تعذّرت المغادرة: {message}"
     },
     "contextMenu": {
       "playNext": "تشغيل تاليا",
@@ -2072,6 +2097,7 @@
       "empty": "لا توجد مقاطع محددة.",
       "download": "تنزيل"
     },
+    "addedBy": "أضافه {name}",
     "addToCollection": {
       "addToLibrary": "إضافة إلى المكتبة",
       "addToPlaylist": "إضافة إلى قائمة تشغيل",
@@ -2295,6 +2321,7 @@
       "reply": "ردّ على {object} خاصتك",
       "mention": "ذكرك",
       "share": "شارك {object} معك",
+      "shareCollaborator": "دعاك للتعاون في {object}",
       "unknown": "أرسل لك إشعارا",
       "webmention": "ذكر {object} خاصتك",
       "activity": "شارك {object}",

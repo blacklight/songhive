@@ -9,6 +9,7 @@ import { useI18n } from "vue-i18n";
 import {
   listShareGrants,
   createShareGrant,
+  updateShareGrant,
   deleteShareGrant,
   listShareUrls,
   createShareUrl,
@@ -31,6 +32,7 @@ import { getPublicUrl, isPublicResource, toAbsoluteUrl } from "@/utils/share";
 import { formatDateTime } from "@/i18n";
 import AppModal from "@/components/feedback/AppModal.vue";
 import AppButton from "@/components/ui/AppButton.vue";
+import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppInput from "@/components/ui/AppInput.vue";
 import AppSelect from "@/components/ui/AppSelect.vue";
 import AppTable from "@/components/ui/AppTable.vue";
@@ -142,6 +144,12 @@ function ensureActiveTab() {
   }
 }
 
+// Only playlists and libraries support collaborator grants — other item
+// types stay read-only shares and never expose the role controls.
+const supportsCollaborators = computed(
+  () => props.itemType === "playlist" || props.itemType === "library",
+);
+
 const grants = ref<ShareGrantResponse[]>([]);
 const grantsLoading = ref(false);
 const grantsError = ref<string | null>(null);
@@ -154,6 +162,8 @@ const userId = ref("");
 const expiresAt = ref("");
 const isCreatingGrant = ref(false);
 const isCreatingUrl = ref(false);
+const newGrantCollaborator = ref(false);
+const togglingGrantId = ref<string | null>(null);
 
 const publishObjectType = ref<"note" | "audio">("note");
 
@@ -171,11 +181,17 @@ const publishObjectTypeHint = computed(() =>
 const newUrl = ref<string | null>(null);
 const newToken = ref<string | null>(null);
 
-const grantColumns = [
-  { key: "user_id", label: t("browse.share.user") },
-  { key: "createdAt", label: t("browse.share.createdAt") },
-  { key: "actions", label: t("browse.detail.actions") },
-];
+const grantColumns = computed(() => {
+  const columns = [
+    { key: "user_id", label: t("browse.share.user") },
+    { key: "createdAt", label: t("browse.share.createdAt") },
+  ];
+  if (supportsCollaborators.value) {
+    columns.push({ key: "role", label: t("browse.share.role") });
+  }
+  columns.push({ key: "actions", label: t("browse.detail.actions") });
+  return columns;
+});
 
 const urlColumns = [
   { key: "expiresAt", label: t("browse.share.expiresAt") },
@@ -188,6 +204,10 @@ const grantRows = computed(() =>
     id: grant.id,
     user_id: grant.username ?? grant.user_id,
     createdAt: formatDateTime(grant.created_at),
+    collaborator: grant.collaborator,
+    role: grant.collaborator
+      ? t("browse.share.roleCollaborator")
+      : t("browse.share.roleViewer"),
     actions: "",
   })),
 );
@@ -266,8 +286,12 @@ async function createGrant() {
       item_type: props.itemType,
       item_id: props.itemId,
       user_id: targetUser,
+      collaborator: supportsCollaborators.value
+        ? newGrantCollaborator.value
+        : false,
     });
     userId.value = "";
+    newGrantCollaborator.value = false;
     toast.push({ type: "success", message: t("browse.share.grantCreated") });
     await loadGrants();
   } catch (err) {
@@ -313,6 +337,24 @@ async function createUrl() {
     });
   } finally {
     isCreatingUrl.value = false;
+  }
+}
+
+async function toggleCollaborator(grantId: string) {
+  const grant = grants.value.find((g) => g.id === grantId);
+  if (!grant || togglingGrantId.value) return;
+
+  togglingGrantId.value = grantId;
+  grantsError.value = null;
+  try {
+    await updateShareGrant(grant.id, { collaborator: !grant.collaborator });
+    await loadGrants();
+  } catch (err) {
+    grantsError.value = t("browse.share.roleUpdateError", {
+      message: getErrorMessage(err),
+    });
+  } finally {
+    togglingGrantId.value = null;
   }
 }
 
@@ -440,6 +482,7 @@ watch(
       activeTab.value = "grants";
       userId.value = "";
       expiresAt.value = "";
+      newGrantCollaborator.value = false;
       newUrl.value = null;
       newToken.value = null;
       grantsError.value = null;
@@ -487,6 +530,13 @@ watch(
           @update:model-value="onUserSearch"
         />
 
+        <AppCheckbox
+          v-if="supportsCollaborators"
+          v-model="newGrantCollaborator"
+          :label="t('browse.share.collaborator')"
+          :hint="t('browse.share.collaboratorHint')"
+        />
+
         <AppButton
           size="sm"
           icon="plus"
@@ -513,6 +563,20 @@ watch(
         :empty-label="t('browse.share.emptyGrants')"
       >
         <template #row-actions="{ row }">
+          <AppButton
+            v-if="supportsCollaborators"
+            size="sm"
+            variant="ghost"
+            :icon="row.collaborator ? 'user' : 'user-plus'"
+            :loading="togglingGrantId === String(row.id)"
+            @click="toggleCollaborator(String(row.id))"
+          >
+            {{
+              row.collaborator
+                ? t("browse.share.makeViewer")
+                : t("browse.share.makeCollaborator")
+            }}
+          </AppButton>
           <AppButton
             size="sm"
             variant="danger"

@@ -33,6 +33,7 @@ const samplePlaylist: playlistsApi.PlaylistResponse = {
   id: "playlist-1",
   name: "My Playlist",
   owner_id: "u1",
+  can_write: true,
   visibility: "private",
 };
 
@@ -114,7 +115,10 @@ describe("AddToCollectionDialog", () => {
     mountDialog();
     await flushPromises();
 
-    expect(librariesApi.listLibraries).toHaveBeenCalledWith({ limit: 100 });
+    expect(librariesApi.listLibraries).toHaveBeenCalledWith({
+      limit: 100,
+      editable: true,
+    });
     const select = document.body.querySelector(
       "select",
     ) as HTMLSelectElement | null;

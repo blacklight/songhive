@@ -7,12 +7,15 @@ export type LibraryUpdate = components["schemas"]["LibraryUpdate"];
 export type ScanRequest = components["schemas"]["ScanRequest"];
 
 export type TrackResponse = components["schemas"]["TrackResponse"];
+export type LibraryTrackResponse =
+  components["schemas"]["LibraryTrackResponse"];
 export type Visibility = components["schemas"]["Visibility"];
 
 export function listLibraries(params?: {
   q?: string;
   owner_username?: string;
   collection?: boolean;
+  editable?: boolean;
   include_external?: boolean;
   limit?: number;
   offset?: number;
@@ -33,6 +36,7 @@ export async function listLibrariesWithMeta(params?: {
   q?: string;
   owner_username?: string;
   collection?: boolean;
+  editable?: boolean;
   include_external?: boolean;
   limit?: number;
   offset?: number;
@@ -147,8 +151,8 @@ export function listLibraryTracks(
     sort_by?: string;
     sort_dir?: "asc" | "desc";
   },
-): Promise<TrackResponse[]> {
-  return apiRequest<TrackResponse[]>(`/libraries/${id}/tracks`, {
+): Promise<LibraryTrackResponse[]> {
+  return apiRequest<LibraryTrackResponse[]>(`/libraries/${id}/tracks`, {
     query: params,
   });
 }

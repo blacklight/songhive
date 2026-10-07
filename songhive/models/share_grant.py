@@ -4,7 +4,7 @@ ShareGrant model - grants access to a shareable item to a user.
 
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import Boolean, ForeignKey, String, UniqueConstraint, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -28,6 +28,11 @@ class ShareGrant(Base):
     created_by: Mapped[str] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
         index=True,
+    )
+    collaborator: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        server_default=false(),
     )
 
     user: Mapped["User"] = relationship(

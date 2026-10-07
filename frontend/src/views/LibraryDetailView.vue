@@ -18,9 +18,11 @@ import {
 import { listRemoteObjects, type RemoteObject } from "@/api/remote";
 import type { TrackResponse } from "@/api/tracks";
 import { getApiErrorMessage } from "@/api/client";
+import { deleteShareGrant } from "@/api/shares";
 import { toQueueTrack } from "@/player/enrich";
 import { SHUFFLE_CHUNK_SIZE } from "@/composables/useShufflePlay";
-import { useCanManage } from "@/composables/useCanManage";
+import { useCollectionPermissions } from "@/composables/useCollectionPermissions";
+import { useConfirm } from "@/composables/useConfirm";
 import { useCollectionItem } from "@/composables/useCollectionItem";
 import { useEntityMeta } from "@/composables/useEntityMeta";
 import { useOwnership } from "@/composables/useOwnership";
@@ -109,9 +111,8 @@ const { owner, visibilityText, visibilityIcon } = useEntityMeta(library);
 const { isOwner } = useOwnership(
   computed(() => library.value?.owner_id ?? null),
 );
-const { canManage } = useCanManage(
-  computed(() => library.value?.owner_id ?? null),
-);
+const { canWrite, shareGrantId } = useCollectionPermissions(library);
+const { confirm } = useConfirm();
 
 const isPublic = computed(() => library.value?.visibility === "public");
 
@@ -233,7 +234,14 @@ const actions = computed(() => [
     label: t("common.edit"),
     icon: "pen-to-square",
     variant: "secondary" as const,
-    visible: canManage.value,
+    visible: canWrite.value,
+  },
+  {
+    key: "leave",
+    label: t("browse.share.leave"),
+    icon: "right-from-bracket",
+    variant: "danger" as const,
+    visible: shareGrantId.value !== null,
   },
   {
     key: "delete",
@@ -243,6 +251,42 @@ const actions = computed(() => [
     visible: canDeleteLibrary.value,
   },
 ]);
+
+const isLeaving = ref(false);
+
+async function leaveLibrary() {
+  const grantId = shareGrantId.value;
+  if (!grantId || !library.value || isLeaving.value) return;
+  const name = library.value.name;
+  const confirmed = await confirm({
+    title: t("browse.share.leave"),
+    message: t("browse.share.leaveConfirm", { name }),
+    danger: true,
+    confirmLabel: t("browse.share.leave"),
+  });
+  if (!confirmed) return;
+
+  isLeaving.value = true;
+  try {
+    await deleteShareGrant(grantId);
+    toastStore.push({ type: "success", message: t("browse.share.left") });
+    // Leaving may remove access entirely — navigate away when it does.
+    try {
+      library.value = await getLibrary(libraryId.value, { include: "owner" });
+    } catch {
+      await router.push("/libraries");
+    }
+  } catch (err) {
+    toastStore.push({
+      type: "error",
+      message: t("browse.share.leaveError", {
+        message: getApiErrorMessage(err) || t("errors.unknown"),
+      }),
+    });
+  } finally {
+    isLeaving.value = false;
+  }
+}
 
 async function onAction(key: string) {
   if (!library.value) return;
@@ -273,6 +317,9 @@ async function onAction(key: string) {
       break;
     case "delete":
       deleteLibrary.open(library.value.id);
+      break;
+    case "leave":
+      await leaveLibrary();
       break;
   }
 }
@@ -429,6 +476,7 @@ watch(
           :loading-more="tracksLoadingMore"
           :auto-scroll="false"
           :context="library.name"
+          :collection-owner-id="library.owner_id"
           :removable-from="removableFrom"
           :deletable="true"
           :shuffle-fetch="shuffleFetch"

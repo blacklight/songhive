@@ -7,19 +7,21 @@ from datetime import datetime
 from typing import Dict, List, Literal, Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...models.audit_log import AuditTargetType
 from ...models.notification import NotificationType
 from ...models.share_grant import ShareGrant
 from ...models.user import User
-from ...services import acl
+from ...services import acl, audit
 from ...services import notifications as notifications_service
 from ...services import sharing
 from ...services.auth import get_user_by_id, get_user_by_username_or_email
 from .._common import Pagination, get_pagination
 from ..deps import get_current_user, get_db
 from ..middleware.rate_limit import rate_limit_account
+from ..responses import UserSummary, build_user_summary
 from ._common import load_and_authorize, validate_item_type
 
 logger = logging.getLogger(__name__)
@@ -32,11 +34,18 @@ class ShareGrantCreate(BaseModel):
     item_type: str
     item_id: str
     user_id: str
+    collaborator: bool = False
 
     @field_validator("item_type")
     @classmethod
     def _check_item_type(cls, value: str) -> str:
         return validate_item_type(value)
+
+    @model_validator(mode="after")
+    def _check_collaborator(self) -> "ShareGrantCreate":
+        if self.collaborator and self.item_type not in acl.COLLABORATIVE_ITEM_TYPES:
+            raise ValueError(f"Item type {self.item_type!r} does not support collaborator grants")
+        return self
 
 
 class ShareGrantResponse(BaseModel):
@@ -49,7 +58,14 @@ class ShareGrantResponse(BaseModel):
     item_id: str
     user_id: str
     username: Optional[str] = None
+    collaborator: bool = False
     created_at: datetime
+
+
+class ShareGrantUpdate(BaseModel):
+    """Payload for updating a share grant's role."""
+
+    collaborator: bool
 
 
 class CreatedShareResponse(BaseModel):
@@ -63,9 +79,23 @@ class CreatedShareResponse(BaseModel):
     item_url: Optional[str] = None
     user_id: Optional[str] = None
     username: Optional[str] = None
+    collaborator: Optional[bool] = None
     created_at: datetime
     expires_at: Optional[datetime] = None
     revoked_at: Optional[datetime] = None
+
+
+class ReceivedShareResponse(BaseModel):
+    """A share grant the current user has received."""
+
+    id: str
+    item_type: str
+    item_id: str
+    item_title: Optional[str] = None
+    item_url: Optional[str] = None
+    collaborator: bool = False
+    shared_by: Optional[UserSummary] = None
+    created_at: datetime
 
 
 async def _resolve_share_grant_user(session: AsyncSession, value: str) -> User:
@@ -99,13 +129,20 @@ async def create_share_grant(
     await load_and_authorize(db, current_user, body.item_type, body.item_id)
 
     target_user = await _resolve_share_grant_user(db, body.user_id)
-    grant, created = await sharing.create_share_grant(
-        db,
-        body.item_type,
-        body.item_id,
-        target_user.id,
-        created_by=current_user.id,
-    )
+    try:
+        grant, created = await sharing.create_share_grant(
+            db,
+            body.item_type,
+            body.item_id,
+            target_user.id,
+            created_by=current_user.id,
+            collaborator=body.collaborator,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
     await db.commit()
 
     if created:
@@ -140,6 +177,7 @@ async def _notify_share_grant(
                 "item_title": item_title,
                 "actor_name": current_user.display_name or current_user.username,
                 "actor_avatar_url": current_user.avatar_url,
+                "collaborator": grant.collaborator,
             },
         )
         await db.commit()
@@ -176,6 +214,18 @@ async def list_share_grants(
     return responses
 
 
+def _item_url(
+    item_type: str,
+    item_id: str,
+    titles: Dict[Tuple[str, str], Optional[str]],
+) -> Optional[str]:
+    """Return the frontend page URL for an item, or None when it is gone."""
+    plural = acl.get_item_plural(item_type)
+    if plural is None or (item_type, item_id) not in titles:
+        return None
+    return f"/{plural}/{item_id}"
+
+
 def _created_share_entry(
     *,
     share_id: str,
@@ -186,22 +236,22 @@ def _created_share_entry(
     titles: Dict[Tuple[str, str], Optional[str]],
     user_id: Optional[str] = None,
     username: Optional[str] = None,
+    collaborator: Optional[bool] = None,
     expires_at: Optional[datetime] = None,
     revoked_at: Optional[datetime] = None,
 ) -> CreatedShareResponse:
     """Build a ``CreatedShareResponse``, resolving the item title and page URL."""
     item_key = (item_type, item_id)
-    plural = acl.get_item_plural(item_type)
-    item_url = f"/{plural}/{item_id}" if plural is not None and item_key in titles else None
     return CreatedShareResponse(
         id=share_id,
         kind=kind,
         item_type=item_type,
         item_id=item_id,
         item_title=titles.get(item_key),
-        item_url=item_url,
+        item_url=_item_url(item_type, item_id, titles),
         user_id=user_id,
         username=username,
+        collaborator=collaborator,
         created_at=created_at,
         expires_at=expires_at,
         revoked_at=revoked_at,
@@ -238,6 +288,7 @@ async def list_created_shares(
             titles=titles,
             user_id=grant.user_id,
             username=grant.user.username if grant.user is not None else None,
+            collaborator=grant.collaborator,
         )
         for grant in grants
     ]
@@ -260,6 +311,115 @@ async def list_created_shares(
     return entries[pagination.offset : pagination.offset + pagination.limit]
 
 
+@router.get("/received", response_model=List[ReceivedShareResponse])
+async def list_received_shares(
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    pagination: Pagination = Depends(get_pagination),
+    item_type: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """List share grants the current user has received, newest first."""
+    if item_type is not None:
+        try:
+            item_type = validate_item_type(item_type)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Invalid item type",
+            ) from exc
+
+    total = await sharing.count_share_grants_received(db, current_user.id, item_type=item_type)
+    grants = await sharing.list_share_grants_received(
+        db,
+        current_user.id,
+        item_type=item_type,
+        limit=pagination.limit,
+        offset=pagination.offset,
+    )
+    pagination.set_total(response, total)
+
+    titles = await acl.resolve_item_titles(db, [(g.item_type, g.item_id) for g in grants])
+    return [
+        ReceivedShareResponse(
+            id=grant.id,
+            item_type=grant.item_type,
+            item_id=grant.item_id,
+            item_title=titles.get((grant.item_type, grant.item_id)),
+            item_url=_item_url(grant.item_type, grant.item_id, titles),
+            collaborator=grant.collaborator,
+            shared_by=(
+                await build_user_summary(grant.creator)
+                if grant.creator is not None and grant.creator.is_active
+                else None
+            ),
+            created_at=grant.created_at,
+        )
+        for grant in grants
+    ]
+
+
+def _audit_target_type(item_type: str) -> Optional[AuditTargetType]:
+    """Map a shareable item type to an audit target type, when one exists."""
+    try:
+        return AuditTargetType(item_type)
+    except ValueError:
+        return None
+
+
+@router.patch(
+    "/{share_id}",
+    response_model=ShareGrantResponse,
+    dependencies=[Depends(rate_limit_account)],
+)
+async def update_share_grant(
+    share_id: str,
+    body: ShareGrantUpdate,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Update a share grant's role (viewer ↔ collaborator).
+
+    Only the item owner or an admin may update a grant — grant creators
+    without management rights and grantees cannot.  Missing and unauthorized
+    requests both return 404 to avoid ID enumeration.
+    """
+    grant = await db.get(ShareGrant, share_id)
+    if grant is None or not await acl.can_manage(db, current_user, grant.item_type, grant.item_id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Not found",
+        )
+
+    try:
+        await sharing.set_share_grant_collaborator(db, grant, body.collaborator)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=str(exc),
+        ) from exc
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="share_grant.update",
+        target_type=_audit_target_type(grant.item_type),
+        target_id=grant.item_id,
+        details={
+            "item_type": grant.item_type,
+            "item_id": grant.item_id,
+            "user_id": grant.user_id,
+            "collaborator": grant.collaborator,
+        },
+    )
+    await db.commit()
+
+    response = ShareGrantResponse.model_validate(grant)
+    if grant.user is not None:
+        response.username = grant.user.username
+    return response
+
+
 @router.delete("/{share_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_share_grant(
     share_id: str,
@@ -269,12 +429,14 @@ async def delete_share_grant(
     """
     Revoke a share grant by id.
 
-    The item owner, an admin, or the user who created the grant may revoke it.
-    Missing and unauthorized requests both return 404 to avoid ID enumeration.
+    The item owner, an admin, the user who created the grant, or the grantee
+    (leaving a share) may revoke it.  Missing and unauthorized requests both
+    return 404 to avoid ID enumeration.
     """
     grant = await db.get(ShareGrant, share_id)
     if grant is None or (
-        grant.created_by != current_user.id
+        grant.user_id != current_user.id
+        and grant.created_by != current_user.id
         and not await acl.can_manage(db, current_user, grant.item_type, grant.item_id)
     ):
         raise HTTPException(
@@ -282,6 +444,7 @@ async def delete_share_grant(
             detail="Not found",
         )
 
+    is_leave = grant.user_id == current_user.id
     item_type, item_id, grantee_id = grant.item_type, grant.item_id, grant.user_id
     await sharing.revoke_share_grant_by_id(db, share_id)
     plural = acl.get_item_plural(item_type) or item_type
@@ -290,6 +453,18 @@ async def delete_share_grant(
         user_id=grantee_id,
         type=NotificationType.SHARE,
         source_url=f"/{plural}/{item_id}",
+    )
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="share_grant.leave" if is_leave else "share_grant.revoke",
+        target_type=_audit_target_type(item_type),
+        target_id=item_id,
+        details={
+            "item_type": item_type,
+            "item_id": item_id,
+            "user_id": grantee_id,
+        },
     )
     await db.commit()
     return None

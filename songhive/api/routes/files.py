@@ -106,7 +106,7 @@ async def _get_target_library(
     library = await music.get_library(session, library_id)
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
-    if not await acl.can_manage(session, user, "library", library_id):
+    if not await acl.can_edit(session, user, "library", library_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     return library
 

@@ -14,6 +14,7 @@ import {
   isUnplayable,
 } from "@/player/playable";
 import AppTable, { type Column } from "@/components/ui/AppTable.vue";
+import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
@@ -69,6 +70,12 @@ export interface Props {
   favoriteManaged?: boolean;
   emptyLabel?: string;
   removableFrom?: RemovableFrom;
+  /**
+   * Owner of the containing playlist/library. When set, entries carrying an
+   * ``added_by`` summary for a different user render a small avatar linking
+   * to that user's profile (collaboration attribution).
+   */
+  collectionOwnerId?: string | null;
   deletable?: boolean;
   autoScroll?: boolean;
   reorderable?: boolean;
@@ -353,6 +360,25 @@ const someSelected = computed(() => {
 
 function asTrackRow(row: Record<string, unknown>): TrackListRow {
   return row as TrackListRow;
+}
+
+/**
+ * The attribution summary for a track row — set only when the adder is a
+ * different user than the collection owner (owner-added rows and provider
+ * sync rows carry no avatar).
+ */
+function addedBySummary(track: QueueTrack) {
+  const adder = track.added_by;
+  if (!adder || !props.collectionOwnerId) return null;
+  if (adder.id === props.collectionOwnerId) return null;
+  return adder;
+}
+
+function addedByTitle(track: QueueTrack): string {
+  const adder = addedBySummary(track);
+  return adder
+    ? t("browse.addedBy", { name: adder.display_name || adder.username })
+    : "";
 }
 
 function isTrackFavorited(track: QueueTrack): boolean {
@@ -1773,6 +1799,27 @@ async function onMenuSelect(key: string) {
               {{ asTrackRow(row).track.remote_domain }}
             </span>
           </button>
+          <RouterLink
+            v-if="addedBySummary(asTrackRow(row).track)"
+            :to="{
+              name: 'userProfile',
+              params: {
+                username: addedBySummary(asTrackRow(row).track)!.username,
+              },
+            }"
+            class="track-list__added-by"
+            :title="addedByTitle(asTrackRow(row).track)"
+            @click.stop
+          >
+            <AppAvatar
+              :src="addedBySummary(asTrackRow(row).track)!.avatar_url || ''"
+              :name="
+                addedBySummary(asTrackRow(row).track)!.display_name ||
+                addedBySummary(asTrackRow(row).track)!.username
+              "
+              size="sm"
+            />
+          </RouterLink>
         </template>
 
         <template #row-artist="{ row }">
@@ -2007,6 +2054,27 @@ async function onMenuSelect(key: string) {
                 </span>
               </button>
               <RouterLink
+                v-if="addedBySummary(asTrackRow(row).track)"
+                :to="{
+                  name: 'userProfile',
+                  params: {
+                    username: addedBySummary(asTrackRow(row).track)!.username,
+                  },
+                }"
+                class="track-list__added-by"
+                :title="addedByTitle(asTrackRow(row).track)"
+                @click.stop
+              >
+                <AppAvatar
+                  :src="addedBySummary(asTrackRow(row).track)!.avatar_url || ''"
+                  :name="
+                    addedBySummary(asTrackRow(row).track)!.display_name ||
+                    addedBySummary(asTrackRow(row).track)!.username
+                  "
+                  size="sm"
+                />
+              </RouterLink>
+              <RouterLink
                 v-if="asTrackRow(row).track.podcast_id"
                 :to="`/podcasts/${asTrackRow(row).track.podcast_id}`"
                 :title="asTrackRow(row).artist"
@@ -2158,6 +2226,8 @@ async function onMenuSelect(key: string) {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
+
+  --added-by-width: 2rem;
 }
 
 .track-list__header {
@@ -2191,7 +2261,7 @@ async function onMenuSelect(key: string) {
 .track-list__title-btn {
   display: inline-flex;
   align-items: center;
-  width: 100%;
+  width: calc(100% - var(--added-by-width));
   min-width: 0;
   gap: var(--space-2);
   background: transparent;
@@ -2266,6 +2336,31 @@ async function onMenuSelect(key: string) {
   flex-shrink: 0;
 }
 
+/* Sits next to the title button — margin-left is mirrored for RTL by
+   postcss-rtlcss, do not convert to a logical property. */
+.track-list__added-by {
+  width: var(--added-by-width);
+  position: absolute;
+  right: 0;
+  display: inline-flex;
+  align-items: center;
+  margin-left: var(--space-1);
+  flex-shrink: 0;
+  border-radius: var(--radius-full, 50%);
+}
+
+.track-list__compact-main .track-list__added-by {
+  top: var(--space-1);
+}
+
+.app-table__cell .track-list__added-by {
+  top: var(--space-3);
+}
+
+.track-list__added-by:hover {
+  opacity: 0.8;
+}
+
 .track-list__external-icon {
   margin-left: calc(0.5 * var(--space-1));
   padding: calc(1.5 * var(--space-1));
@@ -2291,6 +2386,10 @@ async function onMenuSelect(key: string) {
 
 .track-list :deep(.app-table) {
   table-layout: fixed;
+}
+
+.track-list :deep(.app-table__cell) {
+  position: relative;
 }
 
 .track-list :deep(.app-table th),
@@ -2355,6 +2454,7 @@ async function onMenuSelect(key: string) {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  position: relative;
   gap: var(--space-1);
 }
 

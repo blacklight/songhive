@@ -44,6 +44,12 @@ export type QueueTrack = TrackResponse & {
   podcast_episode_id?: string;
   /** Podcast id for episode queue tracks — used to link back to the show. */
   podcast_id?: string;
+  /**
+   * User who added this entry to a collaborative playlist/library; the
+   * track list renders an "Added by" avatar when this differs from the
+   * collection owner.
+   */
+  added_by?: components["schemas"]["UserSummary"] | null;
 };
 
 export type RepeatMode = "off" | "all" | "one";

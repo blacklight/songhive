@@ -30,6 +30,7 @@ from ...models.external_item import ExternalItem
 from ...models.external_library import ExternalLibrary
 from ...models.playlist import Playlist
 from ...models.podcast import PodcastEpisode
+from ...models.share_grant import ShareGrant
 from ...models.user import User
 from ...services import acl, audit, collection, deletion, m3u, music
 from ...services import podcasts as podcasts_service
@@ -81,6 +82,14 @@ class PlaylistResponse(BaseModel):
     owner: Optional[UserSummary] = None
     tracks: Optional[List[TrackSummary]] = None
     tags: List[str] = []
+    # Requester capability flags — clients must use these instead of
+    # inferring edit rights from ``owner_id``.
+    can_write: bool = False
+    can_manage: bool = False
+    is_collaborator: bool = False
+    # The requester's own share grant on this playlist, when one exists;
+    # lets a grantee leave the share via ``DELETE /shares/{id}``.
+    share_grant_id: Optional[str] = None
     # Exposed so list consumers can interleave remote entities under the
     # ``created_at``/``updated_at`` sort fields.
     created_at: Optional[datetime] = None
@@ -204,6 +213,8 @@ class PlaylistItemResponse(BaseModel):
     track: Optional[TrackResponse] = None
     episode: Optional[PlaylistEpisodeItem] = None
     remote: Optional[RemoteObjectResponse] = None
+    added_by_id: Optional[str] = None
+    added_by: Optional[UserSummary] = None
 
 
 async def _playlist_image_url(playlist: Playlist, storage: StorageService) -> Optional[str]:
@@ -260,6 +271,17 @@ def _playlist_tags(playlist: Playlist) -> List[str]:
     return [h.name for h in playlist.tags]
 
 
+async def _user_grant(
+    db: AsyncSession,
+    user: Optional[User],
+    item_type: str,
+    item_id: str,
+) -> Optional[ShareGrant]:
+    """Return the requester's own share grant for a single item, if any."""
+    grants = await acl.user_grants(db, user, item_type, [item_id])
+    return grants.get(str(item_id))
+
+
 async def _build_playlist_response(
     playlist: Playlist,
     user: Optional[User],
@@ -269,8 +291,16 @@ async def _build_playlist_response(
     db: Optional[AsyncSession] = None,
     provider_sync: Optional[dict] = None,
     provider_type: Optional[str] = None,
+    grant: Optional[ShareGrant] = None,
 ) -> PlaylistResponse:
-    """Build a PlaylistResponse with optional nested summaries."""
+    """
+    Build a PlaylistResponse with optional nested summaries.
+
+    ``grant`` is the requester's own share grant on the playlist (looked up
+    once per page by the caller via ``acl.user_grants``); it drives
+    ``is_collaborator``/``share_grant_id`` and the collaborator
+    ``can_write``/``in_collection`` semantics.
+    """
     owner = None
     owner_id = playlist.owner_id
     if "owner" in include and owner_id is not None and playlist.owner:
@@ -287,6 +317,8 @@ async def _build_playlist_response(
                     track_list.append(summary)
             tracks = track_list
 
+    is_collaborator = grant is not None and grant.collaborator
+    can_manage = user is not None and (user.is_admin or playlist.owner_id == user.id)
     return PlaylistResponse(
         id=str(playlist.id),
         name=playlist.name,
@@ -296,10 +328,16 @@ async def _build_playlist_response(
         image_url=await _playlist_image_url(playlist, storage),
         cover_url=await _playlist_cover_url(playlist, storage),
         in_collection=user is not None
-        and (playlist.owner_id == user.id or (saved_ids is not None and str(playlist.id) in saved_ids)),
+        and (
+            playlist.owner_id == user.id or (saved_ids is not None and str(playlist.id) in saved_ids) or is_collaborator
+        ),
         owner=owner,
         tracks=tracks,
         tags=_playlist_tags(playlist),
+        can_write=can_manage or is_collaborator,
+        can_manage=can_manage,
+        is_collaborator=is_collaborator,
+        share_grant_id=str(grant.id) if grant is not None else None,
         created_at=playlist.created_at,
         updated_at=playlist.updated_at,
         provider_sync=provider_sync,
@@ -317,6 +355,10 @@ async def list_playlists(
         alias="collection",
         description="Only return playlists in the current user's collection (owned or saved)",
     ),
+    editable: bool = Query(
+        False,
+        description="Only return playlists the current user owns or collaborates on",
+    ),
     user: Optional[User] = Depends(get_current_user_optional),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"name", "created_at", "updated_at"}, "name")),
@@ -333,13 +375,16 @@ async def list_playlists(
     else:
         owner_id = None
 
-    total = await music.count_playlists(db, user=user, owner_id=owner_id, query=q, collection=collection_only)
+    total = await music.count_playlists(
+        db, user=user, owner_id=owner_id, query=q, collection=collection_only, editable=editable
+    )
     rows = await music.list_playlists(
         db,
         user=user,
         owner_id=owner_id,
         query=q,
         collection=collection_only,
+        editable=editable,
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),
@@ -350,6 +395,7 @@ async def list_playlists(
     pagination.set_total(response, total)
     playlist_ids = [str(p.id) for p in rows]
     saved_ids = await collection.saved_item_ids(db, user, "playlist", playlist_ids)
+    grants = await acl.user_grants(db, user, "playlist", playlist_ids)
     provider_types = await _playlist_provider_types(db, playlist_ids)
     return [
         await _build_playlist_response(
@@ -360,6 +406,7 @@ async def list_playlists(
             saved_ids,
             db=db,
             provider_type=provider_types.get(str(p.id)),
+            grant=grants.get(str(p.id)),
         )
         for p in rows
     ]
@@ -389,6 +436,8 @@ async def create_playlist(
         description=playlist.description,
         visibility=playlist.visibility,
         in_collection=True,
+        can_write=True,
+        can_manage=True,
         created_at=playlist.created_at,
         updated_at=playlist.updated_at,
     )
@@ -424,6 +473,7 @@ async def get_playlist(
         db=db,
         provider_sync=provider_status.to_dict() if provider_status is not None else None,
         provider_type=provider_types.get(playlist_id),
+        grant=await _user_grant(db, user, "playlist", playlist_id),
     )
 
 
@@ -534,10 +584,15 @@ async def update_playlist(
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+    if not await acl.can_edit(db, current_user, "playlist", playlist_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
+        )
+    if body.visibility is not None and not await acl.can_manage(db, current_user, "playlist", playlist_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the owner can change visibility",
         )
 
     if body.name is not None:
@@ -564,7 +619,15 @@ async def update_playlist(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids, db=db)
+    return await _build_playlist_response(
+        playlist,
+        current_user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, current_user, "playlist", playlist_id),
+    )
 
 
 @router.post("/{playlist_id}/image", response_model=PlaylistResponse)
@@ -582,7 +645,7 @@ async def upload_playlist_image(
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+    if not await acl.can_edit(db, current_user, "playlist", playlist_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -610,7 +673,15 @@ async def upload_playlist_image(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids, db=db)
+    return await _build_playlist_response(
+        playlist,
+        current_user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, current_user, "playlist", playlist_id),
+    )
 
 
 @router.post("/{playlist_id}/cover", response_model=PlaylistResponse)
@@ -628,7 +699,7 @@ async def upload_playlist_cover(
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+    if not await acl.can_edit(db, current_user, "playlist", playlist_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -656,7 +727,15 @@ async def upload_playlist_cover(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids, db=db)
+    return await _build_playlist_response(
+        playlist,
+        current_user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, current_user, "playlist", playlist_id),
+    )
 
 
 @router.delete("/{playlist_id}/image", response_model=PlaylistResponse)
@@ -673,7 +752,7 @@ async def delete_playlist_image(
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+    if not await acl.can_edit(db, current_user, "playlist", playlist_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -693,7 +772,15 @@ async def delete_playlist_image(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids, db=db)
+    return await _build_playlist_response(
+        playlist,
+        current_user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, current_user, "playlist", playlist_id),
+    )
 
 
 @router.delete("/{playlist_id}/cover", response_model=PlaylistResponse)
@@ -710,7 +797,7 @@ async def delete_playlist_cover(
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+    if not await acl.can_edit(db, current_user, "playlist", playlist_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -730,7 +817,15 @@ async def delete_playlist_cover(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids, db=db)
+    return await _build_playlist_response(
+        playlist,
+        current_user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, current_user, "playlist", playlist_id),
+    )
 
 
 async def _resolve_track_ids(
@@ -810,7 +905,7 @@ async def add_tracks_to_playlist(
     playlist = await music.get_playlist(db, playlist_id)
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+    if not await acl.can_edit(db, current_user, "playlist", playlist_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -847,6 +942,7 @@ async def add_tracks_to_playlist(
             episode_ids=episode_ids,
             remote_object_ids=remote_object_ids,
             allow_duplicates=body.allow_duplicates,
+            added_by_id=current_user.id,
         )
     except music.DuplicatePlaylistTrackError as exc:
         return JSONResponse(
@@ -1031,6 +1127,11 @@ async def list_playlist_items_route(
     items: List[PlaylistItemResponse] = []
     policy_cache: dict = {}
     for row in rows:
+        # Attribution is exposed to every reader of the playlist (including
+        # anonymous viewers of public ones); suspended adders are hidden.
+        adder = row.added_by if row.added_by is not None and row.added_by.is_active else None
+        added_by = await build_user_summary(adder)
+        added_by_id = str(row.added_by_id) if adder is not None else None
         if row.track is not None:
             items.append(
                 PlaylistItemResponse(
@@ -1046,6 +1147,8 @@ async def list_playlist_items_route(
                         db=db,
                         policy_cache=policy_cache,
                     ),
+                    added_by_id=added_by_id,
+                    added_by=added_by,
                 )
             )
         elif row.episode is not None:
@@ -1055,6 +1158,8 @@ async def list_playlist_items_route(
                     position=row.position,
                     type="episode",
                     episode=_episode_item(row.episode, str(row.episode.id) in played_ids),
+                    added_by_id=added_by_id,
+                    added_by=added_by,
                 )
             )
         elif row.remote_object is not None:
@@ -1070,6 +1175,8 @@ async def list_playlist_items_route(
                         playable=str(remote_row.id) in playable_remote,
                         actor_handles=remote_actor_handles,
                     ),
+                    added_by_id=added_by_id,
+                    added_by=added_by,
                 )
             )
     return items
@@ -1087,7 +1194,7 @@ async def remove_tracks_from_playlist(
     playlist = await music.get_playlist(db, playlist_id)
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+    if not await acl.can_edit(db, current_user, "playlist", playlist_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -1149,7 +1256,7 @@ async def reorder_playlist_tracks_route(
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+    if not await acl.can_edit(db, current_user, "playlist", playlist_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -1276,7 +1383,7 @@ async def add_playlist_tags(
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
 
-    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+    if not await acl.can_edit(db, current_user, "playlist", playlist_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -1310,7 +1417,15 @@ async def add_playlist_tags(
     )
     await db.commit()
     saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids, db=db)
+    return await _build_playlist_response(
+        playlist,
+        current_user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, current_user, "playlist", playlist_id),
+    )
 
 
 @router.delete("/{playlist_id}/tags/{tag}", response_model=PlaylistResponse)
@@ -1328,7 +1443,7 @@ async def remove_playlist_tag(
     if playlist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Playlist not found")
 
-    if not await acl.can_manage(db, current_user, "playlist", playlist_id):
+    if not await acl.can_edit(db, current_user, "playlist", playlist_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -1356,4 +1471,12 @@ async def remove_playlist_tag(
     )
     await db.commit()
     saved_ids = await collection.saved_item_ids(db, current_user, "playlist", {playlist_id})
-    return await _build_playlist_response(playlist, current_user, storage, include, saved_ids, db=db)
+    return await _build_playlist_response(
+        playlist,
+        current_user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, current_user, "playlist", playlist_id),
+    )

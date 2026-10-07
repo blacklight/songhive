@@ -11,6 +11,7 @@ import SharesView from "./SharesView.vue";
 
 vi.mock("@/api/shares", () => ({
   listMyShares: vi.fn(),
+  listReceivedShares: vi.fn(),
   deleteShareGrant: vi.fn(),
   deleteShareUrl: vi.fn(),
 }));
@@ -82,6 +83,11 @@ describe("SharesView", () => {
     vi.clearAllMocks();
     mockMatchMedia(true);
     vi.mocked(sharesApi.listMyShares).mockResolvedValue([]);
+    vi.mocked(sharesApi.listReceivedShares).mockResolvedValue({
+      items: [],
+      offset: 0,
+      total: 0,
+    });
     vi.mocked(sharesApi.deleteShareGrant).mockResolvedValue(undefined);
     vi.mocked(sharesApi.deleteShareUrl).mockResolvedValue(undefined);
   });
@@ -289,6 +295,45 @@ describe("SharesView", () => {
       .findAll("button")
       .find((b) => b.text() === i18n.global.t("browse.share.revoke"));
     expect(revoke).toBeUndefined();
+  });
+
+  it("renders the received tab when ?tab=received", async () => {
+    const router = createTestRouter();
+    await router.push("/shares?tab=received");
+
+    wrapper = mount(SharesView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    expect(sharesApi.listReceivedShares).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: 50, offset: 0 }),
+    );
+    expect(wrapper.text()).toContain(
+      i18n.global.t("pages.shares.received.empty"),
+    );
+  });
+
+  it("switches tabs via the tab control", async () => {
+    const router = createTestRouter();
+    await router.push("/shares");
+
+    wrapper = mount(SharesView, {
+      attachTo: document.body,
+      global: { plugins: [router] },
+    });
+    await flushPromises();
+
+    const receivedTab = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("pages.shares.tabs.received"));
+    expect(receivedTab).toBeDefined();
+    await receivedTab?.trigger("click");
+    await flushPromises();
+
+    expect(router.currentRoute.value.query.tab).toBe("received");
+    expect(sharesApi.listReceivedShares).toHaveBeenCalled();
   });
 
   it("bulk-revokes the selected shares", async () => {

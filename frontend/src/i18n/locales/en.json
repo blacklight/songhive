@@ -389,6 +389,16 @@
       "unknownItem": "Untitled item",
       "anyoneWithLink": "Anyone with the link",
       "expiresAt": "Expires {date}",
+      "tabs": {
+        "created": "Shared by me",
+        "received": "Shared with me"
+      },
+      "received": {
+        "sharedBy": "Shared by",
+        "allTypes": "All types",
+        "filterType": "Filter by type",
+        "empty": "Nothing has been shared with you yet."
+      },
       "columns": {
         "type": "Type",
         "resource": "Resource",
@@ -2002,7 +2012,22 @@
       "embedFormatScript": "JavaScript widget",
       "embedFormatIframe": "HTML iframe",
       "embedLoading": "Loading embed details…",
-      "embedNotPublic": "Only public items can be embedded. Change the visibility to public first."
+      "embedNotPublic": "Only public items can be embedded. Change the visibility to public first.",
+      "collaborator": "Collaborator",
+      "collaboratorHint": "Collaborators can edit the contents and metadata.",
+      "role": "Role",
+      "roleCollaborator": "Collaborator",
+      "roleViewer": "Viewer",
+      "makeCollaborator": "Make collaborator",
+      "makeViewer": "Make viewer",
+      "roleUpdateError": "Could not update the role: {message}",
+      "leave": "Leave",
+      "leaveConfirm": "Leave \"{name}\"? You will lose your shared access.",
+      "leaveSelected": "Leave selected",
+      "leaveBulkConfirm": "Leave {count} shared items? You will lose access to them.",
+      "left": "You left the share.",
+      "leftBulk": "Left {count} shares.",
+      "leaveError": "Could not leave: {message}"
     },
     "contextMenu": {
       "playNext": "Play next",
@@ -2072,6 +2097,7 @@
       "empty": "No tracks selected.",
       "download": "Download"
     },
+    "addedBy": "Added by {name}",
     "addToCollection": {
       "addToLibrary": "Add to library",
       "addToPlaylist": "Add to playlist",
@@ -2295,6 +2321,7 @@
       "reply": "replied to your {object}",
       "mention": "mentioned you",
       "share": "shared {object} with you",
+      "shareCollaborator": "invited you to collaborate on {object}",
       "unknown": "sent you a notification",
       "webmention": "mentioned your {object}",
       "activity": "shared {object}",

@@ -103,7 +103,8 @@ function userCanAddToLibrary(lib: LibraryResponse) {
 }
 
 function userCanAddToPlaylist(playlist: PlaylistResponse) {
-  return authStore.isAdmin || playlist.owner_id === authStore.user?.id;
+  // Server-provided capability — includes collaborator grants.
+  return playlist.can_write;
 }
 
 const filteredCollections = computed(() => {
@@ -141,9 +142,9 @@ async function loadCollections() {
   error.value = null;
   try {
     if (props.mode === "library") {
-      collections.value = await listLibraries({ limit: 100 });
+      collections.value = await listLibraries({ limit: 100, editable: true });
     } else {
-      collections.value = await listPlaylists({ limit: 100 });
+      collections.value = await listPlaylists({ limit: 100, editable: true });
     }
     selectFirst();
   } catch (err) {

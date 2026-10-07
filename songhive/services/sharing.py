@@ -37,25 +37,38 @@ def _hash_token(raw_token: str) -> str:
     return hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
 
 
+def _validate_collaborator(item_type: str, collaborator: bool) -> None:
+    """Reject collaborator grants on item types that do not support them."""
+    from . import acl  # deferred: acl imports sharing at module level
+
+    if collaborator and item_type not in acl.COLLABORATIVE_ITEM_TYPES:
+        raise ValueError(f"Item type {item_type!r} does not support collaborator grants")
+
+
 async def create_share_grant(
     session: AsyncSession,
     item_type: str,
     item_id: str,
     user_id: str,
     created_by: str,
+    *,
+    collaborator: bool = False,
 ) -> Tuple[ShareGrant, bool]:
     """
     Create a share grant for ``user_id`` on ``(item_type, item_id)``.
 
     Returns ``(grant, created)``.  If an identical grant already exists, the
     existing row is returned with ``created=False`` instead of raising a
-    uniqueness error.
+    uniqueness error; when the requested ``collaborator`` flag differs from
+    the stored one it is updated on the existing row.
     """
+    _validate_collaborator(item_type, collaborator)
     grant = ShareGrant(
         item_type=item_type,
         item_id=item_id,
         user_id=user_id,
         created_by=created_by,
+        collaborator=collaborator,
     )
 
     try:
@@ -70,10 +83,25 @@ async def create_share_grant(
         # already been rolled back, leaving the outer transaction intact.
         existing = await _get_share_grant(session, item_type, item_id, user_id)
         if existing is not None:
+            if existing.collaborator != collaborator:
+                existing.collaborator = collaborator
+                await session.flush()
             return existing, False
         raise
 
     return grant, True
+
+
+async def set_share_grant_collaborator(
+    session: AsyncSession,
+    grant: ShareGrant,
+    collaborator: bool,
+) -> ShareGrant:
+    """Update the collaborator flag on an existing grant."""
+    _validate_collaborator(grant.item_type, collaborator)
+    grant.collaborator = collaborator
+    await session.flush()
+    return grant
 
 
 async def _get_share_grant(
@@ -166,6 +194,37 @@ async def list_share_grants_created_by(
         select(ShareGrant).where(ShareGrant.created_by == user_id).order_by(ShareGrant.created_at.desc())
     )
     return list(result.scalars().all())
+
+
+async def list_share_grants_received(
+    session: AsyncSession,
+    user_id: str,
+    *,
+    item_type: Optional[str] = None,
+    limit: int,
+    offset: int,
+) -> List[ShareGrant]:
+    """List share grants received by ``user_id``, newest first, paginated in SQL."""
+    stmt = select(ShareGrant).where(ShareGrant.user_id == user_id)
+    if item_type is not None:
+        stmt = stmt.where(ShareGrant.item_type == item_type)
+    stmt = stmt.order_by(ShareGrant.created_at.desc()).offset(offset).limit(limit)
+    result = await session.execute(stmt)
+    return list(result.scalars().all())
+
+
+async def count_share_grants_received(
+    session: AsyncSession,
+    user_id: str,
+    *,
+    item_type: Optional[str] = None,
+) -> int:
+    """Return the total number of share grants received by ``user_id``."""
+    stmt = select(func.count(ShareGrant.id)).where(ShareGrant.user_id == user_id)
+    if item_type is not None:
+        stmt = stmt.where(ShareGrant.item_type == item_type)
+    result = await session.execute(stmt)
+    return result.scalar() or 0
 
 
 async def create_share_token(

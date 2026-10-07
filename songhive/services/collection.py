@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models.collection_item import CollectionItem
 from ..models.favorite import Favorite
 from ..models.user import User
+from .acl import COLLABORATIVE_ITEM_TYPES as _COLLABORATIVE_ITEM_TYPES
+from .acl import collaborator_clause
 
 # Item types that can be saved to a user's collection.  ``file`` rows are
 # storage internals rather than browsable content and are excluded.
@@ -39,7 +41,10 @@ def in_collection_clause(model: Any, item_type: str, user: User) -> Any:
     """Return a WHERE clause matching ``model`` rows in ``user``'s collection.
 
     A row is collected when the user owns it or has saved it through a
-    ``CollectionItem`` row.  Tracks additionally match when favorited.
+    ``CollectionItem`` row.  Tracks additionally match when favorited, and
+    collaborative item types (playlists, libraries) match when the user
+    holds a collaborator grant — a collection you can edit belongs in your
+    collection lists.
     """
     conditions: List[Any] = [
         exists().where(
@@ -58,6 +63,8 @@ def in_collection_clause(model: Any, item_type: str, user: User) -> Any:
                 Favorite.user_id == user.id,
             )
         )
+    if item_type in _COLLABORATIVE_ITEM_TYPES:
+        conditions.append(collaborator_clause(model, item_type, user))
     return or_(*conditions)
 
 

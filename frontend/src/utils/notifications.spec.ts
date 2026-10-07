@@ -137,6 +137,28 @@ describe("notificationActionText", () => {
     ).toBe("shared a track with you");
   });
 
+  it("uses collaborator wording for collaborator share grants", () => {
+    expect(
+      notificationActionText(
+        notification("share", {
+          item_type: "playlist",
+          item_id: "p-1",
+          collaborator: true,
+        }),
+      ),
+    ).toBe("invited you to collaborate on a playlist");
+    // Plain shares keep the generic wording.
+    expect(
+      notificationActionText(
+        notification("share", {
+          item_type: "playlist",
+          item_id: "p-1",
+          collaborator: false,
+        }),
+      ),
+    ).toBe("shared a playlist with you");
+  });
+
   it("renders the followed object for object-scoped follows", () => {
     expect(
       notificationActionText(

@@ -28,7 +28,7 @@ from ..models.tag import Tag, TagTrack
 from ..models.track import Track
 from ..models.user import User
 from ._common import ilike_contains
-from .acl import _list_access_predicate, apply_access_filter
+from .acl import _list_access_predicate, apply_access_filter, collaborator_clause
 from .collection import apply_collection_filter, in_collection_clause
 from .genres import InvalidGenreName, validate_genre_name
 
@@ -865,6 +865,29 @@ async def get_favorited_track_ids(
     return {str(row) for row in result.scalars().all()}
 
 
+def _library_tracks_stmt(
+    library_id: str,
+    *,
+    user: Optional[User] = None,
+    include: Optional[Set[str]] = None,
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
+    query: Optional[str] = None,
+) -> Select[Any]:
+    """Build the filtered/sorted statement shared by the library track listings."""
+    stmt = (
+        select(Track)
+        .options(*_track_selectin_options(include))
+        .join(LibraryTrack, LibraryTrack.track_id == Track.id)
+        .where(LibraryTrack.library_id == library_id)
+    )
+    if query:
+        stmt = _apply_collection_tracks_query(stmt, query)
+    stmt = apply_access_filter(stmt, Track, user, "track")
+    stmt = stmt.order_by(*_track_sort_clause(sort_by, sort_dir))
+    return stmt
+
+
 async def list_library_tracks(
     session: AsyncSession,
     library_id: str,
@@ -877,19 +900,48 @@ async def list_library_tracks(
     query: Optional[str] = None,
 ) -> List[Track]:
     """List tracks that are members of ``library_id``."""
-    stmt = (
-        select(Track)
-        .options(*_track_selectin_options(include))
-        .join(LibraryTrack, LibraryTrack.track_id == Track.id)
-        .where(LibraryTrack.library_id == library_id)
+    stmt = _library_tracks_stmt(
+        library_id,
+        user=user,
+        include=include,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        query=query,
     )
-    if query:
-        stmt = _apply_collection_tracks_query(stmt, query)
-    stmt = apply_access_filter(stmt, Track, user, "track")
-    stmt = stmt.order_by(*_track_sort_clause(sort_by, sort_dir))
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
     return list(result.scalars().all())
+
+
+async def list_library_track_entries(
+    session: AsyncSession,
+    library_id: str,
+    user: Optional[User] = None,
+    limit: int = 20,
+    offset: int = 0,
+    include: Optional[Set[str]] = None,
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
+    query: Optional[str] = None,
+) -> List[Tuple[Track, Optional[str]]]:
+    """List library member tracks together with each row's ``added_by_id``.
+
+    Same rows and ordering as :func:`list_library_tracks`; the second tuple
+    element is the ``library_tracks.added_by_id`` attribution (``None`` when
+    unset). ``LibraryTrack`` is unique on ``(library_id, track_id)`` so the
+    join stays 1:1.
+    """
+    stmt = _library_tracks_stmt(
+        library_id,
+        user=user,
+        include=include,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
+        query=query,
+    )
+    stmt = stmt.add_columns(LibraryTrack.added_by_id).offset(offset).limit(limit)
+    result = await session.execute(stmt)
+    return [(row[0], row[1]) for row in result.all()]
 
 
 async def count_library_tracks(
@@ -909,12 +961,30 @@ async def count_library_tracks(
     return result.scalar() or 0
 
 
+def _apply_editable_filter(stmt: Select[Any], model: Any, user: Optional[User], item_type: str) -> Select[Any]:
+    """Restrict ``stmt`` to items ``user`` owns or holds a collaborator grant on.
+
+    Admins are intentionally not bypassed — this filter drives the
+    "collections I can edit" picker, which would otherwise list every item on
+    the instance.
+    """
+    if user is None:
+        return stmt.where(false())
+    return stmt.where(
+        or_(
+            model.owner_id == user.id,
+            collaborator_clause(model, item_type, user),
+        )
+    )
+
+
 async def list_playlists(
     session: AsyncSession,
     user: Optional[User] = None,
     owner_id: Optional[str] = None,
     query: Optional[str] = None,
     collection: Optional[bool] = None,
+    editable: bool = False,
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
@@ -930,6 +1000,8 @@ async def list_playlists(
         stmt = stmt.where(or_(ilike_contains(Playlist.name, query), ilike_contains(Playlist.description, query)))
     stmt = apply_collection_filter(stmt, Playlist, user, "playlist", collection)
     stmt = apply_access_filter(stmt, Playlist, user, "playlist")
+    if editable:
+        stmt = _apply_editable_filter(stmt, Playlist, user, "playlist")
     stmt = _apply_sort(stmt, field, sort_dir, Playlist.id)
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
@@ -942,6 +1014,7 @@ async def count_playlists(
     owner_id: Optional[str] = None,
     query: Optional[str] = None,
     collection: Optional[bool] = None,
+    editable: bool = False,
 ) -> int:
     """Return the total number of playlists visible to ``user``."""
     stmt = select(Playlist)
@@ -951,6 +1024,8 @@ async def count_playlists(
         stmt = stmt.where(or_(ilike_contains(Playlist.name, query), ilike_contains(Playlist.description, query)))
     stmt = apply_collection_filter(stmt, Playlist, user, "playlist", collection)
     stmt = apply_access_filter(stmt, Playlist, user, "playlist")
+    if editable:
+        stmt = _apply_editable_filter(stmt, Playlist, user, "playlist")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0
 
@@ -979,6 +1054,7 @@ async def list_libraries(
     owner_id: Optional[str] = None,
     query: Optional[str] = None,
     collection: Optional[bool] = None,
+    editable: bool = False,
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
@@ -1008,6 +1084,8 @@ async def list_libraries(
         )
     stmt = apply_collection_filter(stmt, Library, user, "library", collection)
     stmt = apply_access_filter(stmt, Library, user, "library")
+    if editable:
+        stmt = _apply_editable_filter(stmt, Library, user, "library")
     stmt = _apply_sort(stmt, field, sort_dir, Library.id)
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
@@ -1020,6 +1098,7 @@ async def count_libraries(
     owner_id: Optional[str] = None,
     query: Optional[str] = None,
     collection: Optional[bool] = None,
+    editable: bool = False,
     include_external: bool = False,
 ) -> int:
     """Return the total number of libraries visible to ``user``."""
@@ -1043,6 +1122,8 @@ async def count_libraries(
         )
     stmt = apply_collection_filter(stmt, Library, user, "library", collection)
     stmt = apply_access_filter(stmt, Library, user, "library")
+    if editable:
+        stmt = _apply_editable_filter(stmt, Library, user, "library")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0
 
@@ -1363,6 +1444,7 @@ async def add_playlist_items(
     episode_ids: Sequence[str] = (),
     remote_object_ids: Sequence[str] = (),
     allow_duplicates: bool = False,
+    added_by_id: Optional[str] = None,
 ) -> Tuple[List[str], List[str], List[str]]:
     """
     Append ``track_ids``/``episode_ids``/``remote_object_ids`` to ``playlist_id`` at the end.
@@ -1436,7 +1518,14 @@ async def add_playlist_items(
     added_remote: List[str] = []
     rows: List[PlaylistTrack] = []
     for offset, track_id in enumerate(track_ids, start=1):
-        rows.append(PlaylistTrack(playlist_id=playlist_id, track_id=track_id, position=max_position + offset))
+        rows.append(
+            PlaylistTrack(
+                playlist_id=playlist_id,
+                track_id=track_id,
+                position=max_position + offset,
+                added_by_id=added_by_id,
+            )
+        )
         added_tracks.append(track_id)
     for offset, episode_id in enumerate(episode_ids, start=len(rows) + 1):
         rows.append(
@@ -1444,6 +1533,7 @@ async def add_playlist_items(
                 playlist_id=playlist_id,
                 podcast_episode_id=episode_id,
                 position=max_position + offset,
+                added_by_id=added_by_id,
             )
         )
         added_episodes.append(episode_id)
@@ -1453,6 +1543,7 @@ async def add_playlist_items(
                 playlist_id=playlist_id,
                 remote_object_id=object_id,
                 position=max_position + offset,
+                added_by_id=added_by_id,
             )
         )
         added_remote.append(object_id)
@@ -1469,6 +1560,7 @@ async def add_playlist_tracks(
     playlist_id: str,
     track_ids: List[str],
     allow_duplicates: bool = False,
+    added_by_id: Optional[str] = None,
 ) -> List[str]:
     """
     Append ``track_ids`` to ``playlist_id`` at the end of the playlist.
@@ -1482,6 +1574,7 @@ async def add_playlist_tracks(
         playlist_id,
         track_ids=track_ids,
         allow_duplicates=allow_duplicates,
+        added_by_id=added_by_id,
     )
     return added
 

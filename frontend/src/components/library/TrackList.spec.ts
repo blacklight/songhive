@@ -77,6 +77,11 @@ function createTestRouter() {
         name: "trackActivities",
         component: { template: "<div/>" },
       },
+      {
+        path: "/users/:username",
+        name: "userProfile",
+        component: { template: "<div/>" },
+      },
     ],
   });
 }
@@ -957,6 +962,7 @@ describe("TrackList", () => {
         id: "playlist-1",
         name: "My Playlist",
         owner_id: "user-1",
+        can_write: true,
         visibility: "private",
       },
     ]);
@@ -993,7 +999,10 @@ describe("TrackList", () => {
     await addButton?.trigger("click");
     await flushPromises();
 
-    expect(playlistsApi.listPlaylists).toHaveBeenCalledWith({ limit: 100 });
+    expect(playlistsApi.listPlaylists).toHaveBeenCalledWith({
+      limit: 100,
+      editable: true,
+    });
 
     const saveButton = Array.from(
       document.body.querySelectorAll("button"),
@@ -1526,5 +1535,58 @@ describe("TrackList", () => {
 
     const player = usePlayerStore();
     expect(player.queue.map((t) => t.id)).toEqual(["s-1"]);
+  });
+
+  it("shows the adder's avatar when added_by differs from the owner", async () => {
+    const track = makeTrack({
+      added_by: {
+        id: "user-9",
+        username: "carol",
+        display_name: "Carol",
+      },
+    } as Partial<TrackResponse>);
+    ({ wrapper } = mountTrackList({
+      tracks: [track],
+      collectionOwnerId: "user-1",
+    }));
+    await flushPromises();
+
+    const link = wrapper.find(".track-list__added-by");
+    expect(link.exists()).toBe(true);
+    expect(link.attributes("title")).toBe(
+      i18n.global.t("browse.addedBy", { name: "Carol" }),
+    );
+    expect(link.attributes("href")).toBe("/users/carol");
+  });
+
+  it("hides the adder avatar when the adder is the owner", async () => {
+    const track = makeTrack({
+      added_by: {
+        id: "user-1",
+        username: "alice",
+        display_name: "Alice",
+      },
+    } as Partial<TrackResponse>);
+    ({ wrapper } = mountTrackList({
+      tracks: [track],
+      collectionOwnerId: "user-1",
+    }));
+    await flushPromises();
+
+    expect(wrapper.find(".track-list__added-by").exists()).toBe(false);
+  });
+
+  it("hides the adder avatar when no collection owner is provided", async () => {
+    const track = makeTrack({
+      added_by: {
+        id: "user-9",
+        username: "carol",
+        display_name: "Carol",
+      },
+    } as Partial<TrackResponse>);
+    ({ wrapper } = mountTrackList({ tracks: [track] }));
+    await flushPromises();
+
+    expect(wrapper.find(".track-list__added-by").exists()).toBe(false);
   });
 });

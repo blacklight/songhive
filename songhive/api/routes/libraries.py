@@ -21,6 +21,7 @@ from fastapi import (
 )
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...config.schema import SonghiveConfig
@@ -28,7 +29,9 @@ from ...federation import doc_cache
 from ...models import Visibility
 from ...models.artist import Artist
 from ...models.audit_log import AuditTargetType
+from ...models.external_library import ExternalLibrary
 from ...models.library import Library
+from ...models.share_grant import ShareGrant
 from ...models.user import User
 from ...services import acl, activities, audit, collection, deletion, music, remote_content
 from ...services.auth import get_user_by_username
@@ -79,19 +82,27 @@ class LibraryResponse(BaseModel):
     owner: Optional[UserSummary] = None
     tracks: Optional[List[TrackSummary]] = None
     tags: List[str] = []
-
-
-def _can_write_library(user: Optional[User], library: Library) -> bool:
-    """Return whether the requester may add tracks to this library."""
-    if user is None:
-        return False
-    return user.is_admin or library.owner_id == user.id
+    # Requester capability flags — clients must use these instead of
+    # inferring edit rights from ``owner_id``.  ``can_write`` means
+    # ``acl.can_edit`` (owner, admin, or collaborator).
+    can_manage: bool = False
+    is_collaborator: bool = False
+    # The requester's own share grant on this library, when one exists;
+    # lets a grantee leave the share via ``DELETE /shares/{id}``.
+    share_grant_id: Optional[str] = None
 
 
 class LibraryStatsResponse(BaseModel):
     """Aggregate statistics for a library's accessible tracks."""
 
     track_count: int
+
+
+class LibraryTrackResponse(TrackResponse):
+    """A library member track with per-entry adder attribution."""
+
+    added_by_id: Optional[str] = None
+    added_by: Optional[UserSummary] = None
 
 
 class LibraryCreate(BaseModel):
@@ -171,6 +182,17 @@ def _library_tags(library: Library) -> List[str]:
     return [h.name for h in library.tags]
 
 
+async def _user_grant(
+    db: AsyncSession,
+    user: Optional[User],
+    item_type: str,
+    item_id: str,
+) -> Optional[ShareGrant]:
+    """Return the requester's own share grant for a single item, if any."""
+    grants = await acl.user_grants(db, user, item_type, [item_id])
+    return grants.get(str(item_id))
+
+
 async def _build_library_response(
     library: Library,
     user: Optional[User],
@@ -178,8 +200,16 @@ async def _build_library_response(
     include: IncludeQuery,
     saved_ids: Optional[Set[str]] = None,
     db: Optional[AsyncSession] = None,
+    grant: Optional[ShareGrant] = None,
 ) -> LibraryResponse:
-    """Build a LibraryResponse with optional nested summaries."""
+    """
+    Build a LibraryResponse with optional nested summaries.
+
+    ``grant`` is the requester's own share grant on the library (looked up
+    once per page by the caller via ``acl.user_grants``); it drives
+    ``is_collaborator``/``share_grant_id`` and the collaborator
+    ``can_write``/``in_collection`` semantics.
+    """
     owner = None
     owner_id = library.owner_id
     if "owner" in include and owner_id is not None and library.owner:
@@ -194,6 +224,8 @@ async def _build_library_response(
                 track_list.append(summary)
         tracks = track_list
 
+    is_collaborator = grant is not None and grant.collaborator
+    can_manage = user is not None and (user.is_admin or library.owner_id == user.id)
     return LibraryResponse(
         id=str(library.id),
         name=library.name,
@@ -202,9 +234,14 @@ async def _build_library_response(
         visibility=library.visibility,
         image_url=await _library_image_url(library, storage),
         cover_url=await _library_cover_url(library, storage),
-        can_write=_can_write_library(user, library),
+        can_write=can_manage or is_collaborator,
+        can_manage=can_manage,
+        is_collaborator=is_collaborator,
+        share_grant_id=str(grant.id) if grant is not None else None,
         in_collection=user is not None
-        and (library.owner_id == user.id or (saved_ids is not None and str(library.id) in saved_ids)),
+        and (
+            library.owner_id == user.id or (saved_ids is not None and str(library.id) in saved_ids) or is_collaborator
+        ),
         owner=owner,
         tracks=tracks,
         tags=_library_tags(library),
@@ -223,6 +260,10 @@ async def list_libraries(
         description="Only return libraries in the current user's collection (owned or saved)",
     ),
     include_external: bool = Query(False, description="Include external libraries (admin only)"),
+    editable: bool = Query(
+        False,
+        description="Only return libraries the current user owns or collaborates on",
+    ),
     pagination: Pagination = Depends(get_pagination),
     sort: SortParams = Depends(get_sort({"name", "created_at", "updated_at"}, "name")),
     db: AsyncSession = Depends(get_db),
@@ -250,6 +291,7 @@ async def list_libraries(
         owner_id=owner_id,
         query=q,
         collection=collection_only,
+        editable=editable,
         include_external=include_external,
     )
     rows = await music.list_libraries(
@@ -258,6 +300,7 @@ async def list_libraries(
         owner_id=owner_id,
         query=q,
         collection=collection_only,
+        editable=editable,
         limit=pagination.limit,
         offset=pagination.offset,
         include=set(include.values),
@@ -266,8 +309,13 @@ async def list_libraries(
         include_external=include_external,
     )
     pagination.set_total(response, total)
-    saved_ids = await collection.saved_item_ids(db, user, "library", [str(lib.id) for lib in rows])
-    return [await _build_library_response(lib, user, storage, include, saved_ids, db=db) for lib in rows]
+    library_ids = [str(lib.id) for lib in rows]
+    saved_ids = await collection.saved_item_ids(db, user, "library", library_ids)
+    grants = await acl.user_grants(db, user, "library", library_ids)
+    return [
+        await _build_library_response(lib, user, storage, include, saved_ids, db=db, grant=grants.get(str(lib.id)))
+        for lib in rows
+    ]
 
 
 @router.post("/", response_model=LibraryResponse, status_code=201)
@@ -294,6 +342,7 @@ async def create_library(
         description=library.description,
         visibility=library.visibility,
         can_write=True,
+        can_manage=True,
         in_collection=True,
     )
 
@@ -316,7 +365,15 @@ async def get_library(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
     saved_ids = await collection.saved_item_ids(db, user, "library", {library_id})
-    return await _build_library_response(library, user, storage, include, saved_ids, db=db)
+    return await _build_library_response(
+        library,
+        user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, user, "library", library_id),
+    )
 
 
 @router.get(
@@ -375,7 +432,7 @@ async def upload_track(
     library = await music.get_library(db, library_id)
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    if user is None or not await acl.can_manage(db, user, "library", library_id):
+    if user is None or not await acl.can_edit(db, user, "library", library_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -625,7 +682,7 @@ async def bulk_upload_tracks(
     library = await music.get_library(db, library_id)
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    if user is None or not await acl.can_manage(db, user, "library", library_id):
+    if user is None or not await acl.can_edit(db, user, "library", library_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -700,7 +757,7 @@ async def add_tracks_to_library(
     library = await music.get_library(db, library_id)
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    if not await acl.can_manage(db, current_user, "library", library_id):
+    if not await acl.can_edit(db, current_user, "library", library_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -757,7 +814,7 @@ async def remove_tracks_from_library(
     library = await music.get_library(db, library_id)
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-    if not await acl.can_manage(db, current_user, "library", library_id):
+    if not await acl.can_edit(db, current_user, "library", library_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -839,7 +896,7 @@ async def scan_library(
     )
 
 
-@router.get("/{library_id}/tracks", response_model=List[TrackResponse])
+@router.get("/{library_id}/tracks", response_model=List[LibraryTrackResponse])
 async def list_library_tracks_route(
     response: Response,
     library_id: str,
@@ -857,7 +914,7 @@ async def list_library_tracks_route(
     storage: StorageService = Depends(get_storage_service),
     include: IncludeQuery = Depends(get_include({"artist", "album", "owner"})),
 ):
-    """List tracks that are members of the library."""
+    """List tracks that are members of the library, with per-entry attribution."""
     library = await music.get_library(db, library_id)
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -868,7 +925,7 @@ async def list_library_tracks_route(
         )
 
     total = await music.count_library_tracks(db, library_id=library_id, user=user, query=q)
-    rows = await music.list_library_tracks(
+    rows = await music.list_library_track_entries(
         db,
         library_id=library_id,
         user=user,
@@ -883,9 +940,31 @@ async def list_library_tracks_route(
     favorited_ids = await music.get_favorited_track_ids(
         db,
         user,
-        {str(row.id) for row in rows},
+        {str(row.id) for row, _ in rows},
     )
-    return [await _track_response(storage, row, user, include, favorited_ids) for row in rows]
+
+    # Synced libraries carry the sync-triggering user on every row, not a
+    # human adder — suppress attribution entirely for provider-backed
+    # libraries.
+    provider_backed = (
+        await db.execute(select(ExternalLibrary.id).where(ExternalLibrary.library_id == library_id).limit(1))
+    ).scalar_one_or_none() is not None
+    adders = {}
+    if not provider_backed:
+        adder_ids = {added_by_id for _, added_by_id in rows if added_by_id is not None}
+        if adder_ids:
+            adder_rows = await db.execute(select(User).where(User.id.in_(adder_ids), User.is_active.is_(True)))
+            adders = {str(adder.id): adder for adder in adder_rows.scalars().all()}
+
+    responses: List[LibraryTrackResponse] = []
+    for track, added_by_id in rows:
+        entry = LibraryTrackResponse.model_validate(await _track_response(storage, track, user, include, favorited_ids))
+        adder = adders.get(added_by_id) if added_by_id is not None else None
+        if adder is not None:
+            entry.added_by_id = str(added_by_id)
+            entry.added_by = await build_user_summary(adder)
+        responses.append(entry)
+    return responses
 
 
 @router.patch("/{library_id}", response_model=LibraryResponse)
@@ -903,10 +982,15 @@ async def update_library(
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not await acl.can_manage(db, current_user, "library", library_id):
+    if not await acl.can_edit(db, current_user, "library", library_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
+        )
+    if body.visibility is not None and not await acl.can_manage(db, current_user, "library", library_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the owner can change visibility",
         )
 
     if body.name is not None:
@@ -943,7 +1027,15 @@ async def update_library(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})
-    return await _build_library_response(library, current_user, storage, include, saved_ids, db=db)
+    return await _build_library_response(
+        library,
+        current_user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, current_user, "library", library_id),
+    )
 
 
 @router.post("/{library_id}/image", response_model=LibraryResponse)
@@ -961,7 +1053,7 @@ async def upload_library_image(
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not await acl.can_manage(db, current_user, "library", library_id):
+    if not await acl.can_edit(db, current_user, "library", library_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -989,7 +1081,15 @@ async def upload_library_image(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})
-    return await _build_library_response(library, current_user, storage, include, saved_ids, db=db)
+    return await _build_library_response(
+        library,
+        current_user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, current_user, "library", library_id),
+    )
 
 
 @router.post("/{library_id}/cover", response_model=LibraryResponse)
@@ -1007,7 +1107,7 @@ async def upload_library_cover(
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not await acl.can_manage(db, current_user, "library", library_id):
+    if not await acl.can_edit(db, current_user, "library", library_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -1035,7 +1135,15 @@ async def upload_library_cover(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})
-    return await _build_library_response(library, current_user, storage, include, saved_ids, db=db)
+    return await _build_library_response(
+        library,
+        current_user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, current_user, "library", library_id),
+    )
 
 
 @router.delete("/{library_id}/image", response_model=LibraryResponse)
@@ -1052,7 +1160,7 @@ async def delete_library_image(
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not await acl.can_manage(db, current_user, "library", library_id):
+    if not await acl.can_edit(db, current_user, "library", library_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -1072,7 +1180,15 @@ async def delete_library_image(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})
-    return await _build_library_response(library, current_user, storage, include, saved_ids, db=db)
+    return await _build_library_response(
+        library,
+        current_user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, current_user, "library", library_id),
+    )
 
 
 @router.delete("/{library_id}/cover", response_model=LibraryResponse)
@@ -1089,7 +1205,7 @@ async def delete_library_cover(
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
 
-    if not await acl.can_manage(db, current_user, "library", library_id):
+    if not await acl.can_edit(db, current_user, "library", library_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -1109,7 +1225,15 @@ async def delete_library_cover(
     await db.commit()
 
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})
-    return await _build_library_response(library, current_user, storage, include, saved_ids, db=db)
+    return await _build_library_response(
+        library,
+        current_user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, current_user, "library", library_id),
+    )
 
 
 @router.delete("/{library_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(rate_limit_account)])
@@ -1191,7 +1315,7 @@ async def add_library_tags(
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
 
-    if not await acl.can_manage(db, current_user, "library", library_id):
+    if not await acl.can_edit(db, current_user, "library", library_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -1225,7 +1349,15 @@ async def add_library_tags(
     )
     await db.commit()
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})
-    return await _build_library_response(library, current_user, storage, include, saved_ids, db=db)
+    return await _build_library_response(
+        library,
+        current_user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, current_user, "library", library_id),
+    )
 
 
 @router.delete("/{library_id}/tags/{tag}", response_model=LibraryResponse)
@@ -1243,7 +1375,7 @@ async def remove_library_tag(
     if library is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Library not found")
 
-    if not await acl.can_manage(db, current_user, "library", library_id):
+    if not await acl.can_edit(db, current_user, "library", library_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -1271,4 +1403,12 @@ async def remove_library_tag(
     )
     await db.commit()
     saved_ids = await collection.saved_item_ids(db, current_user, "library", {library_id})
-    return await _build_library_response(library, current_user, storage, include, saved_ids, db=db)
+    return await _build_library_response(
+        library,
+        current_user,
+        storage,
+        include,
+        saved_ids,
+        db=db,
+        grant=await _user_grant(db, current_user, "library", library_id),
+    )

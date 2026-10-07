@@ -389,6 +389,16 @@
       "unknownItem": "Elemento senza titolo",
       "anyoneWithLink": "Chiunque abbia il link",
       "expiresAt": "Scade il {date}",
+      "tabs": {
+        "created": "Condivisi da me",
+        "received": "Condivisi con me"
+      },
+      "received": {
+        "sharedBy": "Condiviso da",
+        "allTypes": "Tutti i tipi",
+        "filterType": "Filtra per tipo",
+        "empty": "Non è stato ancora condiviso nulla con te."
+      },
       "columns": {
         "type": "Tipo",
         "resource": "Risorsa",
@@ -2002,7 +2012,22 @@
       "embedFormatScript": "Widget JavaScript",
       "embedFormatIframe": "Iframe HTML",
       "embedLoading": "Caricamento dei dettagli di incorporamento…",
-      "embedNotPublic": "Solo gli elementi pubblici possono essere incorporati. Prima imposta la visibilità su pubblica."
+      "embedNotPublic": "Solo gli elementi pubblici possono essere incorporati. Prima imposta la visibilità su pubblica.",
+      "collaborator": "Collaboratore",
+      "collaboratorHint": "I collaboratori possono modificare contenuti e metadati.",
+      "role": "Ruolo",
+      "roleCollaborator": "Collaboratore",
+      "roleViewer": "Visualizzatore",
+      "makeCollaborator": "Rendi collaboratore",
+      "makeViewer": "Rendi visualizzatore",
+      "roleUpdateError": "Impossibile aggiornare il ruolo: {message}",
+      "leave": "Abbandona",
+      "leaveConfirm": "Abbandonare \"{name}\"? Perderai l'accesso condiviso.",
+      "leaveSelected": "Abbandona selezionati",
+      "leaveBulkConfirm": "Abbandonare {count} elementi condivisi? Perderai l'accesso.",
+      "left": "Hai abbandonato la condivisione.",
+      "leftBulk": "Hai abbandonato {count} condivisioni.",
+      "leaveError": "Impossibile abbandonare: {message}"
     },
     "contextMenu": {
       "playNext": "Riproduci dopo",
@@ -2072,6 +2097,7 @@
       "empty": "Nessun brano selezionato.",
       "download": "Scarica"
     },
+    "addedBy": "Aggiunto da {name}",
     "addToCollection": {
       "addToLibrary": "Aggiungi alla libreria",
       "addToPlaylist": "Aggiungi alla playlist",
@@ -2295,6 +2321,7 @@
       "reply": "ha risposto al tuo {object}",
       "mention": "ti ha menzionato",
       "share": "ha condiviso {object} con te",
+      "shareCollaborator": "ti ha invitato a collaborare su {object}",
       "unknown": "ti ha inviato una notifica",
       "webmention": "ha menzionato il tuo {object}",
       "activity": "ha condiviso {object}",

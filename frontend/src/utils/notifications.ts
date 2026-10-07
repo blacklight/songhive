@@ -123,6 +123,11 @@ export function notificationActionText(
     }
     keys.push("notifications.types.membership");
   } else {
+    // Collaborator share invites get their own wording ("invited you to
+    // collaborate on …") — the generic share text stays as fallback.
+    if (notification.type === "share" && payload.collaborator === true) {
+      keys.push("notifications.types.shareCollaborator");
+    }
     keys.push(
       notification.type === "follow" &&
         (payload.follow_request_pending === true ||

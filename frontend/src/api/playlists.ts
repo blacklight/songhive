@@ -54,12 +54,16 @@ export interface PlaylistItemResponse {
   track: TrackResponse | null;
   episode: PlaylistEpisodeItem | null;
   remote?: RemoteObject | null;
+  /** Id of the user who added this entry (null for sync-created rows). */
+  added_by_id?: string | null;
+  added_by?: components["schemas"]["UserSummary"] | null;
 }
 
 export function listPlaylists(params?: {
   q?: string;
   owner_username?: string;
   collection?: boolean;
+  editable?: boolean;
   limit?: number;
   offset?: number;
   include?: string;
@@ -79,6 +83,7 @@ export async function listPlaylistsWithMeta(params?: {
   q?: string;
   owner_username?: string;
   collection?: boolean;
+  editable?: boolean;
   limit?: number;
   offset?: number;
   include?: string;
@@ -344,11 +349,15 @@ export function playlistItemToQueueTrack(
   if (item.type === "track" && item.track) {
     // QueueTrack needs the denormalized artist_name/album_title/artwork_url
     // fields — derive them from the nested artist/album/image_url data.
-    return toQueueTrack(item.track);
+    return { ...toQueueTrack(item.track), added_by: item.added_by ?? null };
   }
   if (item.type === "remote" && item.remote) {
     // Keep unplayable remote items in the list so they can be removed.
-    return remoteObjectToQueueTrack(item.remote, { requirePlayable: false });
+    const queueTrack = remoteObjectToQueueTrack(item.remote, {
+      requirePlayable: false,
+    });
+    if (!queueTrack) return null;
+    return { ...queueTrack, added_by: item.added_by ?? null };
   }
   if (item.type === "episode" && item.episode) {
     const episode = item.episode;
@@ -370,6 +379,7 @@ export function playlistItemToQueueTrack(
       podcast_episode_id: episode.id,
       podcast_id: episode.podcast_id,
       in_collection: false,
+      added_by: item.added_by ?? null,
     };
   }
   return null;

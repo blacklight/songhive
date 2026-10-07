@@ -51,6 +51,9 @@ _ITEM_REGISTRY: Dict[str, _ItemType] = {
 ITEM_TYPES = set(_ITEM_REGISTRY)
 ITEM_ID_KEYS = {item_type: entry.id_key for item_type, entry in _ITEM_REGISTRY.items()}
 
+# Item types that support per-user collaborator grants (edit without manage).
+COLLABORATIVE_ITEM_TYPES = frozenset({"playlist", "library"})
+
 
 def get_item_plural(item_type: str) -> Optional[str]:
     """Return the public API plural path segment for ``item_type`` or ``None`` if unknown."""
@@ -494,6 +497,91 @@ async def can_manage(
         return False
 
     return owner_id == user.id
+
+
+async def is_collaborator(
+    session: AsyncSession,
+    user: Optional[User],
+    item_type: str,
+    item_id: str,
+) -> bool:
+    """Return whether ``user`` holds a collaborator grant on ``(item_type, item_id)``.
+
+    Collaborator grants only exist for :data:`COLLABORATIVE_ITEM_TYPES`; the
+    check returns False for anonymous users, other item types, and plain
+    (non-collaborator) grants.
+    """
+    if user is None or item_type not in COLLABORATIVE_ITEM_TYPES:
+        return False
+    result = await session.execute(
+        select(ShareGrant.id)
+        .where(
+            ShareGrant.item_type == item_type,
+            ShareGrant.item_id == item_id,
+            ShareGrant.user_id == user.id,
+            ShareGrant.collaborator.is_(True),
+        )
+        .limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
+async def can_edit(
+    session: AsyncSession,
+    user: Optional[User],
+    item_type: str,
+    item_id: str,
+) -> bool:
+    """Return whether ``user`` may edit the content/metadata of ``item_id``.
+
+    Owners and admins can always edit; on collaborative item types a
+    collaborator grantee can too.  Management powers (delete, visibility,
+    grants, scans, provider sync) stay behind :func:`can_manage`.
+    """
+    if await can_manage(session, user, item_type, item_id):
+        return True
+    return await is_collaborator(session, user, item_type, item_id)
+
+
+async def user_grants(
+    session: AsyncSession,
+    user: Optional[User],
+    item_type: str,
+    item_ids: Iterable[str],
+) -> Dict[str, ShareGrant]:
+    """Return the requester's own grants for ``item_ids``, keyed by item id.
+
+    A single query for a page of items; used to compute per-item
+    ``is_collaborator``/``share_grant_id`` response fields without N+1.
+    Returns an empty mapping for anonymous users.
+    """
+    ids = list(item_ids)
+    if user is None or not ids:
+        return {}
+    result = await session.execute(
+        select(ShareGrant).where(
+            ShareGrant.item_type == item_type,
+            ShareGrant.item_id.in_(ids),
+            ShareGrant.user_id == user.id,
+        )
+    )
+    return {grant.item_id: grant for grant in result.scalars().all()}
+
+
+def collaborator_clause(model, item_type: str, user: User):
+    """Return a SQL EXISTS predicate matching items the user collaborates on.
+
+    ``model`` must expose an ``id`` column joined to ``ShareGrant.item_id``.
+    For use in list filters ("collections I can edit"); callers must ensure
+    ``item_type`` is in :data:`COLLABORATIVE_ITEM_TYPES` and ``user`` is not
+    None.
+    """
+    return exists().where(
+        ShareGrant.item_type == item_type,
+        ShareGrant.item_id == model.id,
+        ShareGrant.user_id == user.id,
+        ShareGrant.collaborator.is_(True),
+    )
 
 
 async def audit_ownerless_private(session: AsyncSession) -> int:

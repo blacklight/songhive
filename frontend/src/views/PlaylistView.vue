@@ -20,7 +20,9 @@ import {
 import { useToastStore } from "@/stores/toast";
 import { useAuthStore } from "@/stores/auth";
 import { getApiErrorMessage } from "@/api/client";
-import { useCanManage } from "@/composables/useCanManage";
+import { deleteShareGrant } from "@/api/shares";
+import { useCollectionPermissions } from "@/composables/useCollectionPermissions";
+import { useConfirm } from "@/composables/useConfirm";
 import { useProviderSync } from "@/composables/useProviderSync";
 import { providerSyncPlaylist } from "@/api/providerSync";
 import { providerDisplayName } from "@/utils/providerName";
@@ -131,9 +133,8 @@ const { owner, visibilityText, visibilityIcon } = useEntityMeta(playlist);
 const { isOwner } = useOwnership(
   computed(() => playlist.value?.owner_id ?? null),
 );
-const { canManage } = useCanManage(
-  computed(() => playlist.value?.owner_id ?? null),
-);
+const { canWrite, canManage, shareGrantId } =
+  useCollectionPermissions(playlist);
 
 const isPublic = computed(() => playlist.value?.visibility === "public");
 
@@ -148,7 +149,7 @@ const {
   kind: "playlist",
   entityId: playlistId,
   status: computed(() => playlist.value?.provider_sync),
-  canSync: isOwner,
+  canSync: canManage,
   sync: providerSyncPlaylist,
   onRefreshed: () =>
     Promise.all([refreshTracks(), loadStats(), loadPlaylist()]).then(
@@ -221,8 +222,9 @@ const {
 const { shareOpen, shareTarget, openShare, closeShare } = useShareDialog();
 const { requestArchive } = useDownloadArchive();
 const { exportM3u } = useM3uExport();
+const { confirm } = useConfirm();
 
-const canRemove = computed(() => canManage.value);
+const canRemove = computed(() => canWrite.value);
 
 const trackListRef = ref<TrackListInstance | null>(null);
 
@@ -322,7 +324,14 @@ const actions = computed(() => [
     label: t("common.edit"),
     icon: "pen-to-square",
     variant: "secondary" as const,
-    visible: canManage.value,
+    visible: canWrite.value,
+  },
+  {
+    key: "leave",
+    label: t("browse.share.leave"),
+    icon: "right-from-bracket",
+    variant: "danger" as const,
+    visible: shareGrantId.value !== null,
   },
   {
     key: "delete",
@@ -332,6 +341,44 @@ const actions = computed(() => [
     visible: canDeletePlaylist.value,
   },
 ]);
+
+const isLeaving = ref(false);
+
+async function leavePlaylist() {
+  const grantId = shareGrantId.value;
+  if (!grantId || !playlist.value || isLeaving.value) return;
+  const name = playlist.value.name;
+  const confirmed = await confirm({
+    title: t("browse.share.leave"),
+    message: t("browse.share.leaveConfirm", { name }),
+    danger: true,
+    confirmLabel: t("browse.share.leave"),
+  });
+  if (!confirmed) return;
+
+  isLeaving.value = true;
+  try {
+    await deleteShareGrant(grantId);
+    toastStore.push({ type: "success", message: t("browse.share.left") });
+    // Leaving may remove access entirely — navigate away when it does.
+    try {
+      playlist.value = await getPlaylist(playlistId.value, {
+        include: "owner",
+      });
+    } catch {
+      await router.push("/playlists");
+    }
+  } catch (err) {
+    toastStore.push({
+      type: "error",
+      message: t("browse.share.leaveError", {
+        message: getApiErrorMessage(err) || t("errors.unknown"),
+      }),
+    });
+  } finally {
+    isLeaving.value = false;
+  }
+}
 
 async function onAction(key: string) {
   if (!playlist.value) return;
@@ -368,6 +415,9 @@ async function onAction(key: string) {
       break;
     case "delete":
       deletePlaylist.open(playlist.value.id);
+      break;
+    case "leave":
+      await leavePlaylist();
       break;
   }
 }
@@ -564,10 +614,11 @@ watch(
           :loading="tracksLoading || providerNeverFetched"
           :loading-more="tracksLoadingMore"
           :context="playlist.name"
+          :collection-owner-id="playlist.owner_id"
           :removable-from="removableFrom"
           :empty-label="t('browse.playlist.empty')"
           :deletable="true"
-          :reorderable="!tracksQuery"
+          :reorderable="!tracksQuery && canWrite"
           :sort-by="trackSortBy"
           :offset="trackOffset"
           :total="trackTotal"

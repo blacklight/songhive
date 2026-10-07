@@ -27,7 +27,7 @@ from ..models.library_track import LibraryTrack
 from ..models.mention_record import MentionRecord
 from ..models.notification import ActivitySubscription, Notification, NotificationPreference
 from ..models.oauth_client import OAuth2Client
-from ..models.playlist import Playlist
+from ..models.playlist import Playlist, PlaylistTrack
 from ..models.podcast import PodcastEpisodePlay, PodcastSubscription, PodcastSyncConfig, PodcastSyncEvent
 from ..models.radio import Radio
 from ..models.report import Report
@@ -524,6 +524,7 @@ async def _remove_user_references(session: AsyncSession, user: User) -> None:
     await session.execute(update(LibraryTrack).where(LibraryTrack.added_by_id == user.id).values(added_by_id=None))
     await session.execute(update(OAuth2Client).where(OAuth2Client.owner_id == user.id).values(owner_id=None))
     await session.execute(update(Playlist).where(Playlist.owner_id == user.id).values(owner_id=None))
+    await session.execute(update(PlaylistTrack).where(PlaylistTrack.added_by_id == user.id).values(added_by_id=None))
     await session.execute(update(Radio).where(Radio.owner_id == user.id).values(owner_id=None))
     await session.execute(update(Report).where(Report.reviewed_by == user.id).values(reviewed_by=None))
     await session.execute(update(Setting).where(Setting.updated_by == user.id).values(updated_by=None))

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from .remote_object import RemoteObject
     from .tag import Tag, TagPlaylist
     from .track import Track
+    from .user import User
 
 
 class Playlist(Base):
@@ -99,8 +100,13 @@ class PlaylistTrack(Base):
         index=True,
     )
     position: Mapped[int] = mapped_column(Integer)
+    added_by_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     playlist: Mapped["Playlist"] = relationship("Playlist", back_populates="tracks", lazy="selectin")
     track: Mapped[Optional["Track"]] = relationship("Track", lazy="selectin")
     episode: Mapped[Optional["PodcastEpisode"]] = relationship("PodcastEpisode", lazy="selectin")
     remote_object: Mapped[Optional["RemoteObject"]] = relationship("RemoteObject", lazy="selectin")
+    added_by: Mapped[Optional["User"]] = relationship("User", foreign_keys=[added_by_id], lazy="selectin")
