@@ -50,10 +50,12 @@ def _build_tornado_app(config: SonghiveConfig, fastapi_app, tornado_redis=None) 
     from tornado.wsgi import WSGIContainer
 
     from .streaming.handler import StreamHandler
+    from .streaming.live import LiveIngestHandler
     from .streaming.mount import StreamMountHandler
+    from .ws.auth import AuthenticatedWebSocket
     from .ws.events import EventWebSocket
 
-    EventWebSocket._allowed_origins = set(config.server.cors_origins)
+    AuthenticatedWebSocket._allowed_origins = set(config.server.cors_origins)
 
     wsgi_app = ASGIMiddleware(cast(Callable[[Any, Any, Any], Awaitable[None]], fastapi_app))
     # Without an executor, WSGIContainer runs the app on the Tornado event
@@ -87,6 +89,7 @@ def _build_tornado_app(config: SonghiveConfig, fastapi_app, tornado_redis=None) 
 
     handlers: list[Any] = [
         (r"/ws/events", EventWebSocket),
+        (r"/ws/live/(?P<output_id>[^/]+)", LiveIngestHandler),
         (r"/ws/", EventWebSocket),
         (r"/api/v1/stream/(?P<track_id>[^/]+)", StreamHandler),
         (r"/streams/(?P<mount>[^/]+)", StreamMountHandler),

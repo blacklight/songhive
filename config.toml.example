@@ -398,6 +398,25 @@ enabled = false
 # update their now-playing display.
 # http_stream_metaint_bytes = 16384
 
+# Live broadcasting lets the owner of a native HTTP mount send device audio
+# (browser MediaRecorder over /ws/live/<output_id>) through the mount to its
+# listeners. Requires the stream worker to be running.
+# live_enabled = true
+
+# Average ingest bitrate cap enforced by the ingest socket (abuse guard).
+# live_max_bitrate_kbps = 320
+
+# Maximum length of one broadcast in seconds; 0 is unlimited.
+# live_max_duration_seconds = 0
+
+# Approximate MAXLEN of the Redis stream buffering live audio between the
+# ingest socket and the worker — a hiccup buffer only.
+# live_ingest_max_entries = 256
+
+# Seconds the ingest socket waits for the worker to report the broadcast on
+# air before failing.
+# live_start_timeout_seconds = 15.0
+
 [streaming]
 # Path to the ffmpeg binary. When omitted, Songhive searches PATH.
 # ffmpeg_path = "/usr/bin/ffmpeg"

@@ -7,8 +7,11 @@ import pytest
 from fakeredis.aioredis import FakeRedis
 from sqlalchemy import func, select
 
+import songhive.streams.live as live_mod
+import songhive.streams.worker as worker_mod
 from songhive.models.base import get_session, init_db
 from songhive.models.history import ListeningHistory
+from songhive.models.output_stream import OutputStream
 from songhive.models.playback_session import PlaybackSession
 from songhive.services.outputs import create_output, update_output
 from songhive.services.playback import (
@@ -17,8 +20,12 @@ from songhive.services.playback import (
     handle_command,
     select_outputs,
 )
+from songhive.services.secrets import encrypt_json
 from songhive.streams.driver import OutputDriver
-from songhive.streams.types import AudioSource, TrackMeta
+from songhive.streams.fake import FakeOutput
+from songhive.streams.live import encode_live_state, live_key, worker_heartbeat_key
+from songhive.streams.registry import get_output as registry_get_output
+from songhive.streams.types import AudioSource, OutputCapabilities, TrackMeta
 from songhive.streams.worker import SessionDriver, StreamWorker
 
 
@@ -1064,3 +1071,290 @@ async def test_session_has_stream_output_survives_db_error(worker_config, make_w
 
     monkeypatch.setattr("songhive.streams.worker.get_session", _failing_session)
     assert await driver._session_has_stream_output() is True
+
+
+class _FakeHttpProvider(FakeOutput):
+    """Registry stand-in so http-typed outputs get an in-memory driver."""
+
+    provider_type = "http"
+
+    async def validate_config(self, config: dict) -> OutputCapabilities:
+        return OutputCapabilities(
+            metadata_updates=True,
+            pause_supported=True,
+            seek_supported=True,
+            multi_listener=True,
+            user_configurable=True,
+        )
+
+
+@pytest.fixture
+def fake_http_provider(monkeypatch):
+    """Serve http-typed outputs through the fake driver inside the worker."""
+    monkeypatch.setattr(
+        worker_mod,
+        "get_output",
+        lambda provider_type: _FakeHttpProvider if provider_type == "http" else registry_get_output(provider_type),
+    )
+    return _FakeHttpProvider
+
+
+async def _make_http_output(db, user, *, mount: str = "radio", enabled: bool = True) -> OutputStream:
+    """Persist an http-typed output row without touching the registry."""
+    cfg = {
+        "mount": mount,
+        "format": "mp3",
+        "bitrate": "128k",
+        "sample_rate": 44100,
+        "name": "Test Radio",
+    }
+    output = OutputStream(
+        user_id=str(user.id),
+        provider_type="http",
+        name="test http output",
+        config=encrypt_json(cfg),
+        enabled=enabled,
+    )
+    db.add(output)
+    await db.flush()
+    await db.commit()
+    return output
+
+
+async def _claim_live(redis, output_id: str, *, ingest_id: str = "ingest-1", user_id: str = "u", title: str = "Live"):
+    """Write a live claim as the ingest handler would."""
+    await redis.set(
+        live_key(str(output_id)),
+        encode_live_state(ingest_id=ingest_id, user_id=user_id, mime="audio/webm", title=title),
+        ex=live_mod.LIVE_KEY_TTL_SECONDS,
+    )
+
+
+def _live_state_commands(driver: OutputDriver) -> list[object]:
+    """Return the ingest ids passed to set_live_state, in order."""
+    return [cmd[1] for cmd in driver.commands if isinstance(cmd, tuple) and cmd[0] == "set_live_state"]
+
+
+@pytest.mark.asyncio
+async def test_worker_heartbeat_key(worker_config, make_worker):
+    """The scan loop's heartbeat proves a stream worker is running."""
+    worker = make_worker()
+    await worker._heartbeat()
+    assert await worker.redis.get(worker_heartbeat_key(worker.worker_id)) == "1"
+
+
+@pytest.mark.asyncio
+async def test_live_broadcast_takes_over_and_resumes_queue(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """Going live pauses the playing queue; ending the broadcast resumes it."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    await _claim_live(worker.redis, str(output.id), ingest_id="ingest-1", user_id=str(session.user_id))
+    assert await _wait_until(lambda: "ingest-1" in _live_state_commands(fake))
+    assert await _wait_for_session_field(session.id, "state", "paused")
+
+    live_sources = [c for c in _set_source_commands(fake) if c[1].kind == "live"]
+    assert live_sources, "live ingest never reached the driver"
+    assert live_sources[0][1].input_format == "matroska"
+    assert live_sources[0][3].title == "Live"
+
+    # Ending the broadcast resumes the frozen queue at the same track.
+    await worker.redis.delete(live_key(str(output.id)))
+    assert await _wait_until(lambda: _live_state_commands(fake)[-1] is None)
+    assert await _wait_for_session_field(session.id, "state", "playing")
+
+    await _stop_driver_task(driver, task)
+    assert _set_source_commands(fake)[-1][3].track_id == "t1"
+
+
+@pytest.mark.asyncio
+async def test_live_end_does_not_resume_after_explicit_stop(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """A transport command during the broadcast cancels the pending resume."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    await _claim_live(worker.redis, str(output.id), ingest_id="ingest-1", user_id=str(session.user_id))
+    assert await _wait_until(lambda: "ingest-1" in _live_state_commands(fake))
+    assert await _wait_for_session_field(session.id, "state", "paused")
+
+    # The user deliberately stops the queue while live; that choice wins.
+    async with get_session() as db:
+        persisted = await db.get(PlaybackSession, session.id)
+        assert persisted is not None
+        await handle_command(db, persisted, "stop", {}, "conn-1")
+    assert await _wait_for_session_field(session.id, "state", "idle")
+
+    await worker.redis.delete(live_key(str(output.id)))
+    assert await _wait_until(lambda: _live_state_commands(fake)[-1] is None)
+    # Let the resync settle, then confirm nothing was restarted.
+    await asyncio.sleep(0.5)
+
+    await _stop_driver_task(driver, task)
+
+    async with get_session() as db:
+        refreshed = await db.get(PlaybackSession, session.id)
+        assert refreshed is not None
+        assert refreshed.state == "idle"
+    assert _find_command(fake, "pause") is not None
+
+
+@pytest.mark.asyncio
+async def test_live_feed_end_resumes_queue(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """A source_ended from the live decoder hands the mount back to the queue."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    await _claim_live(worker.redis, str(output.id), ingest_id="ingest-1", user_id=str(session.user_id))
+    assert await _wait_until(lambda: "ingest-1" in _live_state_commands(fake))
+
+    # The ingest feed ending (broadcaster stopped/disconnected) ends live.
+    fake.trigger_source_ended()
+    assert await _wait_until(lambda: _live_state_commands(fake)[-1] is None)
+    assert await _wait_for_session_field(session.id, "state", "playing")
+
+    await _stop_driver_task(driver, task)
+
+
+@pytest.mark.asyncio
+async def test_live_superseded_ingest_swaps_without_resuming(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """A reconnecting broadcaster's new ingest id replaces the old feed."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+
+    session, output = await make_session_output(_sample_queue(), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    await _claim_live(worker.redis, str(output.id), ingest_id="ingest-1", user_id=str(session.user_id))
+    assert await _wait_until(lambda: "ingest-1" in _live_state_commands(fake))
+
+    await _claim_live(worker.redis, str(output.id), ingest_id="ingest-2", user_id=str(session.user_id))
+    assert await _wait_until(lambda: _live_state_commands(fake)[-1] == "ingest-2")
+    # The swap happens without a queue resume in between.
+    assert await _wait_for_session_field(session.id, "state", "paused")
+
+    await _stop_driver_task(driver, task)
+
+    live_sources = [c for c in _set_source_commands(fake) if c[1].kind == "live"]
+    assert len(live_sources) == 2
+
+
+@pytest.mark.asyncio
+async def test_live_only_driver_lifecycle(
+    engine, db_session, worker_config, regular_user, make_worker, monkeypatch, capture_driver, fake_http_provider
+):
+    """A mount with no session is claimed purely to serve the broadcast."""
+    init_db(engine=engine, force=True)
+    output = await _make_http_output(db_session, regular_user)
+    worker = make_worker()
+
+    await _claim_live(worker.redis, str(output.id), ingest_id="ingest-9", user_id=str(regular_user.id))
+    await worker._scan_live()
+    task = worker._tasks.get(str(output.id))
+    assert task is not None
+
+    fake = await capture_driver.wait_for()
+    assert await _wait_until(lambda: "ingest-9" in _live_state_commands(fake))
+
+    # When the broadcast ends with no session to hand over, the driver stops.
+    await worker.redis.delete(live_key(str(output.id)))
+    await asyncio.wait_for(task, timeout=10.0)
+    assert _find_command(fake, "stop") is not None
+    assert _live_state_commands(fake)[-1] is None
+
+
+@pytest.mark.asyncio
+async def test_live_only_driver_adopts_late_session(
+    engine, db_session, worker_config, regular_user, make_worker, monkeypatch, capture_driver, fake_http_provider
+):
+    """A session attaching mid-broadcast is adopted so the mount survives."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _fake_resolve_source)
+    output = await _make_http_output(db_session, regular_user)
+    worker = make_worker()
+
+    await _claim_live(worker.redis, str(output.id), ingest_id="ingest-1", user_id=str(regular_user.id))
+    await worker._scan_live()
+    task = worker._tasks[str(output.id)]
+    fake = await capture_driver.wait_for()
+    assert await _wait_until(lambda: "ingest-1" in _live_state_commands(fake))
+
+    session = await get_or_create_session(db_session, regular_user)
+    await select_outputs(db_session, session, [str(output.id)], regular_user)
+    session.queue = _sample_queue()
+    session.current_index = 0
+    session.state = "paused"
+    await db_session.flush()
+    await db_session.commit()
+
+    # The live-only tick adopts the driving session (1s poll cadence), so
+    # ending the broadcast hands the mount to the session instead of
+    # stopping the driver.
+    await worker.redis.delete(live_key(str(output.id)))
+    assert await _wait_until(lambda: _live_state_commands(fake)[-1] is None)
+    await asyncio.sleep(0.5)
+    assert not task.done()
+    # The adopted paused session leaves the driver feeding silence.
+    assert _find_command(fake, "pause") is not None
+
+    worker._shutting_down = True
+    await asyncio.wait_for(task, timeout=10.0)
+
+
+@pytest.mark.asyncio
+async def test_scan_live_ignores_ineligible_outputs(
+    engine, db_session, worker_config, regular_user, make_session_output, make_worker, monkeypatch, fake_http_provider
+):
+    """Only enabled native-HTTP outputs with a live claim get a driver."""
+    init_db(engine=engine, force=True)
+    worker = make_worker()
+
+    # A non-http output: provider_type "fake" must never be claimed for live.
+    fake_session, fake_output = await make_session_output(_sample_queue(), state="idle")
+    await _claim_live(worker.redis, str(fake_output.id), user_id=str(regular_user.id))
+
+    # A disabled http output stays dark even with a live claim.
+    disabled = await _make_http_output(db_session, regular_user, mount="off", enabled=False)
+    await _claim_live(worker.redis, str(disabled.id), user_id=str(regular_user.id))
+
+    # An enabled http output without a claim is not picked up either.
+    await _make_http_output(db_session, regular_user, mount="idle-mount")
+
+    await worker._scan_live()
+    assert worker._tasks == {}

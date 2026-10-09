@@ -29,6 +29,7 @@ from ..models.base import get_session, init_db
 from ..models.output_stream import OutputStream
 from ..models.playback_session import PlaybackSession, PlaybackSessionOutput
 from ..models.track import Track
+from ..services.outputs import driving_stream_session
 from ..services.playback import (
     _clamp_position,
     _control_key,
@@ -46,6 +47,16 @@ from ..services.streaming import resolve_external_stream, resolve_track_file
 from ..storage import get_storage
 from ..streams.base import listen_recording_enabled
 from ..streams.driver import OutputDriver
+from ..streams.live import (
+    LIVE_KEY_PATTERN,
+    WORKER_HEARTBEAT_TTL_SECONDS,
+    LiveState,
+    demuxer_for_mime,
+    find_ingest_start,
+    ingest_iterator,
+    read_live_state,
+    worker_heartbeat_key,
+)
 from ..streams.registry import get_output
 from ..streams.types import AudioSource, TrackMeta
 
@@ -71,6 +82,9 @@ class StreamWorker:
         self.redis = create_redis_client(config)
         self._shutting_down = False
         self._tasks: dict[str, asyncio.Task] = {}
+        # A short-TTL heartbeat key lets the live-ingest endpoint detect a
+        # missing worker and fail fast instead of timing the broadcast out.
+        self.worker_id = secrets.token_hex(8)
 
     @property
     def shutting_down(self) -> bool:
@@ -83,7 +97,9 @@ class StreamWorker:
             loop.add_signal_handler(sig, self._request_shutdown)
 
         while not self._shutting_down:
+            await self._heartbeat()
             await self._scan_sessions()
+            await self._scan_live()
             await self._reap_finished()
             await asyncio.sleep(self.config.streams.worker_poll_interval_seconds)
 
@@ -153,6 +169,71 @@ class StreamWorker:
             )
             self._tasks[key] = asyncio.create_task(driver.run())
 
+    async def _heartbeat(self) -> None:
+        """Refresh this worker's heartbeat key so ingest can detect us."""
+        try:
+            await self.redis.set(
+                worker_heartbeat_key(self.worker_id),
+                "1",
+                ex=WORKER_HEARTBEAT_TTL_SECONDS,
+            )
+        except Exception:
+            logger.exception("Failed to refresh worker heartbeat")
+
+    async def _scan_live(self) -> None:
+        """
+        Claim outputs with a pending live broadcast and no driver yet.
+
+        Outputs already driven by a ``SessionDriver`` are left to it — the
+        driver polls the live key itself and takes over the mount.
+        """
+        if not self.config.streams.enabled or not self.config.streams.live_enabled:
+            return
+        try:
+            output_ids = [
+                str(key).rsplit(":", 1)[-1] async for key in self.redis.scan_iter(match=LIVE_KEY_PATTERN, count=100)
+            ]
+        except Exception:
+            logger.exception("Failed to scan live keys")
+            return
+
+        for output_id in output_ids:
+            if not output_id or output_id in self._tasks:
+                continue
+            try:
+                state = await read_live_state(self.redis, output_id)
+            except Exception:
+                logger.exception("Failed to read live state for %s", output_id)
+                continue
+            if state is None:
+                continue
+            try:
+                async with get_session() as db:
+                    output = await db.get(OutputStream, output_id)
+            except Exception:
+                logger.exception("Failed to load live output %s", output_id)
+                continue
+            if output is None or output.provider_type != "http" or not output.enabled:
+                continue
+
+            driver = SessionDriver(self, None, output_id, output.user_id)
+            lock = LOCK_KEY.format(output_id=output_id)
+            try:
+                acquired = await self.redis.set(
+                    lock,
+                    driver._lock_token,
+                    nx=True,
+                    ex=self.config.streams.worker_lock_ttl_seconds,
+                )
+            except Exception:
+                logger.exception("Redis lock check failed for %s", output_id)
+                continue
+            if not acquired:
+                continue
+
+            logger.info("Claimed stream output %s for live broadcast", output_id)
+            self._tasks[output_id] = asyncio.create_task(driver.run())
+
     async def _reap_finished(self) -> None:
         """Remove completed tasks from the active map and refresh their locks."""
         for output_id in list(self._tasks):
@@ -164,7 +245,15 @@ class StreamWorker:
 
 
 class SessionDriver:
-    """Drives one server output for a single playback session."""
+    """
+    Drives one server output for a single playback session.
+
+    With ``session_id=None`` the driver runs in live-only mode: it owns the
+    output's mount purely to serve a live broadcast, skips every
+    session-bound mechanism (control commands, output status rows, idle
+    shutdown), adopts a session that attaches mid-broadcast, and stops when
+    the broadcast ends without one.
+    """
 
     # Control-command batching: after the first envelope is drained, keep
     # polling until no new envelope arrives for _CONTROL_SETTLE_S (capped at
@@ -185,7 +274,7 @@ class SessionDriver:
     def __init__(
         self,
         worker: StreamWorker,
-        session_id: str,
+        session_id: Optional[str],
         output_stream_id: str,
         user_id: str,
     ) -> None:
@@ -202,10 +291,20 @@ class SessionDriver:
         self._advance_retry_at: Optional[float] = None
         self._advance_retry_event: Optional[dict] = None
         self._advance_retry_count = 0
+        # Live broadcast state: the ingest id currently driving the output,
+        # its decoder generation (to recognize its source_ended), and whether
+        # the takeover paused a playing session that should resume after.
+        self._live_ingest_id: Optional[str] = None
+        self._live_generation: Optional[int] = None
+        self._live_started = False
+        self._resume_after_live = False
+        self._live_poll_at = 0.0
+        self._adopt_poll_at = 0.0
+        self._output_name = ""
 
     @property
     def _control_key(self) -> str:
-        return _control_key(self.session_id)
+        return _control_key(self.session_id or "")
 
     @property
     def _lock_key(self) -> str:
@@ -230,7 +329,8 @@ class SessionDriver:
             return
 
         try:
-            await self._sync_to_session()
+            if self.session_id is not None:
+                await self._sync_to_session()
             await self._main_loop()
         except asyncio.CancelledError:
             logger.info("Session driver cancelled for %s", self.session_id)
@@ -246,6 +346,7 @@ class SessionDriver:
             output_stream = await db.get(OutputStream, self.output_stream_id)
             if output_stream is None:
                 raise RuntimeError("Output stream not found")
+            self._output_name = output_stream.name or ""
 
             provider_cls = get_output(output_stream.provider_type)
             provider = provider_cls()
@@ -335,30 +436,38 @@ class SessionDriver:
             # a short settle window and synced to the driver once — syncing
             # per envelope would restart the decoder for each command and
             # listeners would hear the track start over again.
-            envelopes = await self._collect_control_envelopes()
-            if envelopes:
-                await self._handle_commands(envelopes)
+            if self.session_id is not None:
+                envelopes = await self._collect_control_envelopes()
+                if envelopes:
+                    await self._handle_commands(envelopes)
 
             # Drain any driver events, then retry a failed track advance
             # whose backoff has elapsed.
             await self._drain_events()
             await self._maybe_retry_advance()
 
-            # Stop the worker if the session/output has been removed or disabled.
-            if not await self._session_has_stream_output():
-                logger.info("Session %s no longer has a stream output", self.session_id)
-                break
+            # Live broadcasts take over the mount: the driver polls the
+            # output's live key and swaps the ingest source in and out.
+            await self._poll_live()
 
-            # Background idle shutdown: nothing playing and no controller/listeners.
-            if await self._should_stop_on_idle():
-                logger.info("Idle timeout for session %s; stopping driver", self.session_id)
+            if self.session_id is not None:
+                # Stop the worker if the session/output has been removed or disabled.
+                if not await self._session_has_stream_output():
+                    logger.info("Session %s no longer has a stream output", self.session_id)
+                    break
+
+                # Background idle shutdown: nothing playing and no controller/listeners.
+                if await self._should_stop_on_idle():
+                    logger.info("Idle timeout for session %s; stopping driver", self.session_id)
+                    break
+            elif not await self._live_only_tick():
                 break
 
             await asyncio.sleep(0.1)
 
     async def _sync_to_session(self) -> None:
         """Synchronise the driver to the current session state on startup."""
-        if self.driver is None:
+        if self.driver is None or self.session_id is None:
             return
         try:
             async with get_session() as db:
@@ -390,6 +499,240 @@ class SessionDriver:
                         await self.driver.update_metadata(metadata)
         except Exception:
             logger.exception("Failed to sync session %s on startup", self.session_id)
+
+    async def _poll_live(self) -> None:
+        """Watch the output's live key and take the mount over (or back)."""
+        now = time.monotonic()
+        if now - self._live_poll_at < 0.5:
+            return
+        self._live_poll_at = now
+        if self.driver is None:
+            return
+        try:
+            state = await read_live_state(self.worker.redis, self.output_stream_id)
+        except Exception:
+            # A transient Redis error must not bounce an ongoing broadcast.
+            logger.exception("Failed to poll live state for %s", self.output_stream_id)
+            return
+
+        if self._live_ingest_id is None:
+            if state is not None:
+                await self._begin_live(state)
+        elif state is None:
+            await self._end_live()
+        elif state.ingest_id != self._live_ingest_id:
+            # A reconnecting broadcaster claimed a new ingest id: swap
+            # straight to it without resuming the queue in between.
+            await self._end_live(superseded=True)
+            await self._begin_live(state)
+
+    async def _begin_live(self, state: LiveState) -> None:
+        """Take the mount over with a live ingest feed."""
+        if self.driver is None:
+            return
+        self._resume_after_live = False
+
+        # A playing session is paused at its live position so the queue
+        # resumes where it stopped once the broadcast ends (radio-DJ model).
+        if self.session_id is not None:
+            try:
+                async with get_session() as db:
+                    session = await self._load_session(db)
+                    if session is not None and session.state == "playing":
+                        session.position_seconds = _live_position_seconds(session)
+                        session.state = "paused"
+                        session.position_anchor_at = None
+                        session.last_active_at = _now_utc()
+                        await db.flush()
+                        self._resume_after_live = True
+                        await self._publish_state(await session_state_dict(db, session))
+            except Exception:
+                logger.exception("Failed to freeze session %s for live", self.session_id)
+
+        artist = ""
+        try:
+            from ..models.user import User as _User
+
+            async with get_session() as db:
+                owner = await db.get(_User, state.user_id)
+            if owner is not None:
+                artist = owner.display_name or owner.username or ""
+        except Exception:
+            logger.exception("Failed to load live owner %s", state.user_id)
+
+        metadata = TrackMeta(
+            track_id="",
+            title=state.title or self._output_name or "Live",
+            artist=artist,
+        )
+        try:
+            start_id = await find_ingest_start(self.worker.redis, self.output_stream_id, state.ingest_id)
+            source = AudioSource(
+                kind="live",
+                iterator=ingest_iterator(
+                    self.worker.redis,
+                    self.output_stream_id,
+                    state.ingest_id,
+                    start_id=start_id,
+                ),
+                input_format=demuxer_for_mime(state.mime),
+                content_type=state.mime or None,
+            )
+            await self.driver.set_source(source, position=0.0, metadata=metadata)
+            await self.driver.update_metadata(metadata)
+            await self.driver.set_live_state(state.ingest_id)
+            self._live_ingest_id = state.ingest_id
+            self._live_generation = self.driver.generation
+            self._live_started = True
+            # The queue's active track is not what the mount plays anymore;
+            # clearing it makes the post-live resync always set a source.
+            self._active_track_id = None
+            logger.info("Output %s is live (ingest %s)", self.output_stream_id, state.ingest_id)
+        except Exception:
+            logger.exception("Failed to start live source for %s", self.output_stream_id)
+
+    async def _end_live(self, *, superseded: bool = False) -> None:
+        """Hand the mount back when the live broadcast ends."""
+        if self._live_ingest_id is None:
+            return
+        logger.info(
+            "Live broadcast %s on output %s ended%s",
+            self._live_ingest_id,
+            self.output_stream_id,
+            " (superseded)" if superseded else "",
+        )
+        self._live_ingest_id = None
+        self._live_generation = None
+        if self.driver is not None:
+            try:
+                await self.driver.set_live_state(None)
+            except Exception:
+                logger.exception("Failed to clear live state for %s", self.output_stream_id)
+        if superseded:
+            return
+
+        if self.session_id is None and not await self._adopt_session():
+            # Live-only driver with no session to hand the mount to.
+            self._shutting_down = True
+            return
+        await self._resync_after_live()
+
+    async def _resync_after_live(self) -> None:
+        """Return the driver to the session's queued playback after live.
+
+        The session is resumed only when the takeover froze a playing queue
+        and the user has not touched the session state since — an explicit
+        command during the broadcast clears ``_resume_after_live``.
+        """
+        try:
+            async with get_session() as db:
+                session = await self._load_session(db)
+                if session is None:
+                    return
+                resume = self._resume_after_live and session.state == "paused" and _current_track(session)
+                self._resume_after_live = False
+                if resume:
+                    session.state = "playing"
+                    session.position_anchor_at = _now_utc()
+                    session.last_active_at = _now_utc()
+                    await db.flush()
+                    await self._publish_state(await session_state_dict(db, session))
+                source, metadata = await self._resolve_source(db, session)
+        except Exception:
+            logger.exception("Failed to resync session %s after live", self.session_id)
+            return
+
+        if self.driver is None:
+            return
+
+        track_id = _current_track_id(session)
+        if source is not None and session.state == "playing":
+            try:
+                duration = metadata.duration if metadata else None
+                metadata = metadata or TrackMeta(track_id="", title="", artist="")
+                await self.driver.set_source(
+                    source,
+                    position=_clamp_position(session.position_seconds, duration),
+                    metadata=metadata,
+                )
+                await self.driver.update_metadata(metadata)
+                self._active_track_id = track_id
+            except Exception:
+                logger.exception("Failed to restore driver source for %s", self.session_id)
+                try:
+                    await self.driver.pause()
+                except Exception:
+                    logger.exception("Failed to pause driver for %s", self.session_id)
+        else:
+            try:
+                await self.driver.pause()
+                if metadata is not None:
+                    await self.driver.update_metadata(metadata)
+            except Exception:
+                logger.exception("Failed to pause driver for %s", self.session_id)
+
+    async def _adopt_session(self) -> bool:
+        """Attach a live-only driver to the output's driving session."""
+        try:
+            async with get_session() as db:
+                session = await driving_stream_session(db, self.output_stream_id)
+                session_id = session.id if session is not None else None
+                session_user_id = session.user_id if session is not None else None
+        except Exception:
+            logger.exception("Failed to look up a session for output %s", self.output_stream_id)
+            return False
+        if session_id is None or session_user_id is None:
+            return False
+        self.session_id = session_id
+        self.user_id = session_user_id
+        await self._update_output_status(status="live")
+        logger.info("Live-only driver for %s adopted session %s", self.output_stream_id, session_id)
+        return True
+
+    async def _live_only_tick(self) -> bool:
+        """Upkeep for a driver running without a session.
+
+        Returns False to stop the driver: the output disappeared or was
+        disabled, or the broadcast claim vanished before it ever went on
+        air. While broadcasting, a session that attaches to the output is
+        adopted so the mount keeps playing once live ends.
+        """
+        now = time.monotonic()
+        if now - self._adopt_poll_at < 1.0:
+            return True
+        self._adopt_poll_at = now
+        try:
+            async with get_session() as db:
+                output = await db.get(OutputStream, self.output_stream_id)
+                if output is None or output.provider_type != "http" or not output.enabled:
+                    logger.info("Live output %s gone or disabled; stopping", self.output_stream_id)
+                    return False
+                session = await driving_stream_session(db, self.output_stream_id)
+                session_id = session.id if session is not None else None
+                user_id = session.user_id if session is not None else ""
+        except Exception:
+            logger.exception("Live-only upkeep failed for %s", self.output_stream_id)
+            return True
+
+        if session_id is not None:
+            self.session_id = session_id
+            self.user_id = user_id
+            await self._update_output_status(status="live")
+            logger.info("Live-only driver for %s adopted session %s", self.output_stream_id, session_id)
+            if self._live_ingest_id is None:
+                await self._sync_to_session()
+            return True
+
+        if self._live_ingest_id is None and not self._live_started:
+            try:
+                state = await read_live_state(self.worker.redis, self.output_stream_id)
+            except Exception:
+                return True
+            if state is None:
+                # The claim lapsed before the broadcast started.
+                logger.info("Live key for %s vanished before going on air; stopping", self.output_stream_id)
+                return False
+        return True
 
     async def _drain_control_list(self) -> list[dict]:
         """Pop every control envelope currently queued for this session."""
@@ -469,6 +812,14 @@ class SessionDriver:
         if self.driver is None:
             return
 
+        if self._live_ingest_id is not None:
+            # The broadcast owns the mount: the committed session state
+            # takes effect when it ends — except explicit transport
+            # commands, which cancel the pending queue resume.
+            if any(command in ("play", "pause", "stop", "play_at", "next", "prev") for command in commands):
+                self._resume_after_live = False
+            return
+
         track_id = _current_track_id(session)
         if source is not None and session.state == "playing":
             # Restart the decoder only when the track changed, a command
@@ -521,6 +872,10 @@ class SessionDriver:
     async def _reload_driver(self) -> None:
         """Restart the provider driver after the output's config changed."""
         logger.info("Reloading driver for output %s", self.output_stream_id)
+        # The fresh driver knows nothing about an ongoing broadcast; clearing
+        # the flags lets _poll_live restart it on the new driver.
+        self._live_ingest_id = None
+        self._live_generation = None
         await self._stop_driver()
         self._active_track_id = None
         try:
@@ -727,6 +1082,12 @@ class SessionDriver:
             if gen is not None and current_gen is not None and gen != current_gen:
                 logger.debug("Ignoring stale source_ended gen=%s current=%s", gen, current_gen)
                 return
+        if self._live_ingest_id is not None:
+            # The live decoder reached the end of its ingest feed (the
+            # browser stopped or disconnected): hand the mount back to the
+            # session. Broadcast audio never records a listen.
+            await self._end_live()
+            return
         try:
             async with get_session() as db:
                 session = await self._load_session(db)
@@ -917,7 +1278,7 @@ class SessionDriver:
         last_error: Optional[str] = None,
     ) -> None:
         """Update the session output status row."""
-        if status is None and last_error is None:
+        if (status is None and last_error is None) or self.session_id is None:
             return
         try:
             async with get_session() as db:
@@ -969,6 +1330,8 @@ class SessionDriver:
 
     async def _should_stop_on_idle(self) -> bool:
         """Return True when the output has been idle with no controller/listeners."""
+        if self._live_ingest_id is not None:
+            return False
         try:
             async with get_session() as db:
                 session = await self._load_session(db)

@@ -48,6 +48,14 @@ export interface StreamResponse {
   now_playing?: StreamNowPlaying | null;
   /** Approximate active HTTP listeners on the mount. */
   listener_count: number;
+  /** ``true`` while a live device broadcast (not the queue) is on air. */
+  live?: boolean;
+  /**
+   * ``true`` when the requester may open a live broadcast on this mount
+   * (owner, enabled output, ``streams.live_enabled``). UI hint only — the
+   * ingest WebSocket re-checks everything.
+   */
+  can_broadcast?: boolean;
   created_at: string;
 }
 
@@ -59,7 +67,31 @@ export interface StreamUpdateEvent {
   mount: string;
   online: boolean;
   now_playing?: StreamNowPlaying | null;
+  live?: boolean;
 }
+
+/**
+ * Terminal close codes used by the live ingest socket
+ * (``/ws/live/{output_id}``); 1000 is a clean end.
+ */
+export const LIVE_WS_CLOSE = {
+  clean: 1000,
+  unauthenticated: 4001,
+  forbidden: 4003,
+  notFound: 4004,
+  conflict: 4409,
+  startTimeout: 4415,
+  tooSlow: 4429,
+  workerUnavailable: 4503,
+  serverError: 4504,
+} as const;
+
+/** Candidate MediaRecorder mime types, tried in this order. */
+export const LIVE_MIME_CANDIDATES = [
+  "audio/webm;codecs=opus",
+  "audio/ogg;codecs=opus",
+  "audio/mp4",
+] as const;
 
 export interface StreamUpdateResponse {
   id: string;

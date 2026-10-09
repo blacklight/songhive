@@ -5,7 +5,7 @@ The fake driver records every command it receives and can emit events manually
 so tests can exercise the stream worker without real ffmpeg/Icecast.
 """
 
-from typing import Any
+from typing import Any, Optional
 
 from .base import AudioOutput
 from .driver import OutputDriver
@@ -51,6 +51,7 @@ class FakeDriver(OutputDriver):
         self.current_metadata: TrackMeta | None = None
         self.playing = False
         self.paused = False
+        self.live_ingest_id: Optional[str] = None
         self._generation = 0
 
     @property
@@ -101,6 +102,10 @@ class FakeDriver(OutputDriver):
 
     async def update_metadata(self, metadata: TrackMeta) -> None:
         self.commands.append(("update_metadata", metadata))
+
+    async def set_live_state(self, ingest_id: Optional[str]) -> None:
+        self.commands.append(("set_live_state", ingest_id))
+        self.live_ingest_id = ingest_id
 
     async def health(self) -> OutputHealth:
         return OutputHealth(ok=True, message="Fake driver is healthy")

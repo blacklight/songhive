@@ -7,11 +7,15 @@ import * as streamsApi from "@/api/streams";
 import { usePlayerStore } from "@/stores/player";
 import StreamsView from "./StreamsView.vue";
 
-vi.mock("@/api/streams", () => ({
-  listStreams: vi.fn(),
-  updateStream: vi.fn(),
-  sendStreamCommand: vi.fn(),
-}));
+vi.mock("@/api/streams", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/streams")>();
+  return {
+    ...actual,
+    listStreams: vi.fn(),
+    updateStream: vi.fn(),
+    sendStreamCommand: vi.fn(),
+  };
+});
 
 type BusHandler = (event: { type: string; data: unknown }) => void;
 
@@ -347,6 +351,103 @@ describe("StreamsView", () => {
       .find((b) => b.attributes("aria-label") === i18n.global.t("common.play"));
     expect(play).toBeDefined();
     expect(play!.attributes("disabled")).toBeDefined();
+  });
+
+  it("shows a record button only when broadcasting is allowed", async () => {
+    vi.mocked(streamsApi.listStreams).mockResolvedValue([
+      createStream({ can_manage: true, can_broadcast: true }),
+      createStream({
+        id: "s2",
+        mount: "other",
+        can_manage: true,
+        can_broadcast: false,
+      }),
+    ]);
+
+    await mountView();
+
+    const recordButtons = wrapper
+      .findAll("button")
+      .filter(
+        (b) =>
+          b.attributes("aria-label") ===
+          i18n.global.t("pages.streams.broadcast.record"),
+      );
+    expect(recordButtons).toHaveLength(1);
+  });
+
+  it("opens the broadcast modal from the record button", async () => {
+    vi.mocked(streamsApi.listStreams).mockResolvedValue([
+      createStream({ can_manage: true, can_broadcast: true }),
+    ]);
+
+    await mountView();
+
+    const record = wrapper
+      .findAll("button")
+      .find(
+        (b) =>
+          b.attributes("aria-label") ===
+          i18n.global.t("pages.streams.broadcast.record"),
+      );
+    await record!.trigger("click");
+    await flushPromises();
+
+    // jsdom has no mediaDevices, so the modal lands on the unsupported
+    // panel — the point is that it opened.
+    expect(document.body.textContent).toContain(
+      i18n.global.t("pages.streams.broadcast.unsupported"),
+    );
+  });
+
+  it("shows the on-air badge and disables transport while live", async () => {
+    vi.mocked(streamsApi.listStreams).mockResolvedValue([
+      createStream({
+        can_manage: true,
+        online: true,
+        playback_state: "paused",
+        live: true,
+      }),
+    ]);
+
+    await mountView();
+
+    const badge = wrapper
+      .findAll(".stream-card__badge")
+      .find((b) => b.classes().includes("stream-card__badge--live"));
+    expect(badge).toBeDefined();
+    expect(badge!.text()).toContain(
+      i18n.global.t("pages.streams.broadcast.onAir"),
+    );
+    // The paused queue session must not surface while the broadcast is on.
+    expect(badge!.text()).not.toContain(i18n.global.t("pages.streams.paused"));
+
+    const play = wrapper
+      .findAll("button")
+      .find((b) => b.attributes("aria-label") === i18n.global.t("common.play"));
+    expect(play).toBeDefined();
+    expect(play!.attributes("disabled")).toBeDefined();
+  });
+
+  it("flips the badge to on air from a stream_update live flag", async () => {
+    localStorage.setItem(
+      "songhive.auth.user",
+      JSON.stringify({ id: "u1", username: "bob" }),
+    );
+    vi.mocked(streamsApi.listStreams).mockResolvedValue([createStream()]);
+
+    await mountView();
+    expect(wrapper.text()).toContain(i18n.global.t("pages.streams.live"));
+
+    emitStreamUpdate({ mount: "radio", online: true, live: true });
+    await flushPromises();
+
+    const badge = wrapper
+      .findAll(".stream-card__badge")
+      .find((b) => b.classes().includes("stream-card__badge--live"));
+    expect(badge!.text()).toContain(
+      i18n.global.t("pages.streams.broadcast.onAir"),
+    );
   });
 
   it("shows the empty state", async () => {

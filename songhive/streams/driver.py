@@ -66,6 +66,10 @@ class OutputDriver(ABC):
         """Return a best-effort listener count for this output."""
         return 0
 
+    async def set_live_state(self, ingest_id: Optional[str]) -> None:
+        """Mark the output as serving a live ingest; optional, no-op by default."""
+        return None
+
     @property
     def is_paused(self) -> bool:
         """Whether the driver is paused (e.g. feeding silence to the output)."""

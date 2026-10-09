@@ -249,6 +249,10 @@ class HttpStreamDriver(IcecastDriver):
             "title": track.title,
             "artist": track.artist,
             "album": track.album,
+            # The ingest handler polls live_ingest_id to tell the broadcaster
+            # it is on air; listeners only need ``live``.
+            "live": self._live_ingest_id is not None,
+            "live_ingest_id": self._live_ingest_id,
         }
         try:
             await self._redis.set(stream_meta_key(self._mount), json.dumps(meta), ex=int(_META_TTL_SECONDS))
@@ -293,6 +297,7 @@ class HttpStreamDriver(IcecastDriver):
         data = {
             "mount": self._mount,
             "online": online,
+            "live": self._live_ingest_id is not None if online else False,
             "now_playing": self._now_playing_payload() if online else None,
         }
         try:
@@ -341,6 +346,12 @@ class HttpStreamDriver(IcecastDriver):
             raise
         except Exception:
             logger.exception("Publish pump failed for mount %s", self._mount)
+
+    async def set_live_state(self, ingest_id: Optional[str]) -> None:
+        """Mark the mount as broadcasting live and publish the change."""
+        await super().set_live_state(ingest_id)
+        await self._publish_meta()
+        await self._publish_ws_update(online=True)
 
     async def start(self) -> None:
         """Start the encoder/pipeline; silence feeds the mount until a source is set."""

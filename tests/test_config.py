@@ -377,6 +377,11 @@ def test_streams_config_defaults():
     assert config.streams.background_idle_timeout_seconds == 900
     assert config.streams.default_sample_rate == 44100
     assert config.streams.default_bitrate == 192
+    assert config.streams.live_enabled is True
+    assert config.streams.live_max_bitrate_kbps == 320
+    assert config.streams.live_max_duration_seconds == 0
+    assert config.streams.live_ingest_max_entries == 256
+    assert config.streams.live_start_timeout_seconds == 15.0
 
 
 def test_streams_config_from_toml(tmp_path):
@@ -407,6 +412,17 @@ def test_streams_config_from_env(monkeypatch):
     config = SonghiveConfig(auth={"secret_key": "a" * 64})
     assert config.streams.enabled is False
     assert config.streams.allow_user_created_outputs is True
+
+
+def test_streams_config_live_from_env(monkeypatch):
+    """SONGHIVE_STREAMS__LIVE_* env vars override the live-ingest knobs."""
+    monkeypatch.setenv("SONGHIVE_STREAMS__LIVE_ENABLED", "false")
+    monkeypatch.setenv("SONGHIVE_STREAMS__LIVE_MAX_BITRATE_KBPS", "192")
+    monkeypatch.setenv("SONGHIVE_STREAMS__LIVE_MAX_DURATION_SECONDS", "3600")
+    config = SonghiveConfig(auth={"secret_key": "a" * 64})
+    assert config.streams.live_enabled is False
+    assert config.streams.live_max_bitrate_kbps == 192
+    assert config.streams.live_max_duration_seconds == 3600
 
 
 def test_streams_config_parses_comma_string_providers(monkeypatch):

@@ -90,6 +90,11 @@ mobile](https://s3.fabiomanganiello.com/fabio/screenshots/songhive/home-federate
   mountpoints entirely inside Songhive (`/streams/<mount>`) with fan-out to
   multiple listeners. Playback keeps running on the server even after you
   close the tab
+- 🎙️ **Live broadcasting**: Turn any native HTTP mountpoint into a live
+  stream — record audio from your device in the browser and broadcast it to
+  every listener on the mount, radio-DJ style (the queue pauses and resumes
+  afterwards). Requires the stream worker and HTTPS (or localhost) for
+  microphone access
 - 📻 **Playlists & Radios**: Create playlists and dynamic radio stations
 - ❤️ **Listening history, favorites and scrobbling**: every play is recorded, and
   submissions to Last.fm and Libre.fm work out of the box. You also get fancy
@@ -445,7 +450,13 @@ songhive stream-worker
 
 It claims outputs through a Redis lock, so a single worker process is enough —
 running more than one is safe (they just split the outputs), and none is
-required if you don't use server-side outputs. The Docker stack runs it as an
+required if you don't use server-side outputs. The worker is also required
+for live broadcasting: the owner of a native HTTP mount can press
+**Record** on its stream card at `/streams`, pick a microphone, and send
+device audio over the mount to all of its listeners — a playing queue
+pauses for the broadcast and resumes afterwards. Microphone capture needs a
+secure context (HTTPS or `localhost`) and `streams.live_enabled` (enabled
+by default). The Docker stack runs it as an
 optional `stream-worker` container under the `streams` profile:
 
 ```bash

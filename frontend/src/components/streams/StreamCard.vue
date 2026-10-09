@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { RouterLink } from "vue-router";
 import type { StreamResponse } from "@/api/streams";
 import type { ActivityAttachment } from "@/api/activities";
+import { useLiveBroadcastStore } from "@/stores/liveBroadcast";
 import ActivityAudioPlayer from "@/components/activities/ActivityAudioPlayer.vue";
+import LiveBroadcastModal from "@/components/streams/LiveBroadcastModal.vue";
 import AppAvatar from "@/components/ui/AppAvatar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppIcon from "@/components/ui/AppIcon.vue";
@@ -26,6 +28,18 @@ const emit = defineEmits<{
   (e: "toggle-playback", stream: StreamResponse): void;
 }>();
 const { t } = useI18n();
+const liveBroadcast = useLiveBroadcastStore();
+const broadcastModalOpen = ref(false);
+
+// This tab is the broadcaster when the store's active broadcast targets
+// this stream — closing the modal does not end it.
+const broadcastingHere = computed(
+  () => liveBroadcast.outputId === props.stream.id && liveBroadcast.isActive,
+);
+const broadcastingElsewhere = computed(
+  () => liveBroadcast.isActive && liveBroadcast.outputId !== props.stream.id,
+);
+const onAir = computed(() => !!props.stream.live || broadcastingHere.value);
 
 function ownerName(): string {
   return props.stream.owner.display_name || props.stream.owner.username;
@@ -37,9 +51,11 @@ function ownerRoute(): string {
 
 // The mount broadcasts silence while its driving session is paused or
 // stopped — the meta key stays live, so a non-playing session must not be
-// reported as "Live".
+// reported as "Live". A live device broadcast preempts that reporting:
+// the session is frozen in "paused" while it runs.
 const isPaused = computed(
   () =>
+    !onAir.value &&
     props.stream.online &&
     props.stream.playback_state != null &&
     props.stream.playback_state !== "playing",
@@ -47,18 +63,38 @@ const isPaused = computed(
 
 function statusLabel(): string {
   if (!props.stream.enabled) return t("pages.streams.disabled");
+  if (onAir.value) return t("pages.streams.broadcast.onAir");
   if (!props.stream.online) return t("pages.streams.offline");
   return isPaused.value ? t("pages.streams.paused") : t("pages.streams.live");
 }
 
 function statusIcon(): string {
   if (isPaused.value) return "circle-pause";
-  return props.stream.enabled && props.stream.online ? "circle" : "circle-stop";
+  return props.stream.enabled && (props.stream.online || onAir.value)
+    ? "circle"
+    : "circle-stop";
 }
 
+// Transport commands only reach the frozen queue session while a live
+// broadcast is on air, so the button is disabled for the duration.
 const canTogglePlayback = computed(
-  () => props.stream.enabled && props.stream.playback_state != null,
+  () =>
+    props.stream.enabled && props.stream.playback_state != null && !onAir.value,
 );
+
+function recordLabel(): string {
+  return broadcastingHere.value
+    ? t("pages.streams.broadcast.stop")
+    : t("pages.streams.broadcast.record");
+}
+
+function onRecord() {
+  if (broadcastingHere.value) {
+    liveBroadcast.stop();
+    return;
+  }
+  broadcastModalOpen.value = true;
+}
 
 function transportIcon(): string {
   return props.stream.playback_state === "playing" ? "pause" : "play";
@@ -130,7 +166,7 @@ const attachment = computed<ActivityAttachment>(() => ({
         <span
           class="stream-card__badge"
           :class="{
-            'stream-card__badge--live': stream.online && !isPaused,
+            'stream-card__badge--live': onAir || (stream.online && !isPaused),
             'stream-card__badge--paused': isPaused,
             'stream-card__badge--disabled': !stream.enabled,
           }"
@@ -139,6 +175,21 @@ const attachment = computed<ActivityAttachment>(() => ({
           {{ statusLabel() }}
         </span>
         <div v-if="stream.can_manage" class="stream-card__actions">
+          <AppButton
+            v-if="stream.can_broadcast"
+            variant="ghost"
+            size="sm"
+            :class="{ 'stream-card__record--on-air': broadcastingHere }"
+            :icon="broadcastingHere ? 'stop' : 'microphone'"
+            :title="
+              broadcastingElsewhere
+                ? t('pages.streams.broadcast.busyElsewhere')
+                : recordLabel()
+            "
+            :aria-label="recordLabel()"
+            :disabled="busy || broadcastingElsewhere"
+            @click="onRecord"
+          />
           <AppButton
             variant="ghost"
             size="sm"
@@ -214,10 +265,21 @@ const attachment = computed<ActivityAttachment>(() => ({
       </a>
     </div>
 
+    <p v-if="broadcastingHere" class="stream-card__broadcasting">
+      <AppIcon name="microphone" />
+      {{ t("pages.streams.broadcast.broadcastingNote") }}
+    </p>
     <ActivityAudioPlayer
+      v-else
       :attachment="attachment"
       :avatar-url="stream.owner.avatar_url || undefined"
       live
+    />
+
+    <LiveBroadcastModal
+      :open="broadcastModalOpen"
+      :stream="stream"
+      @close="broadcastModalOpen = false"
     />
   </li>
 </template>
@@ -389,5 +451,38 @@ const attachment = computed<ActivityAttachment>(() => ({
 .stream-card__open:hover {
   background-color: var(--color-surface-hover);
   color: var(--color-text-hover);
+}
+
+.stream-card__record--on-air {
+  color: var(--color-danger);
+  animation: stream-card-pulse 1.5s ease-in-out infinite;
+}
+
+.stream-card__broadcasting {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--color-danger);
+  color: var(--color-danger);
+  font-size: 0.875rem;
+}
+
+@keyframes stream-card-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stream-card__record--on-air {
+    animation: none;
+  }
 }
 </style>

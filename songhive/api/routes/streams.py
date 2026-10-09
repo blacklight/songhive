@@ -25,6 +25,7 @@ from ...models.playback_session import PlaybackSession, PlaybackSessionOutput
 from ...models.user import User
 from ...services.auth import get_user_by_username
 from ...services.outputs import (
+    driving_stream_session,
     get_http_stream_for_manage,
     list_http_streams,
     set_output_enabled,
@@ -73,6 +74,12 @@ class StreamResponse(BaseModel):
     owner: StreamOwnerResponse
     enabled: bool
     online: bool
+    # ``True`` while a live broadcast (rather than queued playback) feeds the mount.
+    live: bool = False
+    # UI hint: ``True`` when the requester may start a live broadcast on this
+    # mount (owner only, output enabled, live feature on). The ingest
+    # WebSocket re-checks every condition authoritatively.
+    can_broadcast: bool = False
     # State of the playback session driving this mount, when one is attached.
     playback_state: Optional[str] = None
     description: Optional[str] = None
@@ -167,6 +174,8 @@ async def list_streams(
         owner_id = str(owner.id)
 
     redis = getattr(request.app.state, "redis", None)
+    config = request.app.state.config
+    live_feature_on = bool(config.streams.enabled and config.streams.live_enabled)
     rows = await list_http_streams(db, user_id=owner_id)
     playback_states = await _playback_states(db, [str(output.id) for output, _, _ in rows])
 
@@ -217,6 +226,8 @@ async def list_streams(
                 ),
                 enabled=output.enabled,
                 online=online,
+                live=bool(meta.get("live")) if online else False,
+                can_broadcast=is_owner and output.enabled and live_feature_on,
                 playback_state=playback_states.get(str(output.id)),
                 description=meta.get("description") or cfg.get("description") or None,
                 genre=meta.get("genre") or cfg.get("genre") or None,
@@ -264,21 +275,7 @@ async def stream_command(
 
     # The worker claims the most recently active session attached to this
     # output; commands target that same session so they reach its driver.
-    session = (
-        await db.execute(
-            select(PlaybackSession)
-            .join(
-                PlaybackSessionOutput,
-                PlaybackSessionOutput.session_id == PlaybackSession.id,
-            )
-            .where(
-                PlaybackSessionOutput.output_kind == "stream",
-                PlaybackSessionOutput.output_stream_id == str(output.id),
-            )
-            .order_by(PlaybackSession.last_active_at.desc().nulls_last())
-            .limit(1)
-        )
-    ).scalar_one_or_none()
+    session = await driving_stream_session(db, str(output.id))
     if session is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

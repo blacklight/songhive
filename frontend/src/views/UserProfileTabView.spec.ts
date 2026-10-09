@@ -35,8 +35,25 @@ vi.mock("@/api/tracks", () => ({
   downloadTrack: vi.fn(),
 }));
 
-vi.mock("@/api/streams", () => ({
-  listStreams: vi.fn(),
+vi.mock("@/api/streams", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/streams")>();
+  return {
+    ...actual,
+    listStreams: vi.fn(),
+  };
+});
+
+vi.mock("@/api/ws", () => ({
+  eventBus: {
+    on: vi.fn(),
+    off: vi.fn(),
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    subscribe: vi.fn(),
+    unsubscribe: vi.fn(),
+    playbackControl: vi.fn(),
+    status: { value: "closed" },
+  },
 }));
 
 vi.mock("@/api/activities", () => ({

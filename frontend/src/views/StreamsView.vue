@@ -58,6 +58,7 @@ function onStreamUpdate(event: WsEvent) {
   const stream = streams.value.find((s) => s.mount === data.mount);
   if (!stream) return;
   if (typeof data.online === "boolean") stream.online = data.online;
+  if (typeof data.live === "boolean") stream.live = data.live;
   if (data.now_playing !== undefined) {
     stream.now_playing = data.now_playing ?? null;
   }

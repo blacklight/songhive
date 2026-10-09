@@ -1049,6 +1049,43 @@ class StreamsConfig(BaseSettings):
             "metaint bytes of audio."
         ),
     )
+    live_enabled: bool = Field(
+        default=True,
+        description=(
+            "Allow owners of native HTTP mounts to broadcast live audio from "
+            "their device over the mount (requires streams.enabled and the "
+            "stream worker)."
+        ),
+    )
+    live_max_bitrate_kbps: int = Field(
+        default=320,
+        ge=16,
+        description=(
+            "Average bitrate cap for live ingest, enforced by the ingest "
+            "WebSocket over a sliding window (abuse guard; MediaRecorder "
+            "output sits far below this)."
+        ),
+    )
+    live_max_duration_seconds: int = Field(
+        default=0,
+        ge=0,
+        description=("Maximum length of a single live broadcast in seconds; 0 is unlimited."),
+    )
+    live_ingest_max_entries: int = Field(
+        default=256,
+        ge=16,
+        description=(
+            "Approximate MAXLEN of the Redis stream carrying live audio from "
+            "the ingest socket to the stream worker (a hiccup buffer only)."
+        ),
+    )
+    live_start_timeout_seconds: float = Field(
+        default=15.0,
+        gt=0,
+        description=(
+            "Seconds the ingest socket waits for the stream worker to report " "the broadcast on air before failing."
+        ),
+    )
 
     @field_validator(
         "allowed_user_providers",

@@ -782,6 +782,37 @@ async def update_library(
   private mount's metadata. The page still polls every 30 s: the WS
   endpoint needs auth (anonymous visitors have no socket), and a crashed
   driver only expires its meta key without emitting an event.
+- Live broadcasting (`streams/live.py`, `streaming/live.py`) lets the owner
+  of a native HTTP mount stream device audio from the browser.
+  `LiveIngestHandler` at `/ws/live/{output_id}` (auth shared with
+  `/ws/events` via `ws/auth.py`; owner-only, `provider_type == "http"` and
+  `enabled` re-checked on the refresh timer) claims
+  `songhive:stream:live:{output_id}` with `SET NX` (one broadcaster per
+  mount; the same owner may supersede their own claim, which is how a
+  reconnect takes over), relays binary frames into the capped
+  `songhive:stream:ingest:{output_id}` stream through a serialized writer
+  queue, and caches the first chunk in
+  `songhive:stream:ingest:header:{output_id}` so a worker that re-attaches
+  mid-broadcast gets the container header. The worker publishes a
+  `songhive:stream:worker:{id}` heartbeat (TTL 10 s) every loop — the ingest
+  socket refuses to open without one (4503), then closes 4415 if the mount
+  meta never reports our `live_ingest_id` within
+  `streams.live_start_timeout_seconds`. `StreamWorker._scan_live` claims
+  live outputs whose mount has no driver (a `SessionDriver` with
+  `session_id=None`; it adopts the most recently attached session —
+  `services/outputs.py::driving_stream_session` — when one appears).
+  Session drivers poll the live key in `_main_loop`, pause a playing
+  session at its frozen position, decode the ingest feed through a
+  `kind="live"` `AudioSource` (`icecast.py`; explicit allowlisted demuxer
+  `matroska`/`ogg`/`mp4`, `-protocol_whitelist pipe`, no `-re`/`-ss`), and
+  resume the queue on live end unless the user touched transport state in
+  the meantime. The persistent encoder is never restarted, so listeners
+  hear one continuous stream; live `source_ended` never records a listen,
+  and idle shutdown is suppressed while live. Mount meta gains
+  `live`/`live_ingest_id`; `StreamResponse`/`stream_update` carry `live`
+  plus the owner-only `can_broadcast` hint. Ingest close codes: 4001 auth,
+  4003 forbidden/format, 4004 missing output, 4409 conflict, 4415 start
+  timeout, 4429 bitrate/backpressure, 4503 no worker, 4504 internal.
 - Per-output listen recording: the `record_listens` boolean config key
   (shared `RECORD_LISTENS_FIELD` spec in `streams/base.py`, advertised by the
   `http`/`icecast`/`snapcast` providers) gates `record_server_listen` in

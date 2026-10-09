@@ -423,3 +423,48 @@ async def test_list_streams_ignores_non_http_outputs(client, regular_user, db_se
     await db_session.flush()
 
     assert client.get("/api/v1/streams/").json() == []
+
+
+@pytest.mark.asyncio
+async def test_list_streams_live_flag(client, regular_user, db_session, fake_redis):
+    """A mount broadcasting live reports live=true from its meta blob."""
+    await _make_http_output(db_session, regular_user, "on-air")
+    await _publish_meta(fake_redis, "on-air", song="Host - Live", live=True, live_ingest_id="ing-1")
+    await _make_http_output(db_session, regular_user, "queued")
+    await _publish_meta(fake_redis, "queued", song="A - T", live=False)
+
+    data = {s["mount"]: s for s in client.get("/api/v1/streams/").json()}
+    assert data["on-air"]["live"] is True
+    assert data["queued"]["live"] is False
+
+    # An offline mount never reports live.
+    await fake_redis.delete(stream_meta_key("on-air"))
+    stream = client.get("/api/v1/streams/").json()[0]
+    assert stream["live"] is False
+
+
+@pytest.mark.asyncio
+async def test_list_streams_can_broadcast(client, regular_user, other_user, admin_user, auth_headers, db_session):
+    """Only the owner of an enabled mount gets the broadcast hint."""
+    await _make_http_output(db_session, regular_user, "radio")
+    await _make_http_output(db_session, regular_user, "disabled-mount", enabled=False)
+
+    owner = {s["mount"]: s for s in client.get("/api/v1/streams/", headers=auth_headers(regular_user)).json()}
+    assert owner["radio"]["can_broadcast"] is True
+    assert owner["disabled-mount"]["can_broadcast"] is False
+
+    for viewer in (other_user, admin_user):
+        data = client.get("/api/v1/streams/", headers=auth_headers(viewer)).json()
+        assert data[0]["can_broadcast"] is False
+
+    anon = client.get("/api/v1/streams/").json()
+    assert all(s["can_broadcast"] is False for s in anon)
+
+
+@pytest.mark.asyncio
+async def test_list_streams_can_broadcast_feature_disabled(client, regular_user, auth_headers, db_session, config):
+    """The broadcast hint tracks streams.live_enabled."""
+    config.streams.live_enabled = False
+    await _make_http_output(db_session, regular_user, "radio")
+    data = client.get("/api/v1/streams/", headers=auth_headers(regular_user)).json()
+    assert data[0]["can_broadcast"] is False

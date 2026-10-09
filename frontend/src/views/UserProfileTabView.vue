@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useRoute } from "vue-router";
 import {
@@ -22,7 +22,13 @@ import {
   type ListPlaylistsResult,
   type PlaylistResponse,
 } from "@/api/playlists";
-import { listStreams, type StreamResponse } from "@/api/streams";
+import {
+  listStreams,
+  type StreamResponse,
+  type StreamUpdateEvent,
+} from "@/api/streams";
+import { eventBus, type WsEvent } from "@/api/ws";
+import { useAuthStore } from "@/stores/auth";
 import { useStreamActions } from "@/composables/useStreamActions";
 import { getApiErrorMessage } from "@/api/client";
 import { toQueueTrack } from "@/player/enrich";
@@ -56,6 +62,7 @@ interface Props {
 const props = defineProps<Props>();
 const { t } = useI18n();
 const route = useRoute();
+const auth = useAuthStore();
 const { busyStreams, toggleEnabled, togglePlayback } = useStreamActions();
 
 const username = computed(() => String(route.params.username));
@@ -252,11 +259,41 @@ async function loadMoreActivities() {
   }
 }
 
+// The streams tab gets instant online/now-playing/live updates from the
+// same ``stream_update`` socket event the directory page uses.
+const WS_EVENT = "stream_update";
+
+function onStreamUpdate(event: WsEvent) {
+  const data = event.data as StreamUpdateEvent | undefined;
+  if (!data || typeof data.mount !== "string") return;
+  const stream = streams.value.find((s) => s.mount === data.mount);
+  if (!stream) return;
+  if (typeof data.online === "boolean") stream.online = data.online;
+  if (typeof data.live === "boolean") stream.live = data.live;
+  if (data.now_playing !== undefined) {
+    stream.now_playing = data.now_playing ?? null;
+  }
+}
+
+function syncStreamSubscription() {
+  if (props.tab === "streams" && auth.isAuthenticated) {
+    eventBus.on(WS_EVENT, onStreamUpdate);
+    eventBus.connect();
+  } else {
+    eventBus.off(WS_EVENT, onStreamUpdate);
+  }
+}
+
 onMounted(() => {
   void load();
+  syncStreamSubscription();
+});
+onUnmounted(() => {
+  eventBus.off(WS_EVENT, onStreamUpdate);
 });
 watch([() => props.tab, () => props.reveal, username], () => {
   reset();
+  syncStreamSubscription();
   void load();
 });
 watch([includeBoosts, includeReplies], () => {

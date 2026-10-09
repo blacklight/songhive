@@ -142,6 +142,9 @@ class IcecastDriver(OutputDriver):
         self._listener_count_at = 0.0
         self._listener_count_ttl = 5.0
         self._pushed_song: Optional[str] = None
+        # Live broadcast ingest id while a ``kind="live"`` source drives the
+        # pipeline; surfaced in the mount meta blob by the HTTP driver.
+        self._live_ingest_id: Optional[str] = None
 
     @property
     def _format_spec(self) -> dict[str, str]:
@@ -198,15 +201,43 @@ class IcecastDriver(OutputDriver):
             "-hide_banner",
             "-loglevel",
             "error",
-            "-re",
-            "-ss",
-            str(max(0.0, position)),
         ]
 
-        if source.kind == "url":
-            argv.extend(["-i", source.url or ""])
+        if source.kind == "live":
+            # A live ingest feed is already real-time: no -re/-ss (seeking a
+            # live pipe is meaningless), minimal probing so the broadcast
+            # reaches listeners quickly, and an explicit allowlisted demuxer
+            # plus a pipe-only protocol whitelist — the ingest bytes are
+            # user-controlled and must never be auto-probed or let ffmpeg
+            # open other protocols.
+            argv.extend(
+                [
+                    "-fflags",
+                    "nobuffer",
+                    "-probesize",
+                    "32768",
+                    "-analyzeduration",
+                    "0",
+                    "-protocol_whitelist",
+                    "pipe",
+                    "-f",
+                    source.input_format or "matroska",
+                    "-i",
+                    "pipe:0",
+                ]
+            )
         else:
-            argv.extend(["-i", str(source.path)])
+            argv.extend(
+                [
+                    "-re",
+                    "-ss",
+                    str(max(0.0, position)),
+                ]
+            )
+            if source.kind == "url":
+                argv.extend(["-i", source.url or ""])
+            else:
+                argv.extend(["-i", str(source.path)])
 
         argv.extend(
             [
@@ -249,6 +280,9 @@ class IcecastDriver(OutputDriver):
 
     async def _run_decoder(self, source: AudioSource, position: float, task_id: int) -> None:
         """Run a decoder/silence process and copy its stdout to the encoder stdin."""
+        # A live source's iterator is a real-time byte feed: it goes straight
+        # to the decoder's stdin instead of being spilled to a temp file.
+        live_feed = source.kind == "live" and source.iterator is not None
         if source.kind == "iterator" and source.iterator is not None:
             source = await self._spill_iterator_to_temp(source)
 
@@ -256,10 +290,13 @@ class IcecastDriver(OutputDriver):
         logger.info("Starting decoder task=%s paused=%s argv=%s", task_id, self._paused, argv)
         proc = await asyncio.create_subprocess_exec(
             *argv,
-            stdin=asyncio.subprocess.DEVNULL,
+            stdin=asyncio.subprocess.PIPE if live_feed else asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
+        feeder: Optional[asyncio.Task] = None
+        if live_feed and proc.stdin is not None:
+            feeder = asyncio.create_task(self._feed_live_stdin(proc, source, task_id))
 
         try:
             stdout = proc.stdout
@@ -315,6 +352,46 @@ class IcecastDriver(OutputDriver):
             logger.exception("Decoder error")
             if self._task_count == task_id:
                 self._emit({"type": "error", "message": str(exc)})
+        finally:
+            if feeder is not None:
+                feeder.cancel()
+                try:
+                    await feeder
+                except (asyncio.CancelledError, Exception):
+                    pass
+
+    async def _feed_live_stdin(self, proc: asyncio.subprocess.Process, source: AudioSource, task_id: int) -> None:
+        """
+        Copy a live ingest iterator into the decoder's stdin.
+
+        Exhaustion (broadcaster stopped, superseded, or the live key died)
+        closes stdin so ffmpeg flushes and exits, which makes the decoder
+        emit the usual ``source_ended`` for this generation.
+        """
+        stdin = proc.stdin
+        try:
+            if source.iterator is None:
+                return
+            async for chunk in source.iterator:
+                if not chunk:
+                    continue
+                if self._task_count != task_id or proc.returncode is not None or stdin is None:
+                    return
+                try:
+                    stdin.write(chunk)
+                    await stdin.drain()
+                except (BrokenPipeError, ConnectionResetError, AttributeError):
+                    return
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Live feed failed for decoder task=%s", task_id)
+        finally:
+            if stdin is not None:
+                try:
+                    stdin.close()
+                except (BrokenPipeError, ConnectionResetError, AttributeError, RuntimeError):
+                    pass
 
     def _kill_proc(self, proc: Optional[asyncio.subprocess.Process]) -> None:
         if proc is None or proc.returncode is not None:
@@ -508,6 +585,10 @@ class IcecastDriver(OutputDriver):
         self._resume_position = self._elapsed_position()
         self._position = self._resume_position
         self._source_started_at = time.monotonic()
+        if self._current_source is not None and self._current_source.kind == "live":
+            # There is no "paused live feed" to resume: the source is dropped
+            # and a later broadcast starts a fresh ingest instead.
+            self._current_source = None
         await self._start_decoder_task(AudioSource(kind="path"), 0.0)
 
     async def resume(self) -> None:
@@ -523,7 +604,7 @@ class IcecastDriver(OutputDriver):
 
     async def seek(self, seconds: float) -> None:
         """Reposition the current source; updates the resume point while paused."""
-        if self._current_source is None:
+        if self._current_source is None or self._current_source.kind == "live":
             return
         if self._paused:
             self._resume_position = seconds
@@ -534,7 +615,9 @@ class IcecastDriver(OutputDriver):
     async def set_volume(self, volume: float) -> None:
         """Set the decoder gain; restarts the decoder at the live position."""
         self._volume = min(max(float(volume), 0.0), 1.0)
-        if self._paused or self._current_source is None:
+        if self._paused or self._current_source is None or self._current_source.kind == "live":
+            # A live decoder restart would have to re-probe the ingest stream
+            # mid-container; volume changes are simply ignored while live.
             return
         await self.set_source(
             self._current_source,
@@ -551,6 +634,15 @@ class IcecastDriver(OutputDriver):
     def generation(self) -> Optional[int]:
         """Decoder task generation, used to drop stale ``source_ended`` events."""
         return self._task_count
+
+    async def set_live_state(self, ingest_id: Optional[str]) -> None:
+        """
+        Record the live ingest id currently driving the pipeline.
+
+        ``None`` clears it. Subclasses that publish mount metadata
+        (``HttpStreamDriver``) override this to fan the flag out.
+        """
+        self._live_ingest_id = ingest_id
 
     async def update_metadata(self, metadata: TrackMeta) -> None:
         """Push now-playing metadata via Icecast's admin metadata endpoint.

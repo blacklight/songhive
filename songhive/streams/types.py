@@ -51,11 +51,16 @@ class AudioSource:
     Sources may be resolved from a local ``StoredFile`` path, an async byte
     iterator (e.g. an external library stream), or a remote URL. Only one of
     ``path``, ``iterator`` or ``url`` should be populated for a given source.
+
+    A ``live`` source feeds a real-time compressed-audio stream (live
+    broadcast ingest) through ``iterator``; ``input_format`` names the
+    ffmpeg demuxer for the container (e.g. ``matroska``, ``ogg``, ``mp4``).
     """
 
-    kind: Literal["path", "iterator", "url"]
+    kind: Literal["path", "iterator", "url", "live"]
     path: Optional[Path] = None
     iterator: Optional[AsyncIterator[bytes]] = None
     url: Optional[str] = None
     content_type: Optional[str] = None
     size: Optional[int] = None
+    input_format: Optional[str] = None

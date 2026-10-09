@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { RouterLink, RouterView, useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useInstanceStore } from "@/stores/instance";
+import { useLiveBroadcastStore } from "@/stores/liveBroadcast";
 import { useNotificationsStore } from "@/stores/notifications";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppToast from "@/components/feedback/AppToast.vue";
@@ -14,6 +15,7 @@ import PlayerBarSlot from "@/components/player/PlayerBarSlot.vue";
 const { t } = useI18n();
 const authStore = useAuthStore();
 const instanceStore = useInstanceStore();
+const liveBroadcast = useLiveBroadcastStore();
 const notificationsStore = useNotificationsStore();
 const router = useRouter();
 const route = useRoute();
@@ -320,6 +322,15 @@ const publicProfileLink = computed(() =>
           </li>
         </ul>
       </nav>
+      <RouterLink
+        v-if="liveBroadcast.status === 'on-air'"
+        to="/streams"
+        class="app-layout__on-air"
+        @click="closeNavOnMobile"
+      >
+        <span class="app-layout__on-air-dot" aria-hidden="true" />
+        {{ t("pages.streams.broadcast.onAir") }}
+      </RouterLink>
       <footer v-if="!authStore.isAuthenticated" class="app-layout__menu-footer">
         <RouterLink
           :to="loginItem.to"
@@ -380,6 +391,15 @@ const publicProfileLink = computed(() =>
           v-if="authStore.isAuthenticated"
           class="app-layout__topbar-actions"
         >
+          <RouterLink
+            v-if="liveBroadcast.status === 'on-air'"
+            to="/streams"
+            class="app-layout__topbar-on-air"
+            :title="t('pages.streams.broadcast.onAir')"
+            :aria-label="t('pages.streams.broadcast.onAir')"
+          >
+            <span class="app-layout__on-air-dot" aria-hidden="true" />
+          </RouterLink>
           <RouterLink
             :to="publicProfileLink"
             class="app-layout__topbar-user"
@@ -708,6 +728,51 @@ const publicProfileLink = computed(() =>
   width: var(--footer-btn-width);
   margin-top: 0;
   color: var(--color-text-menu);
+}
+
+.app-layout__on-air {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-danger);
+  color: var(--color-danger);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.app-layout__topbar-on-air {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-2);
+}
+
+.app-layout__on-air-dot {
+  width: 0.625rem;
+  height: 0.625rem;
+  border-radius: 50%;
+  background-color: var(--color-danger);
+  animation: app-layout-on-air-pulse 1.5s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes app-layout-on-air-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-layout__on-air-dot {
+    animation: none;
+  }
 }
 
 .app-layout__main {

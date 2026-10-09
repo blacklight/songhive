@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import SonghiveConfig
 from ..models.output_stream import OutputStream
-from ..models.playback_session import PlaybackSessionOutput
+from ..models.playback_session import PlaybackSession, PlaybackSessionOutput
 from ..models.user import User
 from ..services.secrets import decrypt_json, encrypt_json, redact_config
 from ..streams.registry import get_output, is_user_configurable
@@ -272,6 +272,30 @@ async def get_http_stream_for_manage(db: AsyncSession, output_id: str, user: Use
             detail="Stream not found",
         )
     return output
+
+
+async def driving_stream_session(db: AsyncSession, output_id: str) -> Optional[PlaybackSession]:
+    """
+    Return the session currently driving a stream output, if any.
+
+    Several sessions may have attached the same stream output over time; the
+    most recently active one is the session the worker drives and the one
+    stream commands target.
+    """
+    result = await db.execute(
+        select(PlaybackSession)
+        .join(
+            PlaybackSessionOutput,
+            PlaybackSessionOutput.session_id == PlaybackSession.id,
+        )
+        .where(
+            PlaybackSessionOutput.output_kind == "stream",
+            PlaybackSessionOutput.output_stream_id == str(output_id),
+        )
+        .order_by(PlaybackSession.last_active_at.desc().nulls_last())
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 
 async def set_output_enabled(db: AsyncSession, output: OutputStream, user: User, enabled: bool) -> OutputStream:
