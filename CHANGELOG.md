@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `outputs`: Add a per-output listen-recording toggle — a new
+  `record_listens` field on server outputs gates whether listens on that
+  output are recorded in history, stats and scrobbles, exposed in the
+  output settings UI and enforced by the stream worker.
+  ([`534b5d2`](https://git.platypush.tech/blacklight/songhive/commit/534b5d294f3e87c540484e5008fbeeb4e6c7d54a)).
+- Playlists and libraries can now be shared with collaborators —
+  grantees with the collaborator role get write access, items record
+  who added them, and a new "Received shares" tab lists everything
+  shared with you along with a leave-share action.
+  ([`fa8265d`](https://git.platypush.tech/blacklight/songhive/commit/fa8265dd4883c6d7dbf23cc29578c8bdc5c00699)).
+- `streams`: Owners of native HTTP mounts can now broadcast live audio
+  from their device — a Record button on the stream card captures
+  microphone input in the browser (MediaRecorder over an authenticated
+  WebSocket) and serves it to every listener on the mount through the
+  existing stream pipeline, pausing the queue for the broadcast and
+  resuming it afterwards.
+  ([`8130440`](https://git.platypush.tech/blacklight/songhive/commit/81304406d78c89c92004ad69715408962c9ac052)).
+
 ## 0.4.9
 
 ### Added
