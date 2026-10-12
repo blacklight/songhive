@@ -5,6 +5,7 @@ Tests for the personal listening statistics API.
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import time_machine
 
 from songhive.models._enums import Visibility
 from songhive.models.album import Album
@@ -15,6 +16,13 @@ from songhive.models.remote_object import RemoteObject
 from songhive.models.track import Track
 
 NOW = datetime(2026, 9, 10, 15, 0, 0, tzinfo=timezone.utc)
+
+
+@pytest.fixture(autouse=True)
+def _frozen_now():
+    """Pin "now" at NOW so fixed-date listens stay inside default periods."""
+    with time_machine.travel(NOW):
+        yield
 
 
 async def _track(db_session, owner, *, title="Song", artist=None, album=None, genre=None, release_year=None):

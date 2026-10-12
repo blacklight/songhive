@@ -154,6 +154,12 @@
   instance's `base_urls`, so self-delivered Webmentions never leave the
   mention pipeline that already handles them.
 - Tests use `pytest-asyncio` for async tests and `TestClient` for API tests.
+- Freeze the clock in tests with `time_machine.travel` (see `_frozen_now` in
+  `tests/test_stats_api.py`), never `freezegun`: freezegun rewrites
+  `datetime.datetime` module attributes to `FakeDatetime`, which pydantic
+  can't schema-generate when FastAPI builds route dependants from endpoint
+  signatures containing `Optional[datetime]` params — every request then
+  fails with `FastAPIError: Invalid args for response field`.
 - The autouse `_no_real_celery_broker` fixture in `tests/conftest.py` stubs
   `celery_app.send_task` so test `.delay()`/`.apply_async()` calls never reach
   the configured broker. Without it, tests publish real messages that a running

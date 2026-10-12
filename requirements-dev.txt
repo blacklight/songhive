@@ -6,6 +6,7 @@ pytest-xdist>=3.0
 httpx>=0.24
 aiosqlite>=0.19
 fakeredis>=2.0
+time-machine>=2.6
 
 # Linting & Formatting
 flake8>=6.0
