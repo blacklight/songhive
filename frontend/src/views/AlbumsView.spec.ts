@@ -13,6 +13,7 @@ import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 
 vi.mock("@/api/albums", () => ({
   listAlbumsWithMeta: vi.fn(),
+  listAlbumInitials: vi.fn(),
   deleteAlbum: vi.fn(),
 }));
 
@@ -87,9 +88,11 @@ describe("AlbumsView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.useFakeTimers();
+    Element.prototype.scrollIntoView = vi.fn();
     vi.mocked(albumsApi.listAlbumsWithMeta).mockResolvedValue(
       createListResult([]),
     );
+    vi.mocked(albumsApi.listAlbumInitials).mockResolvedValue({ letters: {} });
     vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
       items: [],
       offset: 0,
@@ -100,6 +103,7 @@ describe("AlbumsView", () => {
   afterEach(() => {
     vi.useRealTimers();
     wrapper?.unmount();
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
     document.body.innerHTML = "";
   });
 
@@ -115,7 +119,7 @@ describe("AlbumsView", () => {
 
     expect(albumsApi.listAlbumsWithMeta).toHaveBeenCalledWith({
       q: "",
-      limit: 20,
+      limit: 50,
       offset: 0,
       include: "artist",
       sort_by: "title",
@@ -196,7 +200,7 @@ describe("AlbumsView", () => {
 
     expect(fetcher).toHaveBeenLastCalledWith({
       q: "query",
-      limit: 20,
+      limit: 50,
       offset: 0,
       include: "artist",
       sort_by: "title",
@@ -236,7 +240,7 @@ describe("AlbumsView", () => {
 
     expect(fetcher).toHaveBeenLastCalledWith({
       q: "",
-      limit: 20,
+      limit: 50,
       offset: 20,
       include: "artist",
       sort_by: "title",

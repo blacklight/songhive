@@ -1,17 +1,19 @@
 <script setup lang="ts" generic="T extends ManageableItem">
-import { computed } from "vue";
+import { computed, nextTick, type ComponentPublicInstance } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAuthStore } from "@/stores/auth";
 import {
   useBulkDelete,
   type ManageableItem,
 } from "@/composables/useBulkDelete";
+import { indexLetterOf } from "@/utils/indexLetters";
 import AppPageTitle from "@/components/ui/AppPageTitle.vue";
 import SearchBar from "@/components/ui/SearchBar.vue";
 import AppButton from "@/components/ui/AppButton.vue";
 import AppCheckbox from "@/components/ui/AppCheckbox.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
+import AlphabetIndex from "@/components/ui/AlphabetIndex.vue";
 import DeleteModal from "@/components/entity/DeleteModal.vue";
 import SortControl, {
   type Option as SortOption,
@@ -26,6 +28,9 @@ export interface Props<T extends ManageableItem> {
   loading: boolean;
   error: string | null;
   hasMore: boolean;
+  /** Whether the loaded window has earlier items; shows "Load previous". */
+  hasPrevious?: boolean;
+  loadingPrevious?: boolean;
   query: string;
   searchPlaceholder?: string;
   emptyMessage?: string;
@@ -44,10 +49,29 @@ export interface Props<T extends ManageableItem> {
   itemClass?: string;
   search: (q: string) => void | Promise<void>;
   loadMore: () => void | Promise<void>;
+  loadPrevious?: () => void | Promise<void>;
   retry: () => void | Promise<void>;
   sortBy?: string;
   sortDir?: "asc" | "desc";
   sortOptions?: SortOption[];
+  /**
+   * Sort key used to bucket items under A–Z index letters, shown as an
+   * alphabet scrollbar along the edge. Pass ``undefined`` when the
+   * active sort is not alphabetical — the bar is hidden.
+   */
+  getIndexKey?: (item: T) => string | number | null | undefined;
+  /**
+   * Letters enabled in the index, typically from the backend initials
+   * endpoint. ``undefined`` falls back to letters found in ``items`` —
+   * pass an empty set while the initials response is still pending if
+   * you only want backend-provided letters enabled.
+   */
+  indexAvailable?: Set<string>;
+  /**
+   * Async hook run before scrolling to a letter's anchor; use it to
+   * fetch the fragment containing the letter when it isn't loaded yet.
+   */
+  resolveIndexJump?: (letter: string) => void | Promise<void>;
 }
 
 const props = withDefaults(defineProps<Props<T>>(), {
@@ -65,6 +89,12 @@ const props = withDefaults(defineProps<Props<T>>(), {
   sortBy: undefined,
   sortDir: undefined,
   sortOptions: undefined,
+  getIndexKey: undefined,
+  hasPrevious: false,
+  loadingPrevious: false,
+  loadPrevious: undefined,
+  indexAvailable: undefined,
+  resolveIndexJump: undefined,
 });
 
 const emit = defineEmits<{
@@ -145,12 +175,53 @@ function onLoadMore() {
   void props.loadMore();
 }
 
+function onLoadPrevious() {
+  if (props.loading) return;
+  void props.loadPrevious?.();
+}
+
 function onRetry() {
   void props.retry();
 }
 
 function onSort(field: string, direction: "asc" | "desc") {
   emit("sort", field, direction);
+}
+
+const itemEls = new Map<string, HTMLElement>();
+
+function setItemEl(id: string, el: Element | ComponentPublicInstance | null) {
+  if (el instanceof HTMLElement) itemEls.set(id, el);
+  else itemEls.delete(id);
+}
+
+// First item under each index letter, in display order.
+const letterAnchors = computed(() => {
+  const anchors = new Map<string, string>();
+  if (!props.getIndexKey) return anchors;
+  for (const item of props.items) {
+    const letter = indexLetterOf(String(props.getIndexKey(item) ?? ""));
+    if (!anchors.has(letter)) anchors.set(letter, item.id);
+  }
+  return anchors;
+});
+
+// Backend-provided letters plus any found in the loaded items (remote
+// entities can introduce letters the local initials don't cover).
+const availableLetters = computed(() => {
+  const letters = new Set<string>(letterAnchors.value.keys());
+  if (props.indexAvailable) {
+    for (const letter of props.indexAvailable) letters.add(letter);
+  }
+  return letters;
+});
+
+async function onIndexJump(letter: string) {
+  await props.resolveIndexJump?.(letter);
+  await nextTick();
+  const id = letterAnchors.value.get(letter);
+  const el = id ? itemEls.get(id) : undefined;
+  el?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 defineSlots<{
@@ -270,6 +341,24 @@ defineSlots<{
     </div>
 
     <template v-else>
+      <AlphabetIndex
+        v-if="getIndexKey"
+        :available="availableLetters"
+        @jump="onIndexJump"
+      />
+
+      <div v-if="hasPrevious" class="bulk-editable-grid__load-previous">
+        <AppButton
+          variant="secondary"
+          :loading="loadingPrevious"
+          :disabled="loading"
+          icon="chevron-up"
+          @click="onLoadPrevious"
+        >
+          {{ t("browse.list.loadPrevious") }}
+        </AppButton>
+      </div>
+
       <ul
         v-if="layout === 'list'"
         class="bulk-editable-grid__items bulk-editable-grid__items--list"
@@ -277,6 +366,7 @@ defineSlots<{
         <li
           v-for="item in items"
           :key="item.id"
+          :ref="(el) => setItemEl(item.id, el)"
           :class="[
             'bulk-editable-grid__item-wrapper',
             'bulk-editable-grid__item-wrapper--list',
@@ -314,6 +404,7 @@ defineSlots<{
         <div
           v-for="item in items"
           :key="item.id"
+          :ref="(el) => setItemEl(item.id, el)"
           :class="[
             'bulk-editable-grid__item-wrapper',
             'bulk-editable-grid__item-wrapper--grid',
@@ -461,6 +552,8 @@ defineSlots<{
 .bulk-editable-grid__item-wrapper {
   position: relative;
   padding: var(--space-3);
+  /* Keep the jump target clear of the sticky topbar. */
+  scroll-margin-top: var(--header-height);
 }
 
 .bulk-editable-grid__item-wrapper:hover {
@@ -496,6 +589,7 @@ defineSlots<{
   opacity: 1;
 }
 
+.bulk-editable-grid__load-previous,
 .bulk-editable-grid__footer {
   display: flex;
   justify-content: center;

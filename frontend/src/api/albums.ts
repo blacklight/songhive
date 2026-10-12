@@ -61,6 +61,24 @@ export async function listAlbumsWithMeta(params?: {
   };
 }
 
+export interface InitialsResult {
+  letters: Record<string, number>;
+}
+
+export function listAlbumInitials(params?: {
+  q?: string;
+  artist_id?: string;
+  year_from?: number;
+  year_to?: number;
+  genre?: string;
+  owner_username?: string;
+  collection?: boolean;
+  sort_by?: "title" | "artist_name";
+  sort_dir?: "asc" | "desc";
+}): Promise<InitialsResult> {
+  return apiRequest<InitialsResult>("/albums/initials", { query: params });
+}
+
 export function getAlbum(
   id: string,
   params?: { include?: string },

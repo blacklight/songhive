@@ -154,6 +154,98 @@ describe("useChunkList", () => {
     });
   });
 
+  it("loads an arbitrary fragment with loadAt", async () => {
+    const fetcher = buildFetcher([
+      { items: ["a"], offset: 0, total: 70 },
+      {
+        items: Array.from({ length: 20 }, (_, i) => `item-${40 + i}`),
+        offset: 40,
+        total: 70,
+      },
+      {
+        items: Array.from({ length: 20 }, (_, i) => `item-${20 + i}`),
+        offset: 20,
+        total: 70,
+      },
+    ]);
+    const wrapper = createList(fetcher);
+
+    await wrapper.vm.load();
+    await wrapper.vm.loadAt(40);
+
+    expect(wrapper.vm.items[0]).toBe("item-40");
+    expect(wrapper.vm.startOffset).toBe(40);
+    expect(wrapper.vm.hasPrevious).toBe(true);
+    expect(wrapper.vm.hasMore).toBe(true);
+    expect(fetcher).toHaveBeenLastCalledWith({
+      q: "",
+      limit: 20,
+      offset: 40,
+      around_track_id: undefined,
+      sort_by: "created_at",
+      sort_dir: "desc",
+    });
+
+    // Load previous extends the window backwards without a reset.
+    await wrapper.vm.loadPrevious();
+    expect(wrapper.vm.items[0]).toBe("item-20");
+    expect(wrapper.vm.startOffset).toBe(20);
+  });
+
+  it("lands on the latest loadAt target queued while busy", async () => {
+    let release: (() => void) | undefined;
+    const fetcher = vi.fn((params: ChunkListParams) => {
+      if (params.offset === 10) {
+        return new Promise<ChunkListResult<string>>((resolve) => {
+          release = () => resolve({ items: ["ten"], offset: 10, total: 50 });
+        });
+      }
+      return Promise.resolve({
+        items: [`item-${params.offset}`],
+        offset: params.offset,
+        total: 50,
+      });
+    });
+    const wrapper = createList(fetcher);
+    await wrapper.vm.load();
+
+    const pending = wrapper.vm.loadAt(10);
+    wrapper.vm.loadAt(30);
+    wrapper.vm.loadAt(40);
+    release?.();
+    await pending;
+    await flushPromises();
+
+    expect(fetcher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 40 }),
+    );
+    expect(wrapper.vm.startOffset).toBe(40);
+  });
+
+  it("retries the last loadAt target after a failure", async () => {
+    const fetcher = buildFetcher([
+      { items: ["a"], offset: 0, total: 50 },
+      new Error("boom"),
+      {
+        items: Array.from({ length: 20 }, (_, i) => `item-${40 + i}`),
+        offset: 40,
+        total: 50,
+      },
+    ]);
+    const wrapper = createList(fetcher);
+
+    await wrapper.vm.load();
+    await wrapper.vm.loadAt(40);
+    expect(wrapper.vm.error).toBe("boom");
+
+    await wrapper.vm.retry();
+    expect(wrapper.vm.error).toBe(null);
+    expect(wrapper.vm.startOffset).toBe(40);
+    expect(fetcher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 40 }),
+    );
+  });
+
   it("debounces search and resets the list", async () => {
     const fetcher = buildFetcher([
       { items: ["old"], offset: 0, total: 1 },

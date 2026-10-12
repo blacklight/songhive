@@ -1907,7 +1907,8 @@
       "createPlaylist": "Crear lista de reproducción",
       "createLibrary": "Crear biblioteca",
       "newPlaylist": "Nueva lista de reproducción",
-      "newLibrary": "Nueva biblioteca"
+      "newLibrary": "Nueva biblioteca",
+      "alphabetIndex": "Índice alfabético"
     },
     "detail": {
       "tracks": "Pistas",

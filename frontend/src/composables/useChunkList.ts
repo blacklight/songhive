@@ -76,6 +76,7 @@ export function useChunkList<T>(
 
   const sortBy = ref<string>(getInitialSortBy());
   const sortDir = ref<"asc" | "desc">(getInitialSortDir());
+  const queuedLoadAt = ref<number | null>(null);
 
   const hasMore = computed(
     () => startOffset.value + items.value.length < total.value,
@@ -149,6 +150,11 @@ export function useChunkList<T>(
       } else if (mode === "prepend") {
         loadingPrevious.value = false;
       }
+      if (queuedLoadAt.value !== null) {
+        const target = queuedLoadAt.value;
+        queuedLoadAt.value = null;
+        void loadAt(target);
+      }
     }
   }
 
@@ -159,6 +165,7 @@ export function useChunkList<T>(
       items.value = [];
       startOffset.value = 0;
       currentOffset.value = 0;
+      queuedLoadAt.value = null;
     }
     const targetOffset = reset ? 0 : currentOffset.value;
     return doLoad(targetOffset, aroundTrackId, "replace");
@@ -182,7 +189,23 @@ export function useChunkList<T>(
     items.value = [];
     startOffset.value = 0;
     currentOffset.value = 0;
+    queuedLoadAt.value = null;
     return doLoad(0, aroundTrackId, "replace");
+  }
+
+  function loadAt(offset: number) {
+    // Scrubbing the index fires a jump per letter; while a fragment is
+    // in flight, remember only the latest target so the scrub still
+    // lands on the letter the user ends on.
+    const target = Math.max(0, Math.floor(offset));
+    if (isBusy()) {
+      queuedLoadAt.value = target;
+      return;
+    }
+    // Keep the target as the current offset so retry() replays this load.
+    lastWasReset.value = false;
+    currentOffset.value = target;
+    return doLoad(target, undefined, "replace");
   }
 
   const search = useDebounce((q: string) => {
@@ -227,6 +250,7 @@ export function useChunkList<T>(
     loadMore,
     loadPrevious,
     loadAround,
+    loadAt,
     search,
     setSort,
     refresh,

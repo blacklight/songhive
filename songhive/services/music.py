@@ -4,6 +4,7 @@ libraries, and radios.
 """
 
 import contextlib
+import unicodedata
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, cast
 
 from sqlalchemy import Select, and_, exists, false, func, or_, select
@@ -199,6 +200,47 @@ def _order_clause(expr: Any, direction: str, nulls_last: bool = False) -> Any:
     return clause
 
 
+def _index_letter(key: Any) -> str:
+    """
+    Bucket a sort key under its A–Z index letter.
+
+    Mirrors the frontend's ``indexLetterOf``: accented letters fold onto
+    their base (``É`` → ``E``); digits, symbols, non-Latin scripts and
+    empty keys all land on ``#``.
+    """
+    first = str(key).strip()[:1] if key is not None else ""
+    base = "".join(char for char in unicodedata.normalize("NFD", first) if unicodedata.category(char) != "Mn").upper()
+    return base if "A" <= base <= "Z" else "#"
+
+
+async def _initials_for(
+    session: AsyncSession,
+    stmt: Select[Any],
+    field: Any,
+    secondary: Any,
+    sort_dir: str,
+    nulls_last: bool = False,
+) -> Dict[str, int]:
+    """
+    Return the offset of the first row under each index letter.
+
+    The row set and ordering mirror the matching ``list_*`` function so the
+    offsets line up with paginated list positions: ``{letter: offset}``
+    tells the client which page fragment to load when jumping to a letter.
+    """
+    key_stmt = stmt.with_only_columns(field).order_by(
+        _order_clause(field, sort_dir, nulls_last),
+        _order_clause(secondary, sort_dir),
+    )
+    result = await session.execute(key_stmt)
+    initials: Dict[str, int] = {}
+    for index, key in enumerate(result.scalars().all()):
+        letter = _index_letter(key)
+        if letter not in initials:
+            initials[letter] = index
+    return initials
+
+
 def _apply_sort(
     stmt: Select[Any],
     field: Any,
@@ -318,6 +360,19 @@ async def count_artists(
     stmt = _build_artists_stmt(query=query, user=user, owner_id=owner_id, collection=collection)
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0
+
+
+async def artist_initials(
+    session: AsyncSession,
+    query: Optional[str] = None,
+    user: Optional[User] = None,
+    owner_id: Optional[str] = None,
+    collection: Optional[bool] = None,
+    sort_dir: str = "asc",
+) -> Dict[str, int]:
+    """Offset of the first artist under each index letter in the name-sorted list."""
+    stmt = _build_artists_stmt(query=query, user=user, owner_id=owner_id, collection=collection)
+    return await _initials_for(session, stmt, Artist.name, Artist.id, sort_dir)
 
 
 async def find_or_create_artist(session: AsyncSession, name: str) -> Artist:
@@ -441,6 +496,13 @@ def _build_albums_stmt(
     return stmt
 
 
+def _album_sort_field(sort_by: str) -> Any:
+    """Sort column for album listings (``artist_name`` dereferences the artist)."""
+    if sort_by == "artist_name":
+        return select(Artist.name).where(Artist.id == Album.artist_id).scalar_subquery()
+    return getattr(Album, sort_by)
+
+
 async def list_albums(
     session: AsyncSession,
     query: Optional[str] = None,
@@ -469,11 +531,7 @@ async def list_albums(
         user=user,
     ).options(*_album_selectin_options(include))
     stmt = apply_access_filter(stmt, Album, user, "album")
-    field = (
-        select(Artist.name).where(Artist.id == Album.artist_id).scalar_subquery()
-        if sort_by == "artist_name"
-        else getattr(Album, sort_by)
-    )
+    field = _album_sort_field(sort_by)
 
     nulls_last = sort_by in {"release_year"}
     stmt = _apply_sort(stmt, field, sort_dir, Album.id, nulls_last)
@@ -507,6 +565,34 @@ async def count_albums(
     stmt = apply_access_filter(stmt, Album, user, "album")
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0
+
+
+async def album_initials(
+    session: AsyncSession,
+    query: Optional[str] = None,
+    artist_id: Optional[str] = None,
+    year_from: Optional[int] = None,
+    year_to: Optional[int] = None,
+    genre: Optional[str] = None,
+    owner_id: Optional[str] = None,
+    collection: Optional[bool] = None,
+    user: Optional[User] = None,
+    sort_by: str = "title",
+    sort_dir: str = "asc",
+) -> Dict[str, int]:
+    """Offset of the first album under each index letter for the filtered list."""
+    stmt = _build_albums_stmt(
+        query=query,
+        artist_id=artist_id,
+        year_from=year_from,
+        year_to=year_to,
+        genre=genre,
+        owner_id=owner_id,
+        collection=collection,
+        user=user,
+    )
+    stmt = apply_access_filter(stmt, Album, user, "album")
+    return await _initials_for(session, stmt, _album_sort_field(sort_by), Album.id, sort_dir)
 
 
 async def get_album(
@@ -978,6 +1064,26 @@ def _apply_editable_filter(stmt: Select[Any], model: Any, user: Optional[User], 
     )
 
 
+def _build_playlists_stmt(
+    user: Optional[User] = None,
+    owner_id: Optional[str] = None,
+    query: Optional[str] = None,
+    collection: Optional[bool] = None,
+    editable: bool = False,
+) -> Select[Any]:
+    """Build a statement for listing/counting playlists."""
+    stmt = select(Playlist)
+    if owner_id:
+        stmt = stmt.where(Playlist.owner_id == owner_id)
+    if query:
+        stmt = stmt.where(or_(ilike_contains(Playlist.name, query), ilike_contains(Playlist.description, query)))
+    stmt = apply_collection_filter(stmt, Playlist, user, "playlist", collection)
+    stmt = apply_access_filter(stmt, Playlist, user, "playlist")
+    if editable:
+        stmt = _apply_editable_filter(stmt, Playlist, user, "playlist")
+    return stmt
+
+
 async def list_playlists(
     session: AsyncSession,
     user: Optional[User] = None,
@@ -993,15 +1099,9 @@ async def list_playlists(
 ) -> List[Playlist]:
     """List playlists visible to ``user``, optionally filtered by name/description."""
     field = getattr(Playlist, sort_by)
-    stmt = select(Playlist).options(*_playlist_selectin_options(include))
-    if owner_id:
-        stmt = stmt.where(Playlist.owner_id == owner_id)
-    if query:
-        stmt = stmt.where(or_(ilike_contains(Playlist.name, query), ilike_contains(Playlist.description, query)))
-    stmt = apply_collection_filter(stmt, Playlist, user, "playlist", collection)
-    stmt = apply_access_filter(stmt, Playlist, user, "playlist")
-    if editable:
-        stmt = _apply_editable_filter(stmt, Playlist, user, "playlist")
+    stmt = _build_playlists_stmt(
+        user=user, owner_id=owner_id, query=query, collection=collection, editable=editable
+    ).options(*_playlist_selectin_options(include))
     stmt = _apply_sort(stmt, field, sort_dir, Playlist.id)
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
@@ -1017,17 +1117,23 @@ async def count_playlists(
     editable: bool = False,
 ) -> int:
     """Return the total number of playlists visible to ``user``."""
-    stmt = select(Playlist)
-    if owner_id:
-        stmt = stmt.where(Playlist.owner_id == owner_id)
-    if query:
-        stmt = stmt.where(or_(ilike_contains(Playlist.name, query), ilike_contains(Playlist.description, query)))
-    stmt = apply_collection_filter(stmt, Playlist, user, "playlist", collection)
-    stmt = apply_access_filter(stmt, Playlist, user, "playlist")
-    if editable:
-        stmt = _apply_editable_filter(stmt, Playlist, user, "playlist")
+    stmt = _build_playlists_stmt(user=user, owner_id=owner_id, query=query, collection=collection, editable=editable)
     result = await session.execute(select(func.count()).select_from(stmt.subquery()))
     return result.scalar() or 0
+
+
+async def playlist_initials(
+    session: AsyncSession,
+    user: Optional[User] = None,
+    owner_id: Optional[str] = None,
+    query: Optional[str] = None,
+    collection: Optional[bool] = None,
+    editable: bool = False,
+    sort_dir: str = "asc",
+) -> Dict[str, int]:
+    """Offset of the first playlist under each index letter in the name-sorted list."""
+    stmt = _build_playlists_stmt(user=user, owner_id=owner_id, query=query, collection=collection, editable=editable)
+    return await _initials_for(session, stmt, Playlist.name, Playlist.id, sort_dir)
 
 
 async def get_playlist(

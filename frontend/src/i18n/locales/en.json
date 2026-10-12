@@ -1907,7 +1907,8 @@
       "createPlaylist": "Create playlist",
       "createLibrary": "Create library",
       "newPlaylist": "New playlist",
-      "newLibrary": "New library"
+      "newLibrary": "New library",
+      "alphabetIndex": "Alphabet index"
     },
     "detail": {
       "tracks": "Tracks",

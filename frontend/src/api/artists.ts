@@ -50,6 +50,19 @@ export async function listArtistsWithMeta(params?: {
   };
 }
 
+export interface InitialsResult {
+  letters: Record<string, number>;
+}
+
+export function listArtistInitials(params?: {
+  q?: string;
+  owner_username?: string;
+  collection?: boolean;
+  sort_dir?: "asc" | "desc";
+}): Promise<InitialsResult> {
+  return apiRequest<InitialsResult>("/artists/initials", { query: params });
+}
+
 export function getArtist(
   id: string,
   params?: { include?: string },

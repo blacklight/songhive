@@ -19,6 +19,7 @@ import CollectionToggle from "@/components/ui/CollectionToggle.vue";
 
 vi.mock("@/api/playlists", () => ({
   listPlaylistsWithMeta: vi.fn(),
+  listPlaylistInitials: vi.fn(),
   createPlaylist: vi.fn(),
   deletePlaylist: vi.fn(),
 }));
@@ -94,9 +95,13 @@ describe("PlaylistsView", () => {
     setActivePinia(createPinia());
     vi.useFakeTimers();
     vi.clearAllMocks();
+    Element.prototype.scrollIntoView = vi.fn();
     vi.mocked(playlistsApi.listPlaylistsWithMeta).mockResolvedValue(
       createListResult([]),
     );
+    vi.mocked(playlistsApi.listPlaylistInitials).mockResolvedValue({
+      letters: {},
+    });
     vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
       items: [],
       offset: 0,
@@ -110,6 +115,7 @@ describe("PlaylistsView", () => {
   afterEach(() => {
     vi.useRealTimers();
     wrapper?.unmount();
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
     document.body.innerHTML = "";
   });
 
@@ -126,7 +132,7 @@ describe("PlaylistsView", () => {
 
     expect(playlistsApi.listPlaylistsWithMeta).toHaveBeenCalledWith({
       q: "",
-      limit: 20,
+      limit: 50,
       offset: 0,
       sort_by: "name",
       sort_dir: "asc",
@@ -188,7 +194,7 @@ describe("PlaylistsView", () => {
 
     expect(fetcher).toHaveBeenLastCalledWith({
       q: "query",
-      limit: 20,
+      limit: 50,
       offset: 0,
       sort_by: "name",
       sort_dir: "asc",
@@ -229,7 +235,7 @@ describe("PlaylistsView", () => {
 
     expect(fetcher).toHaveBeenLastCalledWith({
       q: "",
-      limit: 20,
+      limit: 50,
       offset: 20,
       sort_by: "name",
       sort_dir: "asc",

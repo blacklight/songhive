@@ -287,4 +287,163 @@ describe("BulkEditableGrid", () => {
       .find((b) => b.text() === i18n.global.t("browse.bulkEdit.start"));
     expect(startButton).toBeUndefined();
   });
+
+  it("hides the alphabet index when no getIndexKey is provided", () => {
+    setAuthenticated();
+    const { wrapper } = mountGrid({
+      items: [createItem("1", "Alpha")],
+    });
+
+    expect(wrapper.find(".alphabet-index__strip").exists()).toBe(false);
+  });
+
+  it("shows the alphabet index with only the present letters enabled", () => {
+    setAuthenticated();
+    const { wrapper } = mountGrid({
+      items: [createItem("1", "Alpha"), createItem("2", "Beta")],
+      getIndexKey: (item: TestItem) => item.name,
+    });
+
+    expect(wrapper.find(".alphabet-index__strip").exists()).toBe(true);
+    expect(
+      wrapper.find('[data-letter="A"]').attributes("disabled"),
+    ).toBeUndefined();
+    expect(
+      wrapper.find('[data-letter="B"]').attributes("disabled"),
+    ).toBeUndefined();
+    expect(
+      wrapper.find('[data-letter="C"]').attributes("disabled"),
+    ).toBeDefined();
+  });
+
+  it("scrolls the first item under a letter into view on jump", async () => {
+    setAuthenticated();
+    const { wrapper } = mountGrid({
+      items: [
+        createItem("1", "Alpha"),
+        createItem("2", "Beta"),
+        createItem("3", "Borealis"),
+        createItem("4", "10cc"),
+      ],
+      getIndexKey: (item: TestItem) => item.name,
+    });
+
+    const wrappers = wrapper.findAll(".bulk-editable-grid__item-wrapper");
+    const spies = wrappers.map(
+      (w) => ((w.element as HTMLElement).scrollIntoView = vi.fn()),
+    );
+
+    await wrapper.find('[data-letter="B"]').trigger("click");
+    expect(spies[1]).toHaveBeenCalledWith({
+      behavior: "smooth",
+      block: "start",
+    });
+    expect(spies[0]).not.toHaveBeenCalled();
+    expect(spies[2]).not.toHaveBeenCalled();
+
+    await wrapper.find('[data-letter="#"]').trigger("click");
+    expect(spies[3]).toHaveBeenCalledWith({
+      behavior: "smooth",
+      block: "start",
+    });
+  });
+
+  it("does not scroll to disabled letters", async () => {
+    setAuthenticated();
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    try {
+      const { wrapper } = mountGrid({
+        items: [createItem("1", "Alpha")],
+        getIndexKey: (item: TestItem) => item.name,
+      });
+
+      await wrapper.find('[data-letter="Z"]').trigger("click");
+      expect(scrollIntoView).not.toHaveBeenCalled();
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
+
+  it("enables backend-provided letters absent from the loaded items", () => {
+    setAuthenticated();
+    const { wrapper } = mountGrid({
+      items: [createItem("1", "Alpha")],
+      getIndexKey: (item: TestItem) => item.name,
+      indexAvailable: new Set(["Z"]),
+    });
+
+    expect(
+      wrapper.find('[data-letter="Z"]').attributes("disabled"),
+    ).toBeUndefined();
+    expect(
+      wrapper.find('[data-letter="C"]').attributes("disabled"),
+    ).toBeDefined();
+  });
+
+  it("awaits resolveIndexJump before scrolling to the anchor", async () => {
+    setAuthenticated();
+    const scrollIntoView = vi.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    let release: (() => void) | undefined;
+    const resolveIndexJump = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    try {
+      const { wrapper } = mountGrid({
+        items: [createItem("1", "Zulu")],
+        getIndexKey: (item: TestItem) => item.name,
+        indexAvailable: new Set(["Z"]),
+        resolveIndexJump,
+      });
+
+      await wrapper.find('[data-letter="Z"]').trigger("click");
+      expect(resolveIndexJump).toHaveBeenCalledWith("Z");
+      expect(scrollIntoView).not.toHaveBeenCalled();
+
+      release?.();
+      await flushPromises();
+      expect(scrollIntoView).toHaveBeenCalledWith({
+        behavior: "smooth",
+        block: "start",
+      });
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
+    }
+  });
+
+  it("shows a Load previous button for offset fragments", async () => {
+    setAuthenticated();
+    const loadPrevious = vi.fn();
+    const { wrapper } = mountGrid({
+      items: [createItem("1", "Alpha")],
+      hasPrevious: true,
+      loadPrevious,
+    });
+
+    const button = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.list.loadPrevious"));
+    expect(button).toBeDefined();
+
+    await button?.trigger("click");
+    expect(loadPrevious).toHaveBeenCalled();
+  });
+
+  it("hides Load previous at the top of the list", () => {
+    setAuthenticated();
+    const { wrapper } = mountGrid({
+      items: [createItem("1", "Alpha")],
+      hasPrevious: false,
+    });
+
+    expect(
+      wrapper
+        .findAll("button")
+        .some((b) => b.text() === i18n.global.t("browse.list.loadPrevious")),
+    ).toBe(false);
+  });
 });

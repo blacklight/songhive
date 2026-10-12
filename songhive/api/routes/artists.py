@@ -43,7 +43,7 @@ from ..responses import (
     build_album_summary,
     build_track_summary,
 )
-from ._common import TagListRequest, enforce_editable_fields
+from ._common import InitialsResponse, TagListRequest, enforce_editable_fields
 from ._images import remove_entity_image, upload_entity_image
 from .tracks import _enqueue_track_tag_sync
 
@@ -226,6 +226,33 @@ async def list_artists(
     pagination.set_total(response, total)
     saved_ids = await collection.saved_item_ids(db, user, "artist", [str(a.id) for a in rows])
     return [await _build_artist_response(a, storage, include, saved_ids, user=user, db=db) for a in rows]
+
+
+@router.get("/initials", response_model=InitialsResponse)
+async def list_artist_initials(
+    q: Optional[str] = Query(None, description="Search query"),
+    owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
+    collection_only: Optional[bool] = Query(
+        None,
+        alias="collection",
+        description="Only return artists in the current user's collection (saved)",
+    ),
+    user: Optional[User] = Depends(get_current_user_optional),
+    sort: SortParams = Depends(get_sort({"name"}, "name")),
+    db: AsyncSession = Depends(get_db),
+):
+    """First-item offsets for each index letter in the filtered, name-sorted list."""
+    owner_id = None
+    if owner_username:
+        owner = await get_user_by_username(db, owner_username)
+        if owner is None or not owner.is_active:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        owner_id = str(owner.id)
+
+    letters = await music.artist_initials(
+        db, query=q, user=user, owner_id=owner_id, collection=collection_only, sort_dir=sort.direction
+    )
+    return InitialsResponse(letters=letters)
 
 
 @router.get("/{artist_id}", response_model=ArtistResponse)

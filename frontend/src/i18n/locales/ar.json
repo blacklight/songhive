@@ -1907,7 +1907,8 @@
       "createPlaylist": "إنشاء قائمة تشغيل",
       "createLibrary": "إنشاء مكتبة",
       "newPlaylist": "قائمة تشغيل جديدة",
-      "newLibrary": "مكتبة جديدة"
+      "newLibrary": "مكتبة جديدة",
+      "alphabetIndex": "فهرس أبجدي"
     },
     "detail": {
       "tracks": "المقاطع",

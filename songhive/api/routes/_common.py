@@ -1,6 +1,6 @@
 """Shared helpers for FastAPI route modules."""
 
-from typing import Iterable, List, Optional, Protocol
+from typing import Dict, Iterable, List, Optional, Protocol
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel
@@ -34,6 +34,19 @@ class GenreListRequest(BaseModel):
     """Set/replace genres on a resource."""
 
     genres: List[str]
+
+
+class InitialsResponse(BaseModel):
+    """
+    Index letters and their first-item offsets for a list query.
+
+    Keys follow the client-side index rules (``#`` plus ``A``–``Z``,
+    diacritics folded); each value is the offset of the first item whose
+    sort key falls under that letter, so clients can jump straight to the
+    matching page fragment.
+    """
+
+    letters: Dict[str, int]
 
 
 class HasOwnerId(Protocol):

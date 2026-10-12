@@ -58,7 +58,7 @@ from ..deps import (
 from ..middleware.rate_limit import rate_limit, rate_limit_account
 from ..responses import TrackResponse, TrackSummary, UserSummary, _is_loaded, build_track_summary, build_user_summary
 from ..semantic_meta import public_base_url
-from ._common import TagListRequest
+from ._common import InitialsResponse, TagListRequest
 from ._images import remove_entity_image, upload_entity_image
 from .remote import RemoteObjectResponse, _object_response, _playable_object_ids
 from .tracks import _build_track_response
@@ -410,6 +410,43 @@ async def list_playlists(
         )
         for p in rows
     ]
+
+
+@router.get("/initials", response_model=InitialsResponse)
+async def list_playlist_initials(
+    q: Optional[str] = Query(None, description="Search playlists"),
+    owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
+    collection_only: Optional[bool] = Query(
+        None,
+        alias="collection",
+        description="Only return playlists in the current user's collection (owned or saved)",
+    ),
+    editable: bool = Query(
+        False,
+        description="Only return playlists the current user owns or collaborates on",
+    ),
+    user: Optional[User] = Depends(get_current_user_optional),
+    sort: SortParams = Depends(get_sort({"name"}, "name")),
+    db: AsyncSession = Depends(get_db),
+):
+    """First-item offsets for each index letter in the filtered, name-sorted list."""
+    owner_id = None
+    if owner_username:
+        owner = await get_user_by_username(db, owner_username)
+        if owner is None or not owner.is_active:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        owner_id = str(owner.id)
+
+    letters = await music.playlist_initials(
+        db,
+        user=user,
+        owner_id=owner_id,
+        query=q,
+        collection=collection_only,
+        editable=editable,
+        sort_dir=sort.direction,
+    )
+    return InitialsResponse(letters=letters)
 
 
 @router.post("/", response_model=PlaylistResponse, status_code=201)

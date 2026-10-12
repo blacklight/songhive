@@ -67,7 +67,7 @@ from ..responses import (
     build_user_summary,
 )
 from ..semantic_meta import public_base_url
-from ._common import GenreListRequest, TagListRequest, enforce_editable_fields
+from ._common import GenreListRequest, InitialsResponse, TagListRequest, enforce_editable_fields
 from ._images import remove_entity_image, upload_entity_image
 from .tracks import _enqueue_track_enrichment, _enqueue_track_tag_sync, _handle_visibility_changes
 
@@ -298,6 +298,47 @@ async def list_albums(
     pagination.set_total(response, total)
     saved_ids = await collection.saved_item_ids(db, user, "album", [str(a.id) for a in rows])
     return [await _build_album_response(a, user, storage, include, saved_ids, db=db) for a in rows]
+
+
+@router.get("/initials", response_model=InitialsResponse)
+async def list_album_initials(
+    q: Optional[str] = Query(None, description="Search query"),
+    artist_id: Optional[str] = Query(None),
+    year_from: Optional[int] = Query(None),
+    year_to: Optional[int] = Query(None),
+    genre: Optional[str] = Query(None, description="Filter by genre name"),
+    owner_username: Optional[str] = Query(None, description="Filter by owner's username"),
+    collection_only: Optional[bool] = Query(
+        None,
+        alias="collection",
+        description="Only return albums in the current user's collection (owned or saved)",
+    ),
+    user: Optional[User] = Depends(get_current_user_optional),
+    sort: SortParams = Depends(get_sort({"title", "artist_name"}, "title")),
+    db: AsyncSession = Depends(get_db),
+):
+    """First-item offsets for each index letter in the filtered, alphabetically-sorted list."""
+    owner_id = None
+    if owner_username:
+        owner = await get_user_by_username(db, owner_username)
+        if owner is None or not owner.is_active:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        owner_id = str(owner.id)
+
+    letters = await music.album_initials(
+        db,
+        query=q,
+        artist_id=artist_id,
+        year_from=year_from,
+        year_to=year_to,
+        genre=genre,
+        owner_id=owner_id,
+        collection=collection_only,
+        user=user,
+        sort_by=sort.field,
+        sort_dir=sort.direction,
+    )
+    return InitialsResponse(letters=letters)
 
 
 @router.get(

@@ -105,6 +105,20 @@ export async function listPlaylistsWithMeta(params?: {
   };
 }
 
+export interface InitialsResult {
+  letters: Record<string, number>;
+}
+
+export function listPlaylistInitials(params?: {
+  q?: string;
+  owner_username?: string;
+  collection?: boolean;
+  editable?: boolean;
+  sort_dir?: "asc" | "desc";
+}): Promise<InitialsResult> {
+  return apiRequest<InitialsResult>("/playlists/initials", { query: params });
+}
+
 export function createPlaylist(
   body: PlaylistCreate,
   params?: { visibility?: Visibility },

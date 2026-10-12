@@ -10,9 +10,11 @@ import type { ArtistResponse, ListArtistsResult } from "@/api/artists";
 import type { RemoteObject } from "@/api/remote";
 import ArtistsView from "./ArtistsView.vue";
 import CollectionToggle from "@/components/ui/CollectionToggle.vue";
+import SortControl from "@/components/ui/SortControl.vue";
 
 vi.mock("@/api/artists", () => ({
   listArtistsWithMeta: vi.fn(),
+  listArtistInitials: vi.fn(),
   deleteArtist: vi.fn(),
 }));
 
@@ -79,9 +81,13 @@ describe("ArtistsView", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.useFakeTimers();
+    Element.prototype.scrollIntoView = vi.fn();
     vi.mocked(artistsApi.listArtistsWithMeta).mockResolvedValue(
       createListResult([]),
     );
+    vi.mocked(artistsApi.listArtistInitials).mockResolvedValue({
+      letters: {},
+    });
     vi.mocked(remoteApi.listRemoteObjectsWithMeta).mockResolvedValue({
       items: [],
       offset: 0,
@@ -92,6 +98,7 @@ describe("ArtistsView", () => {
   afterEach(() => {
     vi.useRealTimers();
     wrapper?.unmount();
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView;
     document.body.innerHTML = "";
   });
 
@@ -107,7 +114,7 @@ describe("ArtistsView", () => {
 
     expect(artistsApi.listArtistsWithMeta).toHaveBeenCalledWith({
       q: "",
-      limit: 20,
+      limit: 50,
       offset: 0,
       sort_by: "name",
       sort_dir: "asc",
@@ -187,7 +194,7 @@ describe("ArtistsView", () => {
 
     expect(fetcher).toHaveBeenLastCalledWith({
       q: "query",
-      limit: 20,
+      limit: 50,
       offset: 0,
       sort_by: "name",
       sort_dir: "asc",
@@ -226,7 +233,7 @@ describe("ArtistsView", () => {
 
     expect(fetcher).toHaveBeenLastCalledWith({
       q: "",
-      limit: 20,
+      limit: 50,
       offset: 20,
       sort_by: "name",
       sort_dir: "asc",
@@ -285,6 +292,80 @@ describe("ArtistsView", () => {
     expect(fetcher).toHaveBeenLastCalledWith(
       expect.objectContaining({ collection: undefined }),
     );
+  });
+
+  it("shows the alphabet index only while sorting by name", async () => {
+    vi.mocked(artistsApi.listArtistsWithMeta).mockResolvedValue(
+      createListResult([createArtist("artist-1", "Alpha Artist")]),
+    );
+
+    wrapper = mount(ArtistsView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+
+    expect(wrapper.find(".alphabet-index__strip").exists()).toBe(true);
+
+    const sort = wrapper.findComponent(SortControl);
+    await sort.vm.$emit("update:modelValue", "created_at");
+    await flushPromises();
+
+    expect(wrapper.find(".alphabet-index__strip").exists()).toBe(false);
+    expect(artistsApi.listArtistsWithMeta).toHaveBeenLastCalledWith(
+      expect.objectContaining({ sort_by: "created_at" }),
+    );
+  });
+
+  it("jumps to a letter's fragment without loading intermediate pages", async () => {
+    vi.mocked(artistsApi.listArtistInitials).mockResolvedValue({
+      letters: { A: 0, Z: 40 },
+    });
+    const fetcher = vi.mocked(artistsApi.listArtistsWithMeta);
+    fetcher.mockImplementation((params) =>
+      Promise.resolve({
+        items:
+          params.offset === 40
+            ? [createArtist("artist-z", "Zulu")]
+            : [createArtist("artist-a", "Alpha")],
+        offset: params.offset ?? 0,
+        total: 41,
+      }),
+    );
+
+    wrapper = mount(ArtistsView, {
+      global: { plugins: [createTestRouter()] },
+    });
+    await flushPromises();
+    expect(wrapper.text()).toContain("Alpha");
+
+    fetcher.mockClear();
+    await wrapper.find('[data-letter="Z"]').trigger("click");
+    await flushPromises();
+
+    // A single fetch straight to the letter's offset — no intermediate
+    // pages are requested.
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(fetcher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 40 }),
+    );
+    expect(wrapper.text()).toContain("Zulu");
+    expect(wrapper.text()).not.toContain("Alpha");
+
+    // The fragment sits mid-list: Load previous pulls the page before it.
+    const loadPrevious = wrapper
+      .findAll("button")
+      .find((b) => b.text() === i18n.global.t("browse.list.loadPrevious"));
+    expect(loadPrevious).toBeDefined();
+
+    fetcher.mockClear();
+    await loadPrevious?.trigger("click");
+    await flushPromises();
+
+    expect(fetcher).toHaveBeenLastCalledWith(
+      expect.objectContaining({ offset: 0 }),
+    );
+    expect(wrapper.text()).toContain("Alpha");
+    expect(wrapper.text()).toContain("Zulu");
   });
 
   it("renders remote artists in the grid with their domain", async () => {
