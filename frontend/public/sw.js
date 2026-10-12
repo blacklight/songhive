@@ -1,4 +1,4 @@
-const CACHE_NAME = "songhive-shell-v1";
+const CACHE_NAME = "songhive-shell-v2";
 
 const SHELL_ASSETS = [
   "/",
@@ -21,7 +21,22 @@ self.addEventListener("install", (event) => {
 });
 
 self.addEventListener("activate", (event) => {
-  event.waitUntil(self.clients.claim());
+  // Older caches may hold entries the current exclusion list would never
+  // store — a live mountpoint body that streamed into the cache until the
+  // stream ended, for instance, which then replays as a stale snapshot —
+  // so previous caches are dropped wholesale rather than migrated.
+  event.waitUntil(
+    caches
+      .keys()
+      .then((names) =>
+        Promise.all(
+          names
+            .filter((name) => name !== CACHE_NAME)
+            .map((name) => caches.delete(name)),
+        ),
+      )
+      .then(() => self.clients.claim()),
+  );
 });
 
 function isNavigationRequest(request) {
@@ -40,6 +55,25 @@ function isAssetRequest(request) {
     return false;
   }
   if (url.pathname.startsWith("/stream/")) {
+    return false;
+  }
+  // Live mountpoints are endless streams: a cached entry can never be
+  // fresh, and writing the body to the cache buffers it until the stream
+  // ends — after which every play replays that stale snapshot. The bare
+  // /streams path is the SPA's directory page and stays cacheable.
+  if (url.pathname.startsWith("/streams/") && url.pathname !== "/streams/") {
+    return false;
+  }
+  if (url.pathname.startsWith("/rest/")) {
+    return false;
+  }
+  // Media elements fetch with a Range header that cache lookups ignore;
+  // any media or ranged request belongs on the network, not in the cache.
+  if (
+    request.destination === "audio" ||
+    request.destination === "video" ||
+    request.headers.has("range")
+  ) {
     return false;
   }
   if (url.pathname.endsWith("manifest.webmanifest")) {
@@ -92,7 +126,8 @@ self.addEventListener("notificationclick", (event) => {
   const target = safeLocalUrl(event.notification.data?.url);
 
   event.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true })
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
       .then((clientList) => {
         const existing = clientList.find(
           (client) => client.url === target && "focus" in client,
@@ -123,7 +158,14 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(event.request)
         .then((response) => {
-          if (response && response.status === 200) {
+          // Navigations to non-SPA endpoints (e.g. a stream mountpoint
+          // opened directly) must not overwrite the cached shell: only
+          // store the offline fallback when the body is HTML.
+          if (
+            response &&
+            response.status === 200 &&
+            (response.headers.get("Content-Type") || "").includes("text/html")
+          ) {
             const clone = response.clone();
             caches.open(CACHE_NAME).then((cache) => cache.put("/", clone));
           }
@@ -139,11 +181,19 @@ self.addEventListener("fetch", (event) => {
       caches.match(event.request).then((cached) => {
         const fetchPromise = fetch(event.request)
           .then((response) => {
-            if (response && response.status === 200) {
+            // Honour no-store so a dynamic endpoint the exclusion list
+            // missed still cannot poison the cache with a stale body.
+            if (
+              response &&
+              response.status === 200 &&
+              !(response.headers.get("Cache-Control") || "").includes(
+                "no-store",
+              )
+            ) {
               const clone = response.clone();
-              caches.open(CACHE_NAME).then((cache) =>
-                cache.put(event.request, clone),
-              );
+              caches
+                .open(CACHE_NAME)
+                .then((cache) => cache.put(event.request, clone));
             }
             return response;
           })
