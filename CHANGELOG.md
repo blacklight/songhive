@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed
+
+- `homepage`: The desktop screenshot in the project homepage's hero
+  section is now hidden on mobile viewports, where it previously
+  rendered squashed below the fold.
+  ([`d0c72bb`](https://git.platypush.tech/blacklight/songhive/commit/d0c72bb6d6ad6aa4160e7388cdf2e47c451dc62c)).
+
+### Fixed
+
+- `streams`: Live mountpoint playback no longer fails on clients with
+  the PWA service worker — the worker treated `/streams/…` mounts as
+  cacheable assets, replaying a stale partial body to the `<audio>`
+  element (playback stopped seconds after play) and holding each
+  attempt's background fetch connected to the mount for the worker's
+  lifetime, which inflated the listener count and could saturate the
+  per-mount listener cap. Ranged and `audio`/`video` requests now
+  always bypass the cache, `no-store` responses are never cached, and
+  stale entries are purged on activation.
+  ([`c485d04`](https://git.platypush.tech/blacklight/songhive/commit/c485d0479a560d0fa18f62cc1a437d081cdacb65)).
+
 ## 0.4.10
 
 ### Added
