@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `frontend`: Artists, albums and playlists browse lists now offer an
+  A–Z index — a letter strip jumps straight to the first items under
+  each initial, backed by new `/initials` endpoints with offsets and
+  on-demand page loading around the jump target.
+  ([`4b6edea`](https://git.platypush.tech/blacklight/songhive/commit/4b6edeacb7afa4bc1d00006eaa0bfa70b20307f6)).
+
 ## 0.4.11
 
 ### Changed
