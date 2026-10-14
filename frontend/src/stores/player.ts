@@ -148,6 +148,26 @@ export const usePlayerStore = defineStore("player", () => {
   let sessionController: SessionController | null = null;
   const sessionMode: Ref<boolean> = ref(false);
 
+  // Local playback context stashed while a remote output drives playback.
+  // Session syncs overwrite the display refs (and the engine stays paused),
+  // so returning to the web output restores the device's own track and
+  // status instead of reporting the remote session's.
+  interface LocalSnapshot {
+    queue: QueueTrack[];
+    originalQueue: QueueTrack[];
+    index: number;
+    repeat: RepeatMode;
+    shuffle: boolean;
+    currentTime: number;
+    duration: number;
+    playbackState: PlaybackState;
+    restoredPosition: number | null;
+    volume: number;
+    muted: boolean;
+    queueRefill: QueueRefill | null;
+  }
+  let localSnapshot: LocalSnapshot | null = null;
+
   // Shuffle-play fetcher that extends the queue when playback nears its
   // end; set by ``shuffleAll`` and cleared when a new queue context starts.
   const queueRefill: Ref<QueueRefill | null> = ref(null);
@@ -642,14 +662,21 @@ export const usePlayerStore = defineStore("player", () => {
   }
 
   function updateTime(t: number) {
+    // Engine-driven: while a session output drives playback the remote
+    // session owns the reported position.
+    if (sessionMode.value) return;
     currentTime.value = t;
   }
 
   function updateDuration(d: number) {
+    if (sessionMode.value) return;
     duration.value = d;
   }
 
   function setPlaybackState(s: PlaybackState) {
+    // Engine-driven: stale local engine events must not overwrite the
+    // reported session status while a remote output is active.
+    if (sessionMode.value) return;
     playbackState.value = s;
     if (s === "playing") isPlaying.value = true;
     else if (s === "paused" || s === "idle" || s === "error")
@@ -683,13 +710,67 @@ export const usePlayerStore = defineStore("player", () => {
   }
 
   function setSessionMode(enabled: boolean) {
-    sessionMode.value = enabled;
+    if (enabled === sessionMode.value) return;
+    if (enabled) {
+      // A remote output is taking over. Flush pending local persistence
+      // before session echoes start mutating the watched refs (writes are
+      // skipped in session mode), pause the engine so local audio cannot
+      // keep playing underneath the session UI, and stash the local
+      // context.
+      persistNow();
+      engine?.pause();
+      localSnapshot = {
+        queue: queue.value,
+        originalQueue: originalQueue.value,
+        index: index.value,
+        repeat: repeat.value,
+        shuffle: shuffle.value,
+        currentTime: currentTime.value,
+        duration: duration.value,
+        playbackState: playbackState.value,
+        restoredPosition: restoredPosition.value,
+        volume: volume.value,
+        muted: muted.value,
+        queueRefill: queueRefill.value,
+      };
+      // A locally armed shuffle refill must not feed the remote queue.
+      queueRefill.value = null;
+      sessionMode.value = true;
+      return;
+    }
+    sessionMode.value = false;
+    if (!localSnapshot) return;
+    const snap = localSnapshot;
+    localSnapshot = null;
+    queue.value = snap.queue;
+    originalQueue.value = snap.originalQueue;
+    index.value = snap.index;
+    repeat.value = snap.repeat;
+    shuffle.value = snap.shuffle;
+    currentTime.value = snap.currentTime;
+    duration.value = snap.duration;
+    restoredPosition.value = snap.restoredPosition;
+    volume.value = snap.volume;
+    muted.value = snap.muted;
+    queueRefill.value = snap.queueRefill;
+    engine?.setVolume(volume.value, muted.value);
+    // The engine was paused when the remote output took over, so a track
+    // that was playing comes back paused at the position it left off.
+    isPlaying.value = false;
+    playbackState.value =
+      snap.playbackState === "playing" || snap.playbackState === "loading"
+        ? "paused"
+        : snap.playbackState;
+    persistNow();
   }
 
   // Persistence: debounce localStorage writes to at most once per second.
   let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
   function doPersist() {
+    // Session echoes mutate the same refs the watcher persists; in session
+    // mode skip writes so the stored local queue survives the detour.
+    if (sessionMode.value) return;
     try {
       localStorage.setItem(STORAGE_QUEUE, JSON.stringify(queue.value));
       localStorage.setItem(STORAGE_INDEX, String(index.value));

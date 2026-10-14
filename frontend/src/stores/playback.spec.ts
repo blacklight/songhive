@@ -146,6 +146,27 @@ describe("usePlaybackStore", () => {
     });
   });
 
+  it("restores the local queue and status when switching back to the web output", async () => {
+    const store = usePlaybackStore();
+    const playerStore = usePlayerStore();
+    const localTracks = [makeQueueTrack("l1"), makeQueueTrack("l2")];
+    playerStore.playAll(localTracks, 1);
+    const state = makeState([makeTrackData("s1")]);
+    vi.mocked(playbackApi.sendPlaybackCommand).mockResolvedValue(state);
+    vi.mocked(playbackApi.setSessionOutputs).mockResolvedValue(state);
+
+    await store.selectOutput("os1");
+    expect(playerStore.currentTrack?.id).toBe("s1");
+    expect(playerStore.isPlaying).toBe(true);
+
+    await store.selectOutput("web");
+    expect(playerStore.queue.map((t) => t.id)).toEqual(["l1", "l2"]);
+    expect(playerStore.index).toBe(1);
+    expect(playerStore.currentTrack?.id).toBe("l2");
+    expect(playerStore.isPlaying).toBe(false);
+    expect(playerStore.playbackState).toBe("paused");
+  });
+
   it("applies the session volume to the player store", async () => {
     const store = usePlaybackStore();
     const playerStore = usePlayerStore();

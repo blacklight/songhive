@@ -100,6 +100,11 @@ export const usePlaybackStore = defineStore("playback", () => {
   }
 
   function syncToPlayer(state: PlaybackSessionState): void {
+    // Transition first: entering session mode snapshots the local context
+    // for later restore; leaving it puts that context back, after which
+    // session echoes must not overwrite the local display again.
+    playerStore.setSessionMode(isSessionMode.value);
+    if (!isSessionMode.value) return;
     const queue = (state.queue || []).map(trackDataToQueueTrack);
     const index = Math.min(Math.max(state.current_index, 0), queue.length - 1);
     const current = queue[index];
@@ -113,7 +118,6 @@ export const usePlaybackStore = defineStore("playback", () => {
       state.state,
       current?.duration ?? 0,
     );
-    playerStore.setSessionMode(isSessionMode.value);
     // Skip self-echoes while a local volume change is in flight so the slider
     // does not jerk mid-drag; remote controllers' values apply once the
     // window expires.

@@ -885,4 +885,92 @@ describe("usePlayerStore", () => {
       makeTrack("j"),
     ]);
   });
+
+  it("restores the local queue and paused status when leaving session mode", () => {
+    const store = usePlayerStore();
+    const engine = createMockEngine();
+    store.registerEngine(engine);
+    const tracks = [makeTrack("a"), makeTrack("b"), makeTrack("c")];
+    store.playAll(tracks, 1);
+    store.updateDuration(180);
+    store.updateTime(42);
+    store.cycleRepeat();
+
+    store.setSessionMode(true);
+    expect(engine.pause).toHaveBeenCalled();
+
+    store.setSessionState(
+      [makeTrack("x"), makeTrack("y")],
+      0,
+      "off",
+      false,
+      100,
+      true,
+      "playing",
+      200,
+    );
+    expect(store.currentTrack?.id).toBe("x");
+    expect(store.isPlaying).toBe(true);
+
+    store.setSessionMode(false);
+
+    expect(store.queue).toEqual(tracks);
+    expect(store.index).toBe(1);
+    expect(store.currentTrack?.id).toBe("b");
+    expect(store.currentTime).toBe(42);
+    expect(store.duration).toBe(180);
+    expect(store.repeat).toBe("all");
+    expect(store.isPlaying).toBe(false);
+    // The engine was paused on handoff, so a playing track resumes paused.
+    expect(store.playbackState).toBe("paused");
+  });
+
+  it("ignores engine-driven updates while a session output drives playback", () => {
+    const store = usePlayerStore();
+    store.setSessionMode(true);
+    store.setSessionState(
+      [makeTrack("a")],
+      0,
+      "off",
+      false,
+      30,
+      true,
+      "playing",
+      180,
+    );
+
+    store.updateTime(99);
+    store.updateDuration(999);
+    store.setPlaybackState("paused");
+
+    expect(store.currentTime).toBe(30);
+    expect(store.duration).toBe(180);
+    expect(store.playbackState).toBe("playing");
+    expect(store.isPlaying).toBe(true);
+  });
+
+  it("keeps the persisted local queue while a session output is active", async () => {
+    const store = usePlayerStore();
+    store.registerEngine(createMockEngine());
+    store.playTrack(makeTrack("a"));
+
+    store.setSessionMode(true);
+    store.setSessionState(
+      [makeTrack("x")],
+      0,
+      "off",
+      false,
+      0,
+      true,
+      "playing",
+      180,
+    );
+    await flushPromises();
+    vi.advanceTimersByTime(1100);
+
+    const persisted = JSON.parse(
+      localStorage.getItem("songhive.player.queue")!,
+    ) as QueueTrack[];
+    expect(persisted.map((t) => t.id)).toEqual(["a"]);
+  });
 });
