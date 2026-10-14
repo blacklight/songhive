@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `player`: Switching the output back to "This device" restores the
+  device's own queue and playback status — the player bar previously
+  kept showing the remote session's track and play state while the
+  local engine kept running underneath; it is now paused for the
+  duration of the remote session and its stale events can no longer
+  overwrite the reported status or the persisted local queue.
+  ([`46a3c4f`](https://git.platypush.tech/blacklight/songhive/commit/46a3c4f1dff7b898f0b288be87a94d2c8d09e9cd)).
+
 ## 0.4.12
 
 ### Added
