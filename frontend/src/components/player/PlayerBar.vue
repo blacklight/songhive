@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { ref, useTemplateRef, watch, type ComponentPublicInstance } from "vue";
+import {
+  computed,
+  onMounted,
+  ref,
+  useTemplateRef,
+  watch,
+  type ComponentPublicInstance,
+} from "vue";
 import { useI18n } from "vue-i18n";
 import { usePlayerStore } from "@/stores/player";
+import { useOutputsStore } from "@/stores/outputs";
 import AppButton from "@/components/ui/AppButton.vue";
 import NowPlaying from "./NowPlaying.vue";
 import PlayerControls from "./PlayerControls.vue";
@@ -13,6 +21,8 @@ import { useMediaSession } from "@/composables/useMediaSession";
 
 const { t } = useI18n();
 const store = usePlayerStore();
+const outputStore = useOutputsStore();
+const hasOutputs = computed(() => outputStore.enabledOutputs.length > 0);
 const expanded = ref(false);
 const queueOpen = ref(false);
 const queueToggleRef = useTemplateRef<ComponentPublicInstance>("queueToggle");
@@ -47,11 +57,19 @@ watch(
 function queueReturnTarget() {
   return expanded.value ? expandedQueueToggleRef.value : queueToggleRef.value;
 }
+
+// The OutputSelector loads outputs itself once mounted, but it only mounts
+// when the bar is visible — with an empty queue the bar must fetch outputs
+// on its own to decide whether to stay up for output switching.
+onMounted(async () => {
+  if (store.currentTrack) return;
+  await outputStore.loadOutputs();
+});
 </script>
 
 <template>
   <div
-    v-if="store.currentTrack"
+    v-if="store.currentTrack || hasOutputs"
     class="player-bar"
     :class="{ 'player-bar--expanded': expanded }"
     role="region"
@@ -65,18 +83,21 @@ function queueReturnTarget() {
 
     <div class="player-bar__full">
       <div class="player-bar__left">
-        <NowPlaying />
+        <NowPlaying v-if="store.currentTrack" />
       </div>
 
       <div class="player-bar__center">
-        <PlayerControls />
-        <ProgressBar />
+        <template v-if="store.currentTrack">
+          <PlayerControls />
+          <ProgressBar />
+        </template>
       </div>
 
       <div class="player-bar__right">
-        <VolumeControl />
+        <VolumeControl v-if="store.currentTrack" />
         <OutputSelector />
         <AppButton
+          v-if="store.currentTrack"
           ref="queueToggle"
           variant="ghost"
           size="sm"
@@ -94,44 +115,47 @@ function queueReturnTarget() {
 
     <div class="player-bar__mini">
       <div class="player-bar__mini-info">
-        <NowPlaying mini />
+        <NowPlaying v-if="store.currentTrack" mini />
       </div>
 
       <div class="player-bar__mini-controls">
-        <AppButton
-          variant="ghost"
-          size="sm"
-          class="player-bar__mini-play"
-          :aria-label="store.isPlaying ? t('common.pause') : t('common.play')"
-          :title="store.isPlaying ? t('common.pause') : t('common.play')"
-          :icon="store.isPlaying ? 'pause' : 'play'"
-          @click="store.isPlaying ? store.pause() : store.play()"
-        />
+        <OutputSelector v-if="!store.currentTrack" />
+        <template v-else>
+          <AppButton
+            variant="ghost"
+            size="sm"
+            class="player-bar__mini-play"
+            :aria-label="store.isPlaying ? t('common.pause') : t('common.play')"
+            :title="store.isPlaying ? t('common.pause') : t('common.play')"
+            :icon="store.isPlaying ? 'pause' : 'play'"
+            @click="store.isPlaying ? store.pause() : store.play()"
+          />
 
-        <AppButton
-          variant="ghost"
-          size="sm"
-          class="player-bar__mini-next"
-          :aria-label="t('player.nextTrack')"
-          :title="t('player.nextTrack')"
-          :disabled="!store.hasNext && store.repeat === 'off'"
-          icon="forward-step"
-          @click="store.next"
-        />
+          <AppButton
+            variant="ghost"
+            size="sm"
+            class="player-bar__mini-next"
+            :aria-label="t('player.nextTrack')"
+            :title="t('player.nextTrack')"
+            :disabled="!store.hasNext && store.repeat === 'off'"
+            icon="forward-step"
+            @click="store.next"
+          />
 
-        <AppButton
-          variant="ghost"
-          size="sm"
-          class="player-bar__mini-expand"
-          :aria-label="t('player.expandPlayer')"
-          :title="t('player.expandPlayer')"
-          icon="chevron-up"
-          @click="toggleExpanded"
-        />
+          <AppButton
+            variant="ghost"
+            size="sm"
+            class="player-bar__mini-expand"
+            :aria-label="t('player.expandPlayer')"
+            :title="t('player.expandPlayer')"
+            icon="chevron-up"
+            @click="toggleExpanded"
+          />
+        </template>
       </div>
     </div>
 
-    <div class="player-bar__expanded">
+    <div v-if="store.currentTrack" class="player-bar__expanded">
       <div class="player-bar__expanded-header">
         <NowPlaying />
         <AppButton

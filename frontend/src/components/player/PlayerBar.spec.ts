@@ -4,7 +4,15 @@ import { createPinia, setActivePinia } from "pinia";
 import { createRouter, createMemoryHistory } from "vue-router";
 import { usePlayerStore } from "@/stores/player";
 import PlayerBar from "./PlayerBar.vue";
+import * as outputsApi from "@/api/outputs";
 import type { QueueTrack } from "@/player/types";
+import type { OutputResponse } from "@/api/outputs";
+
+vi.mock("@/api/outputs", async (importOriginal) => ({
+  ...(await importOriginal()),
+  listOutputs: vi.fn(async () => []),
+  listOutputProviders: vi.fn(async () => []),
+}));
 
 function makeTrack(
   id: string,
@@ -78,6 +86,7 @@ async function mountPlayerBar() {
 describe("PlayerBar", () => {
   beforeEach(() => {
     localStorage.clear();
+    vi.mocked(outputsApi.listOutputs).mockResolvedValue([]);
   });
 
   it("does not render when no track is loaded", () => {
@@ -89,6 +98,30 @@ describe("PlayerBar", () => {
     });
 
     expect(wrapper.find(".player-bar").exists()).toBe(false);
+  });
+
+  it("keeps the output selector when the queue is empty but outputs exist", async () => {
+    const output: OutputResponse = {
+      id: "out1",
+      user_id: "u1",
+      provider_type: "icecast",
+      name: "Icecast",
+      config: {},
+      capabilities: null,
+      enabled: true,
+      last_error: null,
+      created_at: "",
+      updated_at: "",
+    };
+    vi.mocked(outputsApi.listOutputs).mockResolvedValue([output]);
+    const { wrapper } = await mountPlayerBar();
+    await flushPromises();
+
+    expect(wrapper.find(".player-bar").exists()).toBe(true);
+    expect(wrapper.find(".output-selector").exists()).toBe(true);
+    expect(wrapper.find(".now-playing").exists()).toBe(false);
+    expect(wrapper.find(".player-controls__play").exists()).toBe(false);
+    expect(wrapper.find(".player-bar__queue-toggle").exists()).toBe(false);
   });
 
   it("renders full layout when a track is loaded", async () => {
