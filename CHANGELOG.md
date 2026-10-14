@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `playerbar`: The player bar no longer disappears completely when the
+  queue is empty — as long as at least one enabled remote output
+  exists, it stays up with just the output selector, so playback can
+  be moved to an output whose session queue is not empty.
+  ([`bcd89c9`](https://git.platypush.tech/blacklight/songhive/commit/bcd89c98d9a7b35d253e448e10bb3fdc651b89aa)).
+
 ## 0.4.13
 
 ### Fixed
