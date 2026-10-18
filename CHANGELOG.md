@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `federation`: FEP-be68 audio object interoperability — `Audio`
+  objects now emit ISO 8601 `xsd:duration` durations and
+  `artist_credit` alongside the legacy `artists` (with both shapes
+  understood inbound), restoring import into Funkwhale >= 2.x; actors
+  serve a real paginated outbox (public `create`/`announce` envelopes)
+  and `following` collection, activity envelopes dereference at
+  `/users/{u}/activities/{id}`, catalog `Track`s and `ArtistCredit`s
+  get their own URLs under `/music/tracks/{id}`, and a new
+  `artist_credits` model backs multi-artist tracks end to end —
+  editable via the `artist_credits` API field, populated on import
+  from multi-valued `artist` tags, external-library sync and
+  MusicBrainz enrichment, and rendered with joinphrases on the track
+  page.
+  ([`5eb8b02`](https://git.platypush.tech/blacklight/songhive/commit/5eb8b02b740a813d0d5040d1575ef743fb1b61da)).
+
 ## 0.4.14
 
 ### Fixed
