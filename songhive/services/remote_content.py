@@ -1534,7 +1534,7 @@ async def _scan_linked_collection(
     obj: dict,
     actor_url: str,
     config: SonghiveConfig,
-) -> None:
+) -> bool:
     """
     Fetch the first page of a collection linked from a music document and
     cache its items.
@@ -1544,7 +1544,8 @@ async def _scan_linked_collection(
     ``orderedItems``/``collection`` instead. One bounded fetch resolves the
     collection (or its ``first`` page link when items aren't inlined), then
     the items go through the same embedded-doc caching path as collection
-    pages. No-op when no usable link is present.
+    pages. Returns ``True`` when a linked collection was fetched — the
+    caller falls through to other seeding paths when ``False``.
     """
     link = next(
         (
@@ -1555,13 +1556,13 @@ async def _scan_linked_collection(
         None,
     )
     if link is None or not remote_domain_allowed(link, config):
-        return
+        return False
     try:
         coll_doc = (await fetch_remote_document(link, config)).json()
     except (FetchError, FetchNotFound):
-        return
+        return True
     if not isinstance(coll_doc, dict):
-        return
+        return True
 
     items_doc = coll_doc
     if _doc_type(coll_doc) in ("OrderedCollection", "Collection") and not (
@@ -1577,6 +1578,82 @@ async def _scan_linked_collection(
             if isinstance(page_doc, dict):
                 items_doc = page_doc
     await _cache_embedded_music_docs(session, items_doc, actor_url, config)
+    return True
+
+
+_FUNKWHALE_ALBUM_PAGE_RE = re.compile(r"^/library/albums/(?P<aid>\d+)/?$")
+# Bound on REST-seeded tracks per remote album lookup.
+_REST_TRACK_SEED_LIMIT = 60
+
+
+async def _scan_funkwhale_rest_tracks(
+    session: AsyncSession,
+    obj: dict,
+    request_url: str,
+    actor_url: str,
+    config: SonghiveConfig,
+) -> bool:
+    """
+    Seed a remote Funkwhale album's tracks from its REST API.
+
+    Funkwhale ``Album`` docs are leaves — no ``tracks``/collection link
+    exists and actor outboxes are private — so the AP document alone
+    cannot enumerate an album's contents. When the original lookup
+    addressed the public ``/library/albums/<id>`` page, the matching
+    ``/api/v2/albums/<id>/`` JSON lists each track's federation id and
+    ``listen_url``; the Track documents are then fetched and cached
+    through the normal AP path. Best-effort and bounded — any failure
+    degrades to an unchanged (childless) cache row.
+    """
+    parsed = urlparse(request_url)
+    match = _FUNKWHALE_ALBUM_PAGE_RE.match(parsed.path or "")
+    if _doc_type(obj) != "Album" or match is None:
+        return False
+    api_url = parsed._replace(path=f"/api/v2/albums/{match.group('aid')}/", query="").geturl()
+    try:
+        data = (await fetch_remote_document(api_url, config)).json()
+    except (FetchError, FetchNotFound):
+        return False
+    tracks = data.get("tracks") if isinstance(data, dict) else None
+    if not isinstance(tracks, list):
+        return False
+
+    found = False
+    for entry in tracks[:_REST_TRACK_SEED_LIMIT]:
+        if not isinstance(entry, dict):
+            continue
+        fid = entry.get("fid")
+        if (
+            not isinstance(fid, str)
+            or not fid.startswith(("http://", "https://"))
+            or not remote_domain_allowed(fid, config)
+        ):
+            continue
+        try:
+            track_doc = (await fetch_remote_document(fid, config)).json()
+        except (FetchError, FetchNotFound):
+            continue
+        if not isinstance(track_doc, dict) or _doc_type(track_doc) not in _MUSIC_OBJECT_TYPES:
+            continue
+        track_actor = _attributed_to(track_doc) or actor_url
+        row = await _upsert_remote_object_row(
+            session,
+            canonical_url=fid,
+            activity=track_doc,
+            obj=track_doc,
+            actor_url=track_actor,
+        )
+        # The Track catalog doc has no media link — the REST
+        # ``listen_url`` is the streamable rendition URL.
+        listen = entry.get("listen_url")
+        if row.audio_url is None and isinstance(listen, str):
+            if listen.startswith("/"):
+                row.audio_url = f"{parsed.scheme}://{parsed.netloc}{listen}"
+            elif listen.startswith(("http://", "https://")):
+                row.audio_url = listen
+        await _cache_embedded_music_docs(session, track_doc, track_actor, config)
+        found = True
+    return found
 
 
 async def _fold_renditions(session: AsyncSession, rows: List[RemoteObject]) -> List[RemoteObject]:
@@ -1865,7 +1942,11 @@ async def dereference_remote_object(
         else:
             # Catalog docs may link a children collection (``tracks`` on
             # Bandwagon ``Album``s) instead of embedding their items.
-            await _scan_linked_collection(session, obj, resolved_actor_url, config)
+            # When the AP doc links nothing at all, a Funkwhale
+            # ``/library/albums/<id>`` page URL is seeded via the remote's
+            # REST API — AP offers no album children collection there.
+            if not await _scan_linked_collection(session, obj, resolved_actor_url, config):
+                await _scan_funkwhale_rest_tracks(session, obj, url, resolved_actor_url, config)
     if page_doc is not None:
         page_actor = _attributed_to(page_doc) or _doc_actor(page_doc) or resolved_actor_url
         page_id = page_doc.get("id")

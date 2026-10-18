@@ -858,6 +858,45 @@ class TestDereferenceRemoteObject:
         assert fallbacks[str(children[0].id)]["album_name"] == "Remote Album"
         assert fallbacks[str(children[0].id)]["artist_name"] == "BW Artist"
 
+    async def test_funkwhale_album_seeds_tracks_from_rest(self, db_session, remote_config, fetcher):
+        """A leaf Funkwhale ``Album`` page URL seeds tracks via REST.
+
+        Funkwhale album docs carry no children collection — the AP doc is a
+        leaf. When the lookup addressed the ``/library/albums/<id>`` page,
+        the ``/api/v2/albums/<id>/`` listing gives each track's federation
+        ``fid`` and ``listen_url``; the Track docs are fetched through the
+        normal AP path and parent to the album.
+        """
+        page_url = f"https://{REMOTE_DOMAIN}/library/albums/42"
+        album_url = f"https://{REMOTE_DOMAIN}/federation/music/albums/a1"
+        api_url = f"https://{REMOTE_DOMAIN}/api/v2/albums/42/"
+        track_url = f"https://{REMOTE_DOMAIN}/federation/music/tracks/t1"
+        album_doc = {
+            "id": album_url,
+            "type": "Album",
+            "attributedTo": ACTOR_URL,
+            "name": "FW Album",
+            "to": ["Public"],
+        }
+        api_doc = {"tracks": [{"fid": track_url, "listen_url": "/api/v2/listen/u1/", "title": "One", "position": 1}]}
+        track_doc = {
+            "id": track_url,
+            "type": "Track",
+            "attributedTo": ACTOR_URL,
+            "name": "One",
+            "album": {"type": "Album", "id": album_url, "name": "FW Album"},
+            "to": ["Public"],
+        }
+        fetcher({page_url: album_doc, api_url: api_doc, track_url: track_doc, ACTOR_URL: ACTOR_DOC})
+        result = await rc.dereference_remote_object(db_session, remote_config, page_url)
+        assert result.remote_object.resource_type == "album"
+
+        children = await rc.get_remote_object_children(db_session, result.remote_object)
+        assert [c.name for c in children] == ["One"]
+        assert children[0].audio_url == f"https://{REMOTE_DOMAIN}/api/v2/listen/u1/"
+        assert children[0].visibility == "public"
+        assert children[0].object_type == "Track"
+
     async def test_cached_album_lazily_rescans_linked_children(self, db_session, remote_config, fetcher):
         """Rows cached before a children scan lazily rescan on next lookup."""
         album_url = f"https://{REMOTE_DOMAIN}/albums/bw2"
