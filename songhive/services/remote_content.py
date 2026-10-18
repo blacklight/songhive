@@ -626,7 +626,7 @@ async def _fetch_actor_document(actor_url: str, config: SonghiveConfig) -> dict:
     if not isinstance(doc_id, str) or not doc_id.startswith(("http://", "https://")):
         raise FetchError("Remote actor document has no id", url=result.url)
     require_remote_domain(doc_id, config)
-    if doc.get("type") not in _ACTOR_TYPES:
+    if _doc_type(doc) not in _ACTOR_TYPES:
         raise FetchError(f"Remote document is not an actor (type={doc.get('type')!r})", status_code=422, url=result.url)
     return doc
 
@@ -778,6 +778,21 @@ def _as_url(value: Any) -> Optional[str]:
     return None
 
 
+def _doc_type(obj: dict) -> str:
+    """
+    Return a document's primary ``type`` as a single string.
+
+    ActivityStreams allows ``type`` as an array (e.g. Bandwagon's
+    ``["Album", "Article"]``); the first string entry is the primary type.
+    Falls back to ``"Object"`` for missing or non-string values, and is
+    always safe to call — never raises on list values.
+    """
+    doc_type = obj.get("type")
+    if isinstance(doc_type, list):
+        doc_type = next((t for t in doc_type if isinstance(t, str)), None)
+    return doc_type if isinstance(doc_type, str) and doc_type else "Object"
+
+
 def _media_url(value: Any, media_prefix: Optional[str] = None) -> Optional[str]:
     """Extract a media URL, optionally filtered by ``mediaType`` prefix."""
     if isinstance(value, str) and value.startswith(("http://", "https://")):
@@ -825,7 +840,7 @@ def _detect_resource_type(obj: dict, target: Optional[RemoteTarget] = None) -> O
     """Map a fetched document to a normalized remote resource kind."""
     if target is not None and target.resource_kind:
         return target.resource_kind
-    obj_type = obj.get("type")
+    obj_type = _doc_type(obj)
     # Music entities in the shared Funkwhale/Songhive dialect (``Audio`` is
     # the playable upload; ``Track``/``Album``/``Artist``/``Library`` are
     # catalog entities). A bare ``Audio`` with no music fields still maps
@@ -846,9 +861,17 @@ def _parent_url_of(obj: dict) -> Optional[str]:
     ``library``, ``Track`` → ``album``, ``Album`` → first ``artists`` entry,
     collection pages → ``partOf``. ``None`` for non-music documents.
     """
-    obj_type = obj.get("type")
+    obj_type = _doc_type(obj)
     if obj_type == "Audio":
-        return _as_url(obj.get("library"))
+        # ``library`` first (Funkwhale dialect); producers that attach the
+        # track directly to its catalog parent (e.g. Bandwagon) link the
+        # album instead.
+        track = obj.get("track")
+        return (
+            _as_url(obj.get("library"))
+            or _as_url(obj.get("album"))
+            or (_as_url(track.get("album")) if isinstance(track, dict) else None)
+        )
     if obj_type == "Track":
         return _as_url(obj.get("album"))
     if obj_type == "Album":
@@ -924,7 +947,7 @@ async def _unwrap_document(
     dereferenced once — still under the same guards — keeping the total
     fetch bound at two documents per lookup.
     """
-    doc_type = doc.get("type")
+    doc_type = _doc_type(doc)
     if doc_type not in _ACTIVITY_WRAPPER_TYPES and doc_type not in _TOMBSTONE_TYPES:
         return None, doc, "Object"
 
@@ -939,7 +962,7 @@ async def _unwrap_document(
         return doc, inner_doc, str(doc_type)
 
     if isinstance(inner, dict):
-        if inner.get("type") in _TOMBSTONE_TYPES:
+        if _doc_type(inner) in _TOMBSTONE_TYPES:
             return doc, None, "delete"
         return doc, inner, str(doc_type)
 
@@ -1116,7 +1139,7 @@ async def _upsert_remote_object_row(
     row.canonical_url = canonical_url
     row.activity_url = activity_url if isinstance(activity_url, str) and activity_url != canonical_url else None
     row.domain = federation_service.extract_domain(canonical_url)
-    row.object_type = str(obj.get("type") or "Object")
+    row.object_type = _doc_type(obj)
     row.resource_type = _detect_resource_type(obj, target)
     row.actor_url = actor_url
     row.parent_url = _parent_url_of(obj)
@@ -1127,7 +1150,13 @@ async def _upsert_remote_object_row(
     row.summary = obj.get("summary") if isinstance(obj.get("summary"), str) else None
     row.content = obj.get("content") if isinstance(obj.get("content"), str) else None
     row.image_url = _media_url(obj.get("image"), "image/")
-    row.audio_url = _media_url(obj.get("url"), "audio/")
+    # ``url`` is only a playable link on media objects — on catalog entities
+    # (e.g. a Bandwagon ``Album``) it's the HTML page, which must not become
+    # ``audio_url``. ``attachment`` ``Document``s are checked by mediaType.
+    audio = _media_url(obj.get("url"), "audio/") if _doc_type(obj) in ("Audio", "Video") else None
+    if audio is None:
+        audio = _media_url(obj.get("attachment"), "audio/")
+    row.audio_url = audio
     row.content_hash = content_hash(obj)
     row.etag = etag
     row.last_modified = last_modified
@@ -1157,7 +1186,7 @@ async def materialize_remote_post(
     cache row is still upserted for content documents whose mirror is
     skipped.
     """
-    if activity.get("type") != "Create":
+    if _doc_type(activity) != "Create":
         return None
     obj = activity.get("object")
     actor = activity.get("actor")
@@ -1168,7 +1197,7 @@ async def materialize_remote_post(
         not actor.startswith(("http://", "https://"))
         or not isinstance(object_id, str)
         or not object_id.startswith(("http://", "https://"))
-        or obj.get("type") in _TOMBSTONE_TYPES
+        or _doc_type(obj) in _TOMBSTONE_TYPES
     ):
         return None
 
@@ -1196,7 +1225,7 @@ async def materialize_remote_post(
     # Content objects become feed activities — matching the wrapped-object
     # rule in ``dereference_remote_object``, so e.g. a ``Create(Audio)``
     # track post mirrors as an activity as well as a browsable resource.
-    if obj.get("type") not in _CONTENT_OBJECT_TYPES:
+    if _doc_type(obj) not in _CONTENT_OBJECT_TYPES:
         return None
     return await _materialize_remote_activity(
         session,
@@ -1225,7 +1254,7 @@ def _iter_embedded_music_docs(obj: dict):
     artist, not the reverse).
     """
     obj_id = obj.get("id") if isinstance(obj.get("id"), str) else None
-    obj_type = obj.get("type")
+    obj_type = _doc_type(obj)
 
     def _yield_doc(value, container):
         if isinstance(value, dict):
@@ -1262,12 +1291,12 @@ def _iter_embedded_music_docs(obj: dict):
     elif obj_type == "Album":
         for artist_doc in _embedded_artist_docs(obj):
             yield artist_doc, None
-    elif obj_type in _COLLECTION_PAGE_TYPES:
+    elif obj_type in _COLLECTION_PAGE_TYPES or obj_type in ("OrderedCollection", "Collection"):
         items = obj.get("items") or obj.get("orderedItems")
         container = _as_url(obj.get("partOf")) or obj_id
         if isinstance(items, list):
             for item in items:
-                if isinstance(item, dict) and item.get("type") in _MUSIC_OBJECT_TYPES:
+                if isinstance(item, dict) and _doc_type(item) in _MUSIC_OBJECT_TYPES:
                     yield item, container
                     for nested, nested_container in _iter_embedded_music_docs(item):
                         yield nested, nested_container
@@ -1295,7 +1324,7 @@ async def _cache_embedded_music_docs(
         if count >= _MAX_EMBEDDED_OBJECTS:
             break
         doc_id = doc.get("id")
-        doc_type = doc.get("type")
+        doc_type = _doc_type(doc)
         if (
             not isinstance(doc_id, str)
             or not doc_id.startswith(("http://", "https://"))
@@ -1380,6 +1409,32 @@ async def rendition_audio_map(session: AsyncSession, canonical_urls: List[str]) 
     return result
 
 
+# Object types whose ``url``/``id`` is a catalog page, never a media file —
+# a ``audio_url`` equal to the canonical URL on these is a pre-fix artifact
+# of accepting any http ``url`` as playable.
+_NON_MEDIA_OBJECT_TYPES = frozenset(
+    {
+        "Album",
+        "Artist",
+        "Library",
+        "Playlist",
+        "OrderedCollection",
+        "Collection",
+        "OrderedCollectionPage",
+        "CollectionPage",
+    }
+)
+
+
+def row_audio_url(row: RemoteObject) -> Optional[str]:
+    """Return ``row.audio_url`` unless it's a self-referencing page link."""
+    if row.audio_url is None:
+        return None
+    if row.object_type in _NON_MEDIA_OBJECT_TYPES and row.audio_url == row.canonical_url:
+        return None
+    return row.audio_url
+
+
 async def resolve_media_url(session: AsyncSession, row: RemoteObject) -> Optional[str]:
     """
     Resolve the playable media URL for a remote object at request time.
@@ -1390,8 +1445,8 @@ async def resolve_media_url(session: AsyncSession, row: RemoteObject) -> Optiona
     """
     if row.unavailable_at is not None:
         return None
-    if row.audio_url:
-        return row.audio_url
+    if row_audio_url(row):
+        return row_audio_url(row)
     if row.object_type in ("Audio", "Track", "Video") or row.resource_type == "track":
         return (await rendition_audio_map(session, [row.canonical_url])).get(row.canonical_url)
     return None
@@ -1424,7 +1479,7 @@ async def _scan_library_first_page(
         page_doc = result.json()
     except (FetchError, FetchNotFound):
         return
-    if not isinstance(page_doc, dict) or page_doc.get("type") not in _COLLECTION_PAGE_TYPES:
+    if not isinstance(page_doc, dict) or _doc_type(page_doc) not in _COLLECTION_PAGE_TYPES:
         return
     # Cache the page itself so its own id resolves, then the items.
     page_id = page_doc.get("id")
@@ -1437,6 +1492,91 @@ async def _scan_library_first_page(
             actor_url=actor_url,
         )
     await _cache_embedded_music_docs(session, page_doc, actor_url, config)
+
+
+async def ensure_children_scanned(
+    session: AsyncSession,
+    row: RemoteObject,
+    config: SonghiveConfig,
+) -> bool:
+    """
+    Lazily (re)scan a cached container's linked children collection.
+
+    Called when serving a cached row whose stored payload still links a
+    ``tracks``/``items``/``orderedItems``/``collection`` URL but has no
+    cached children — either because the row predates linked-collection
+    scanning or because the earlier scan failed. One bounded fetch; a
+    permanently empty or unreachable collection costs it per call.
+
+    Returns ``True`` when a scan ran so callers can commit the new rows —
+    read endpoints use request sessions that never commit on their own.
+    """
+    payload = row.payload
+    if not isinstance(payload, dict) or not row.actor_url:
+        return False
+    has_link = any(
+        isinstance(payload.get(k), str) and payload[k].startswith(("http://", "https://"))
+        for k in ("tracks", "items", "orderedItems", "collection")
+    )
+    if not has_link:
+        return False
+    has_child = await session.scalar(
+        select(RemoteObject.id).where(RemoteObject.parent_url == row.canonical_url).limit(1)
+    )
+    if has_child is not None:
+        return False
+    await _scan_linked_collection(session, payload, row.actor_url, config)
+    return True
+
+
+async def _scan_linked_collection(
+    session: AsyncSession,
+    obj: dict,
+    actor_url: str,
+    config: SonghiveConfig,
+) -> None:
+    """
+    Fetch the first page of a collection linked from a music document and
+    cache its items.
+
+    Some producers (e.g. Bandwagon) don't embed tracks in ``Album`` docs —
+    they link a children collection through ``tracks``/``items``/
+    ``orderedItems``/``collection`` instead. One bounded fetch resolves the
+    collection (or its ``first`` page link when items aren't inlined), then
+    the items go through the same embedded-doc caching path as collection
+    pages. No-op when no usable link is present.
+    """
+    link = next(
+        (
+            v
+            for key in ("tracks", "items", "orderedItems", "collection")
+            if isinstance((v := obj.get(key)), str) and v.startswith(("http://", "https://"))
+        ),
+        None,
+    )
+    if link is None or not remote_domain_allowed(link, config):
+        return
+    try:
+        coll_doc = (await fetch_remote_document(link, config)).json()
+    except (FetchError, FetchNotFound):
+        return
+    if not isinstance(coll_doc, dict):
+        return
+
+    items_doc = coll_doc
+    if _doc_type(coll_doc) in ("OrderedCollection", "Collection") and not (
+        coll_doc.get("items") or coll_doc.get("orderedItems")
+    ):
+        # Link-only collection index — resolve its first page.
+        first = _as_url(coll_doc.get("first"))
+        if first is not None and remote_domain_allowed(first, config):
+            try:
+                page_doc = (await fetch_remote_document(first, config)).json()
+            except (FetchError, FetchNotFound):
+                page_doc = None
+            if isinstance(page_doc, dict):
+                items_doc = page_doc
+    await _cache_embedded_music_docs(session, items_doc, actor_url, config)
 
 
 async def _fold_renditions(session: AsyncSession, rows: List[RemoteObject]) -> List[RemoteObject]:
@@ -1611,6 +1751,11 @@ async def dereference_remote_object(
 
     cached = await _cached_remote_object(session, url)
     if cached is not None and not refresh:
+        # Rows cached before linked-collection support (or a failed scan)
+        # look like childless containers — lazily rescan when the stored
+        # payload still links one. Bounded by the same guards as the fresh
+        # path; a permanently empty collection costs one fetch per lookup.
+        await ensure_children_scanned(session, cached, config)
         activity = await session.scalar(
             select(Activity).where(
                 Activity.source_type == "remote",
@@ -1647,7 +1792,7 @@ async def dereference_remote_object(
     # is not itself a browsable resource — cache its items under the
     # parent collection, then keep resolving the parent as the object.
     page_doc: Optional[dict] = None
-    if wrapper is None and obj.get("type") in _COLLECTION_PAGE_TYPES:
+    if wrapper is None and _doc_type(obj) in _COLLECTION_PAGE_TYPES:
         part_of = _as_url(obj.get("partOf"))
         if part_of is not None and remote_domain_allowed(part_of, config):
             page_doc = obj
@@ -1675,7 +1820,7 @@ async def dereference_remote_object(
     # must share its authority — pubby's rules for inbound delivery apply
     # to explicit fetches too. Music entities carry no ``attributedTo``
     # requirement of their own; their owning actor is ``actor``.
-    if obj.get("type") not in _MUSIC_OBJECT_TYPES or _attributed_to(obj) is not None:
+    if _doc_type(obj) not in _MUSIC_OBJECT_TYPES or _attributed_to(obj) is not None:
         validate_attribution(actor_url, obj)
 
     # Resolve (and cache) the publishing actor through the actor path so
@@ -1687,11 +1832,11 @@ async def dereference_remote_object(
         actor = await lookup_remote_actor(session, config, actor_url)
         resolved_actor_url = actor.actor_url
     except FetchError as exc:
-        if obj.get("type") not in _MUSIC_OBJECT_TYPES:
+        if _doc_type(obj) not in _MUSIC_OBJECT_TYPES:
             raise FetchError(f"Could not resolve remote object author: {exc}", status_code=exc.status_code) from exc
         resolved_actor_url = actor_url
 
-    if kind not in ("Create", "Announce", "Update", "Object") or obj.get("type") in _TOMBSTONE_TYPES:
+    if kind not in ("Create", "Announce", "Update", "Object") or _doc_type(obj) in _TOMBSTONE_TYPES:
         raise HTTPException(status_code=422, detail=f"Unsupported remote activity type: {kind}")
 
     row = await _upsert_remote_object_row(
@@ -1713,10 +1858,14 @@ async def dereference_remote_object(
     # pages render children without one fetch per entity. Library docs
     # carry no items — scan their first collection page instead. Both
     # paths are bounded and re-use the same domain guards.
-    if obj.get("type") in _MUSIC_OBJECT_TYPES:
+    if _doc_type(obj) in _MUSIC_OBJECT_TYPES:
         await _cache_embedded_music_docs(session, obj, resolved_actor_url, config)
-        if obj.get("type") == "Library":
+        if _doc_type(obj) == "Library":
             await _scan_library_first_page(session, obj, resolved_actor_url, config)
+        else:
+            # Catalog docs may link a children collection (``tracks`` on
+            # Bandwagon ``Album``s) instead of embedding their items.
+            await _scan_linked_collection(session, obj, resolved_actor_url, config)
     if page_doc is not None:
         page_actor = _attributed_to(page_doc) or _doc_actor(page_doc) or resolved_actor_url
         page_id = page_doc.get("id")
@@ -1733,7 +1882,7 @@ async def dereference_remote_object(
     # Wrapped objects (Create/Announce/…) and bare content objects become
     # feed activities; a bare resource (e.g. a dereferenced ``Audio`` track)
     # is cached, not materialized.
-    should_materialize = wrapper is not None or (obj.get("type") in _CONTENT_OBJECT_TYPES and row.resource_type is None)
+    should_materialize = wrapper is not None or (_doc_type(obj) in _CONTENT_OBJECT_TYPES and row.resource_type is None)
     activity = (
         await _materialize_remote_activity(
             session,
@@ -1797,6 +1946,22 @@ async def resolve_actor_handle_map(
         return {}
 
 
+async def resolve_actor_name_map(
+    config: SonghiveConfig,
+    actor_urls: Iterable[Optional[str]],
+) -> dict[str, str]:
+    """Resolve actor URLs to display names from cached actor documents."""
+    urls = {u for u in actor_urls if isinstance(u, str) and u.startswith(("http://", "https://"))}
+    if not urls:
+        return {}
+    try:
+        storage = await asyncio.to_thread(_federation_storage, config)
+        return await asyncio.to_thread(federation_service.cached_actor_names, storage, urls)
+    except Exception:
+        logger.debug("Could not resolve cached actor names", exc_info=True)
+        return {}
+
+
 def remote_object_payload_name(obj: dict) -> Optional[str]:
     """Return the display name embedded in a remote object document."""
     return _object_name(obj)
@@ -1826,7 +1991,7 @@ def activity_remote_object(activity: Activity) -> Optional[dict]:
         "id": str(activity.entity_id),
         "name": _object_name(obj),
         "resource_type": resource_type,
-        "object_type": str(obj.get("type") or "Object"),
+        "object_type": _doc_type(obj),
         "domain": federation_service.extract_domain(canonical) if isinstance(canonical, str) and canonical else None,
         "image_url": _media_url(obj.get("image"), "image/"),
         "url": f"/remote/{resource_type}/{activity.entity_id}",
@@ -1941,6 +2106,63 @@ def remote_object_music_fields(row: RemoteObject) -> dict:
     """
     payload = row.payload if isinstance(row.payload, dict) else {}
     return _music_fields(payload)
+
+
+async def music_field_fallbacks(
+    session: AsyncSession,
+    config: SonghiveConfig,
+    rows: Iterable[RemoteObject],
+) -> dict[str, dict]:
+    """
+    ``{row_id: fields}`` fallbacks for ``artist_name``/``album_name`` the
+    payload doesn't declare.
+
+    Producers that don't repeat credits on each track (e.g. Bandwagon
+    publishes ``artist_credit`` on the ``Album`` only and attributes tracks
+    to the artist actor) still get displayable metadata: ``album_name``
+    comes from the cached parent container's name, ``artist_name`` from the
+    parent's own credit fields or — when the parent doesn't declare one
+    either — the attributed actor's cached display name.
+    """
+    rows = [r for r in rows if isinstance(r.payload, dict)]
+    missing_artist = {str(r.id): r for r in rows if _music_fields(r.payload or {})["artist_name"] is None}
+    missing_album = {str(r.id): r for r in rows if _music_fields(r.payload or {})["album_name"] is None}
+    if not missing_artist and not missing_album:
+        return {}
+
+    parent_urls = {r.parent_url for r in [*missing_artist.values(), *missing_album.values()] if r.parent_url}
+    parents = (
+        {
+            p.canonical_url: p
+            for p in (
+                await session.execute(select(RemoteObject).where(RemoteObject.canonical_url.in_(parent_urls)))
+            ).scalars()
+        }
+        if parent_urls
+        else {}
+    )
+
+    fallbacks: dict[str, dict] = {}
+    for r in rows:
+        parent = parents.get(r.parent_url) if r.parent_url else None
+        if parent is None:
+            continue
+        fields = fallbacks.setdefault(str(r.id), {})
+        if str(r.id) in missing_album and parent.name:
+            fields["album_name"] = parent.name
+        if str(r.id) in missing_artist:
+            parent_artist = _music_fields(parent.payload)["artist_name"] if isinstance(parent.payload, dict) else None
+            if parent_artist:
+                fields["artist_name"] = parent_artist
+
+    unresolved = [r for r in missing_artist.values() if "artist_name" not in fallbacks.get(str(r.id), {})]
+    if unresolved:
+        actor_names = await resolve_actor_name_map(config, [r.actor_url for r in unresolved])
+        for r in unresolved:
+            name = actor_names.get(r.actor_url)
+            if name:
+                fallbacks.setdefault(str(r.id), {})["artist_name"] = name
+    return fallbacks
 
 
 # Bounds for collection-closure and container-expansion graph walks over

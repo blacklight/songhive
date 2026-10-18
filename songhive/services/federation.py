@@ -388,6 +388,17 @@ def cached_actor_handle(storage, actor_url: str) -> Optional[str]:
     return cached_actor_handles(storage, [actor_url]).get(actor_url)
 
 
+def cached_actor_names(storage, actor_urls: Iterable[str]) -> dict[str, str]:
+    """Map actor URLs to display names from cached actor documents."""
+    docs = cached_actor_docs(storage, actor_urls)
+    names: dict[str, str] = {}
+    for url, doc in docs.items():
+        name = doc.get("name") or doc.get("preferredUsername")
+        if isinstance(name, str) and name.strip():
+            names[url] = name.strip()
+    return names
+
+
 @dataclass(frozen=True)
 class RemoteActorMatch:
     """A cached remote actor matched by :func:`search_remote_actors`."""

@@ -781,6 +781,122 @@ class TestDereferenceRemoteObject:
         assert row.visibility == "public"
         assert await rc.resolve_media_url(db_session, row) == f"{object_url}/audio?format=mp3"
 
+    async def test_multivalued_type_normalized(self, db_session, remote_config, fetcher):
+        """A ``type`` array resolves to its primary entry — Bandwagon albums
+        arrive as ``["Album", "Article"]``."""
+        object_url = f"https://{REMOTE_DOMAIN}/albums/bw1"
+        album_doc = {
+            "id": object_url,
+            "type": ["Album", "Article"],
+            "attributedTo": ACTOR_URL,
+            "name": "Remote Album",
+            "to": ["Public"],
+        }
+        fetcher({object_url: album_doc, ACTOR_URL: ACTOR_DOC})
+        result = await rc.dereference_remote_object(db_session, remote_config, object_url)
+        row = result.remote_object
+        assert row.object_type == "Album"
+        assert row.resource_type == "album"
+        assert row.visibility == "public"
+
+    async def test_album_linked_children_collection(self, db_session, remote_config, fetcher):
+        """An album's linked ``tracks`` collection is scanned and cached.
+
+        Bandwagon albums carry no embedded tracks — ``tracks`` links a
+        children collection (a bare ``OrderedCollection``, not a page).
+        Its items parent to the album through their own ``album`` field
+        (they have no ``library``).
+        """
+        album_url = f"https://{REMOTE_DOMAIN}/albums/bw1"
+        children_url = f"{album_url}/pub/children"
+        track_url = f"{children_url}/1"
+        album_doc = {
+            "id": album_url,
+            "type": ["Album", "Article"],
+            "attributedTo": ACTOR_URL,
+            "name": "Remote Album",
+            "artist_credit": [
+                {
+                    "type": "ArtistCredit",
+                    "credit": "BW Artist",
+                    "artist": {"type": "Artist", "id": f"{REMOTE_DOMAIN}/artists/1", "name": "BW Artist"},
+                }
+            ],
+            "tracks": children_url,
+            "to": ["Public"],
+        }
+        children_doc = {
+            "id": children_url,
+            "type": "OrderedCollection",
+            "orderedItems": [
+                {
+                    "id": track_url,
+                    "type": "Audio",
+                    "attributedTo": ACTOR_URL,
+                    "name": "child one",
+                    "album": album_url,
+                    "track": {"type": "Track", "id": track_url, "name": "child one", "album": album_url},
+                    "url": {"type": "Link", "href": f"{track_url}/audio", "mediaType": "audio/mpeg"},
+                    "to": ["Public"],
+                }
+            ],
+        }
+        fetcher({album_url: album_doc, children_url: children_doc, ACTOR_URL: ACTOR_DOC})
+        result = await rc.dereference_remote_object(db_session, remote_config, album_url)
+        assert result.remote_object.resource_type == "album"
+
+        children = await rc.get_remote_object_children(db_session, result.remote_object)
+        assert [c.name for c in children] == ["child one"]
+        assert children[0].audio_url == f"{track_url}/audio"
+        assert children[0].visibility == "public"
+
+        # Children don't repeat the album's credit — display fields fall
+        # back to the cached parent row and the attributed actor.
+        fields = rc.remote_object_music_fields(children[0])
+        assert fields["artist_name"] is None and fields["album_name"] is None
+        fallbacks = await rc.music_field_fallbacks(db_session, remote_config, children)
+        assert fallbacks[str(children[0].id)]["album_name"] == "Remote Album"
+        assert fallbacks[str(children[0].id)]["artist_name"] == "BW Artist"
+
+    async def test_cached_album_lazily_rescans_linked_children(self, db_session, remote_config, fetcher):
+        """Rows cached before a children scan lazily rescan on next lookup."""
+        album_url = f"https://{REMOTE_DOMAIN}/albums/bw2"
+        children_url = f"{album_url}/pub/children"
+        track_url = f"{children_url}/1"
+        await _remote_row(
+            db_session,
+            canonical_url=album_url,
+            object_type="Album",
+            resource_type="album",
+            name="Remote Album",
+            payload={
+                "id": album_url,
+                "type": ["Album", "Article"],
+                "attributedTo": ACTOR_URL,
+                "name": "Remote Album",
+                "tracks": children_url,
+            },
+        )
+        children_doc = {
+            "id": children_url,
+            "type": "OrderedCollection",
+            "orderedItems": [
+                {
+                    "id": track_url,
+                    "type": "Audio",
+                    "attributedTo": ACTOR_URL,
+                    "name": "child one",
+                    "album": album_url,
+                    "url": {"type": "Link", "href": f"{track_url}/audio", "mediaType": "audio/mpeg"},
+                    "to": ["Public"],
+                }
+            ],
+        }
+        fetcher({children_url: children_doc})
+        result = await rc.dereference_remote_object(db_session, remote_config, album_url)
+        children = await rc.get_remote_object_children(db_session, result.remote_object)
+        assert [c.name for c in children] == ["child one"]
+
 
 # ---------------------------------------------------------------------------
 # Cached-only search
@@ -1544,6 +1660,23 @@ class TestRemoteMembership:
         )
         assert likes.status_code == 200
         assert len(likes.json()["actors"]) == 1
+
+    async def test_ensure_activity_carries_children(self, client, db_session, regular_user, auth_headers):
+        """The ensure-activity response includes container ``items``.
+
+        ``RemoteResourceView`` replaces its loaded object with this response
+        on first visits (``activity_id`` is absent until the POST runs) —
+        dropping ``items`` there empties the track list until a reload.
+        """
+        _, album, track = await _remote_music_tree(db_session)
+        await db_session.commit()
+
+        ensured = client.post(
+            f"/api/v1/remote/objects/{album.id}/activity",
+            headers=auth_headers(regular_user),
+        )
+        assert ensured.status_code == 200, ensured.json()
+        assert [i["id"] for i in ensured.json()["object"]["items"]] == [str(track.id)]
 
 
 async def _remote_rendition(db_session, track: RemoteObject) -> RemoteObject:

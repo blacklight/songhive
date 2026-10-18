@@ -50,6 +50,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/remote")
 
 _REMOTE_RESOURCE_KINDS = ("track", "album", "artist", "playlist", "library")
+# Resource kinds that can carry children — candidates for the lazy
+# linked-collection scan on read.
+_REMOTE_CONTAINER_KINDS = ("album", "artist", "playlist", "library")
 
 
 class RemoteActorResponse(BaseModel):
@@ -239,6 +242,7 @@ def _object_response(
     items: Optional[List[RemoteObjectResponse]] = None,
     playable: bool = False,
     actor_handles: Optional[Dict[str, str]] = None,
+    music_fallbacks: Optional[Dict[str, dict]] = None,
 ) -> RemoteObjectResponse:
     # The cached actor document's ``preferredUsername`` is authoritative for
     # the handle — actor URLs may be opaque (Mastodon ``/ap/users/<id>``), so
@@ -246,6 +250,10 @@ def _object_response(
     actor_handle = (actor_handles or {}).get(row.actor_url) or (
         remote_content.actor_handle_from_url(row.actor_url) if row.actor_url else None
     )
+    music_fields = remote_content.remote_object_music_fields(row)
+    fallback = (music_fallbacks or {}).get(str(row.id))
+    if fallback:
+        music_fields = {key: value if value is not None else fallback.get(key) for key, value in music_fields.items()}
     return RemoteObjectResponse(
         id=str(row.id),
         canonical_url=row.canonical_url,
@@ -258,9 +266,9 @@ def _object_response(
         summary=row.summary,
         content=row.content,
         image_url=row.image_url,
-        audio_url=row.audio_url,
+        audio_url=remote_content.row_audio_url(row),
         stream_url=remote_content.remote_object_stream_url(row) if playable else None,
-        **remote_content.remote_object_music_fields(row),
+        **music_fields,
         visibility=row.visibility,
         fetched_at=row.fetched_at,
         unavailable=row.unavailable_at is not None,
@@ -290,15 +298,22 @@ async def _resource_items(db: AsyncSession, children: List, config: SonghiveConf
     grandchildren = [gc for gcs in grandchildren_map.values() for gc in gcs]
     playable = await _playable_object_ids(db, [*children, *grandchildren])
     actor_handles = await _actor_handle_map(config, [*children, *grandchildren])
+    music_fallbacks = await remote_content.music_field_fallbacks(db, config, [*children, *grandchildren])
     return [
         _object_response(
             child,
             playable=str(child.id) in playable,
             items=[
-                _object_response(gc, playable=str(gc.id) in playable, actor_handles=actor_handles)
+                _object_response(
+                    gc,
+                    playable=str(gc.id) in playable,
+                    actor_handles=actor_handles,
+                    music_fallbacks=music_fallbacks,
+                )
                 for gc in grandchildren_map.get(child.canonical_url, [])
             ],
             actor_handles=actor_handles,
+            music_fallbacks=music_fallbacks,
         )
         for child in children
     ]
@@ -314,11 +329,11 @@ async def _playable_object_ids(db: AsyncSession, rows) -> set:
     ``media_of_url`` (with a payload fallback for rows cached before the
     column existed).
     """
-    ids = {str(row.id) for row in rows if row.audio_url and row.unavailable_at is None}
+    ids = {str(row.id) for row in rows if remote_content.row_audio_url(row) and row.unavailable_at is None}
     candidates = [
         row.canonical_url
         for row in rows
-        if not row.audio_url
+        if not remote_content.row_audio_url(row)
         and row.unavailable_at is None
         and (row.object_type in ("Audio", "Track", "Video") or row.resource_type == "track")
     ]
@@ -724,11 +739,17 @@ async def get_remote_object(
 
     viewer = await _object_viewer_state(db, user, row)
     parent_row = await remote_content.get_remote_object_parent(db, row)
+    # A cached container whose children scan ran before linked-collection
+    # support (or failed) self-heals here — one bounded fetch, no-op when
+    # the payload doesn't link a collection or children already exist.
+    if row.resource_type in _REMOTE_CONTAINER_KINDS and (await remote_content.ensure_children_scanned(db, row, config)):
+        await db.commit()
     children = await remote_content.get_remote_object_children(db, row)
     activity = await remote_content.get_remote_object_activity(db, row)
     related = [row, *([parent_row] if parent_row is not None else [])]
     playable = await _playable_object_ids(db, related)
     actor_handles = await _actor_handle_map(config, related)
+    music_fallbacks = await remote_content.music_field_fallbacks(db, config, related)
     return RemoteObjectDetailResponse(
         object=_object_response(
             row,
@@ -741,6 +762,7 @@ async def get_remote_object(
                     parent_row,
                     playable=str(parent_row.id) in playable,
                     actor_handles=actor_handles,
+                    music_fallbacks=music_fallbacks,
                 )
                 if parent_row is not None
                 else None
@@ -748,6 +770,7 @@ async def get_remote_object(
             items=await _resource_items(db, children, config),
             playable=str(row.id) in playable,
             actor_handles=actor_handles,
+            music_fallbacks=music_fallbacks,
         ),
         activity=await _activity_response_or_none(request, db, user, activity),
     )
@@ -987,7 +1010,19 @@ async def ensure_remote_object_activity(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     activity = await remote_content.ensure_remote_activity(db, row)
     await db.commit()
+    # The returned object mirrors ``get_remote_object`` — parents, items and
+    # playable/music fields included — because the resource view replaces its
+    # object with this response (first visits take the ``activity_id=None``
+    # branch).
     viewer = await _object_viewer_state(db, user, row)
+    parent_row = await remote_content.get_remote_object_parent(db, row)
+    if row.resource_type in _REMOTE_CONTAINER_KINDS and (await remote_content.ensure_children_scanned(db, row, config)):
+        await db.commit()
+    children = await remote_content.get_remote_object_children(db, row)
+    related = [row, *([parent_row] if parent_row is not None else [])]
+    playable = await _playable_object_ids(db, related)
+    actor_handles = await _actor_handle_map(config, related)
+    music_fallbacks = await remote_content.music_field_fallbacks(db, config, related)
     return RemoteObjectDetailResponse(
         object=_object_response(
             row,
@@ -995,8 +1030,20 @@ async def ensure_remote_object_activity(
             favorited=viewer["favorited"],
             follow_state=viewer["follow_state"],
             activity_id=str(activity.id),
-            playable=str(row.id) in await _playable_object_ids(db, [row]),
-            actor_handles=await _actor_handle_map(config, [row]),
+            parent=(
+                _object_response(
+                    parent_row,
+                    playable=str(parent_row.id) in playable,
+                    actor_handles=actor_handles,
+                    music_fallbacks=music_fallbacks,
+                )
+                if parent_row is not None
+                else None
+            ),
+            items=await _resource_items(db, children, config),
+            playable=str(row.id) in playable,
+            actor_handles=actor_handles,
+            music_fallbacks=music_fallbacks,
         ),
         activity=await _activity_response_or_none(request, db, user, activity),
     )
@@ -1029,11 +1076,17 @@ async def get_remote_resource(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
     viewer = await _object_viewer_state(db, user, row)
     parent_row = await remote_content.get_remote_object_parent(db, row)
+    # Same lazy heal as the object detail endpoint — a container cached
+    # before linked-collection scanning (or whose first scan failed)
+    # rescans on read.
+    if row.resource_type in _REMOTE_CONTAINER_KINDS and (await remote_content.ensure_children_scanned(db, row, config)):
+        await db.commit()
     children = await remote_content.get_remote_object_children(db, row)
     activity = await remote_content.get_remote_object_activity(db, row)
     related = [row, *([parent_row] if parent_row is not None else [])]
     playable = await _playable_object_ids(db, related)
     actor_handles = await _actor_handle_map(config, related)
+    music_fallbacks = await remote_content.music_field_fallbacks(db, config, related)
     return _object_response(
         row,
         in_collection=viewer["in_collection"],
@@ -1041,11 +1094,17 @@ async def get_remote_resource(
         follow_state=viewer["follow_state"],
         activity_id=str(activity.id) if activity is not None else None,
         parent=(
-            _object_response(parent_row, playable=str(parent_row.id) in playable, actor_handles=actor_handles)
+            _object_response(
+                parent_row,
+                playable=str(parent_row.id) in playable,
+                actor_handles=actor_handles,
+                music_fallbacks=music_fallbacks,
+            )
             if parent_row is not None
             else None
         ),
         items=await _resource_items(db, children, config),
         playable=str(row.id) in playable,
         actor_handles=actor_handles,
+        music_fallbacks=music_fallbacks,
     )
