@@ -92,6 +92,7 @@ async def _load_track(session: AsyncSession, track_id: str) -> Optional[Track]:
 
 async def _load_scrobble_fields(
     session: AsyncSession,
+    config: SonghiveConfig,
     entity_id: str,
     entity_kind: str,
 ) -> Optional[Dict[str, Any]]:
@@ -100,7 +101,10 @@ async def _load_scrobble_fields(
 
     Remote rendition rows (Funkwhale ``Audio``/``Video`` uploads) report
     their media entity's metadata when the entity is also cached —
-    ``_fold_renditions`` performs that swap.
+    ``_fold_renditions`` performs that swap. Sparse payloads (Bandwagon
+    ``Audio`` items carry no ``artist_credit``/album name) fall back to the
+    cached parent row or the attributed actor so the service doesn't see an
+    empty ``artist``.
     """
     from ..services import remote_content, scrobbler
 
@@ -109,7 +113,8 @@ async def _load_scrobble_fields(
         if row is None or row.unavailable_at is not None:
             return None
         row = (await remote_content._fold_renditions(session, [row]))[0]
-        return scrobbler.remote_object_fields(row)
+        fallbacks = await remote_content.music_field_fallbacks(session, config, [row])
+        return scrobbler.remote_object_fields(row, fallbacks.get(str(row.id)))
     track = await _load_track(session, entity_id)
     return scrobbler.track_fields(track) if track is not None else None
 
@@ -148,7 +153,7 @@ def scrobble_now_playing(self, user_id: str, entity_id: str, entity_kind: str = 
                 user = await session.get(User, user_id)
                 if user is None:
                     return "missing-user"
-                fields = await _load_scrobble_fields(session, entity_id, entity_kind)
+                fields = await _load_scrobble_fields(session, config, entity_id, entity_kind)
                 if fields is None:
                     return "missing-track"
                 row = await _load_active_config(session, config, user)
@@ -211,7 +216,7 @@ def scrobble_track(self, user_id: str, entity_id: str, played_at: int, entity_ki
                 user = await session.get(User, user_id)
                 if user is None:
                     return "missing-user"
-                fields = await _load_scrobble_fields(session, entity_id, entity_kind)
+                fields = await _load_scrobble_fields(session, config, entity_id, entity_kind)
                 if fields is None:
                     return "missing-track"
                 row = await _load_active_config(session, config, user)

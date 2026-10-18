@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `federation`: Remote Funkwhale album pages now list their tracks —
+  Funkwhale `Album` documents carry no children collection, so when a
+  lookup addressed a `/library/albums/<id>` page URL the matching REST
+  listing is fetched, each track's federation `id` is dereferenced
+  through the normal ActivityPub path, and `audio_url` is seeded from
+  `listen_url` so the tracks are playable immediately.
+  ([`72e2168`](https://git.platypush.tech/blacklight/songhive/commit/72e2168184347e18e820b150593ea9602071411e)).
+
+### Fixed
+
+- `federation`: Remote container pages populate children and metadata
+  for dialects like Bandwagon's — multi-valued `type` arrays
+  (`["Album", "Article"]`) no longer 500 lookups, linked children
+  collections (`tracks`/`items`/`orderedItems`/`collection`, including
+  bare `OrderedCollection` documents) are scanned and cached, items
+  parent to their `album`/`track.album` when no `library` link
+  exists, catalog entities no longer report their HTML page URL as
+  playable audio, and sparse track payloads fall back to the cached
+  parent album/actor for `artist_name`/`album_name`. Album pages
+  also no longer lose their track list on the first visit — the
+  activity-materialization response now carries the full object — and
+  childless cached containers lazily rescan their linked collection
+  on lookup and view.
+  ([`ce39288`](https://git.platypush.tech/blacklight/songhive/commit/ce39288d27eec008e115212a97ef35df3dee0ed3)).
+
 ## 0.4.17
 
 ### Fixed

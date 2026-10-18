@@ -383,26 +383,30 @@ def track_fields(track: Track) -> Dict[str, Any]:
     }
 
 
-def remote_object_fields(row: RemoteObject) -> Dict[str, Any]:
+def remote_object_fields(row: RemoteObject, fallback: Optional[Dict[str, Optional[str]]] = None) -> Dict[str, Any]:
     """
     Map a cached remote music object to scrobble API fields.
 
     Scrobbles carry metadata only — a remote ``Track`` (or its rendition)
     resolves title/artist/album/duration from the cached payload, with
     ``position``/MusicBrainz ids picked up best-effort from the embedded
-    track document.
+    track document. ``fallback`` is an entry from
+    ``remote_content.music_field_fallbacks`` — producers like Bandwagon
+    attribute the artist only on the album or the actor, and a scrobble
+    with an empty ``artist`` is rejected by the service.
     """
+    fallback = fallback or {}
     payload = row.payload if isinstance(row.payload, dict) else {}
     embedded = payload.get("track")
     track_doc = embedded if isinstance(embedded, dict) else payload
     music = remote_content.remote_object_music_fields(row)
     position = track_doc.get("position")
     mbid = track_doc.get("musicbrainz_recordingid") or track_doc.get("musicbrainz_id")
-    artist = music["artist_name"] or ""
+    artist = music["artist_name"] or fallback.get("artist_name") or ""
     return {
         "artist": artist,
         "track": remote_content.remote_object_display_name(row) or row.name or "",
-        "album": music["album_name"],
+        "album": music["album_name"] or fallback.get("album_name"),
         "album_artist": artist or None,
         "duration": music["duration"],
         "track_number": (

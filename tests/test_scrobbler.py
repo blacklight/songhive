@@ -409,7 +409,7 @@ async def test_remote_object_fields_maps_metadata(db_session):
     assert fields["mbid"] == "mbid-remote"
 
 
-async def test_load_scrobble_fields_folds_rendition(db_session):
+async def test_load_scrobble_fields_folds_rendition(db_session, config):
     """A rendition id resolves to its media entity's scrobble fields."""
     from songhive.models.remote_object import RemoteObject
 
@@ -441,14 +441,70 @@ async def test_load_scrobble_fields_folds_rendition(db_session):
     db_session.add_all([track, rendition])
     await db_session.flush()
 
-    fields = await scrobble_tasks._load_scrobble_fields(db_session, str(rendition.id), "remote")
+    fields = await scrobble_tasks._load_scrobble_fields(db_session, config, str(rendition.id), "remote")
     assert fields is not None
     # Fields come from the entity row, not the rendition's composite name.
     assert fields["track"] == "The Song"
     assert fields["artist"] == "The Band"
     assert fields["album"] == "The Album"
 
-    assert await scrobble_tasks._load_scrobble_fields(db_session, "missing", "remote") is None
+    assert await scrobble_tasks._load_scrobble_fields(db_session, config, "missing", "remote") is None
+
+
+async def test_load_scrobble_fields_falls_back_to_parent_and_actor(db_session, config):
+    """Sparse remote items scrobble with resolved album/artist metadata.
+
+    Bandwagon-style ``Audio`` items carry no ``artist_credit`` and ``album``
+    is a bare URL — an unenriched scrobble would submit ``artist=""``, which
+    the service rejects. The field loader applies the same parent-row /
+    attributed-actor fallback the API responses use.
+    """
+    from songhive.models.remote_object import RemoteObject
+
+    album_url = "https://remote.example/albums/1"
+    album = RemoteObject(
+        canonical_url=album_url,
+        domain="remote.example",
+        object_type="Album",
+        resource_type="album",
+        actor_url="https://remote.example/users/bob",
+        name="The Album",
+        payload={
+            "type": "Album",
+            "id": album_url,
+            "name": "The Album",
+            "artist_credit": [
+                {
+                    "type": "ArtistCredit",
+                    "credit": "The Band",
+                    "artist": {"type": "Artist", "id": "https://remote.example/artists/1", "name": "The Band"},
+                }
+            ],
+        },
+    )
+    track = RemoteObject(
+        canonical_url="https://remote.example/audio/1",
+        domain="remote.example",
+        object_type="Audio",
+        resource_type="track",
+        parent_url=album_url,
+        actor_url="https://remote.example/users/bob",
+        name="The Song",
+        payload={
+            "type": "Audio",
+            "id": "https://remote.example/audio/1",
+            "name": "The Song",
+            "album": album_url,
+            "track": {"type": "Track", "id": "https://remote.example/audio/1", "name": "The Song"},
+        },
+    )
+    db_session.add_all([album, track])
+    await db_session.flush()
+
+    fields = await scrobble_tasks._load_scrobble_fields(db_session, config, str(track.id), "remote")
+    assert fields is not None
+    assert fields["artist"] == "The Band"
+    assert fields["album"] == "The Album"
 
 
 def test_enqueue_remote_dispatches_entity_kind(_no_real_celery_broker):
