@@ -30,6 +30,13 @@ All notable changes to this project will be documented in this file.
   childless cached containers lazily rescan their linked collection
   on lookup and view.
   ([`ce39288`](https://git.platypush.tech/blacklight/songhive/commit/ce39288d27eec008e115212a97ef35df3dee0ed3)).
+- `scrobbler`: Listens of remote (federated) tracks now reach Last.fm —
+  sparse remote payloads (e.g. Bandwagon `Audio` items with no
+  `artist_credit` and `album` as a bare URL) were scrobbled with an
+  empty `artist`, which the service rejects; submission fields now fall
+  back to the cached parent album/actor metadata like the API
+  responses do.
+  ([`b12d0f4`](https://git.platypush.tech/blacklight/songhive/commit/b12d0f490e854ef595dd882b485455f7fa1988e3)).
 
 ## 0.4.17
 
