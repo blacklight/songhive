@@ -30,7 +30,10 @@ def _build_attachment(user: User) -> Optional[list[dict[str, Any]]]:
     links = getattr(user, "links", None) or []
     if not links:
         return None
-    return [property_value_attachment(link.name, link.url) for link in links]
+    # Bare-URL values (Funkwhale's own shape): Funkwhale <= 2.0.x declares
+    # ``attachment[].value`` as an URLField, so the Mastodon-style HTML
+    # anchors would fail actor validation during remote fetches.
+    return [property_value_attachment(link.name, link.url, render_html=False) for link in links]
 
 
 def user_to_actor_document(user: User, domain: str) -> dict:

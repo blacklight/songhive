@@ -852,18 +852,18 @@ def test_user_to_actor_document_includes_avatar_and_links():
         {
             "type": "PropertyValue",
             "name": "Website",
-            "value": '<a href="https://example.com" rel="me">example.com</a>',
+            "value": "https://example.com",
         },
         {
             "type": "PropertyValue",
             "name": "Mastodon",
-            "value": '<a href="https://mastodon.example.com/@alice" rel="me">mastodon.example.com/@alice</a>',
+            "value": "https://mastodon.example.com/@alice",
         },
     ]
 
 
-def test_user_to_actor_document_escapes_invalid_link_values():
-    """Malformed-but-prefixed URLs are emitted as escaped text, not anchors."""
+def test_user_to_actor_document_emits_link_urls_verbatim():
+    """Profile links serialize as bare URLs (Funkwhale-validatable shape)."""
     user = User(
         username="alice",
         email="alice@example.com",
@@ -880,14 +880,14 @@ def test_user_to_actor_document_escapes_invalid_link_values():
         {
             "type": "PropertyValue",
             "name": "Query",
-            "value": '<a href="https://example.com/?a=1&amp;b=2" rel="me">example.com/?a=1&amp;b=2</a>',
+            "value": "https://example.com/?a=1&b=2",
         },
         {"type": "PropertyValue", "name": "No host", "value": "https://"},
         {"type": "PropertyValue", "name": "Space", "value": "https://exa mple.com"},
         {
             "type": "PropertyValue",
             "name": "Quote",
-            "value": "https://example.com/&quot; onmouseover=&quot;alert(1)",
+            "value": 'https://example.com/" onmouseover="alert(1)',
         },
     ]
 
@@ -1004,7 +1004,7 @@ async def test_sync_user_actor_caches_document(db_session, config):
         {
             "type": "PropertyValue",
             "name": "Website",
-            "value": '<a href="https://example.com" rel="me">example.com</a>',
+            "value": "https://example.com",
         },
     ]
 
@@ -1637,7 +1637,7 @@ async def test_sync_user_actor_fans_out_updated_links(db_session, config, monkey
         {
             "type": "PropertyValue",
             "name": "New",
-            "value": '<a href="https://new.example" rel="me">new.example</a>',
+            "value": "https://new.example",
         }
     ]
 
