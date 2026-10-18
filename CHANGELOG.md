@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `federation`: Remote `Audio` documents that embed a `track` stub
+  sharing the parent's id (e.g. Bandwagon) no longer clobber their own
+  cache row — embedded music docs now only seed missing rows, so
+  fetched `Audio` records keep their `audio_url`, payload and public
+  visibility and remote Bandwagon tracks are playable again.
+  ([`278db11`](https://git.platypush.tech/blacklight/songhive/commit/278db117a54ebc543e0243f3f03481426be6e958)).
+
 ## 0.4.16
 
 ### Fixed
