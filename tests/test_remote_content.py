@@ -745,6 +745,42 @@ class TestDereferenceRemoteObject:
         assert row.audio_url == f"https://{REMOTE_DOMAIN}/media/song.ogg"
         assert result.activity is None  # bare resources are not feed entries
 
+    async def test_embedded_track_stub_does_not_clobber_audio(self, db_session, remote_config, fetcher):
+        """A ``track`` stub sharing the parent's id must not overwrite its row.
+
+        Bandwagon ``Audio`` documents embed a ``track`` dict whose ``id`` is
+        the document's own id; caching it as an embedded doc would clobber
+        the ``Audio`` row's ``audio_url``, payload and visibility with the
+        stub's (``to: ["Public"]`` shorthand is public).
+        """
+        object_url = f"https://{REMOTE_DOMAIN}/tracks/bw1"
+        audio_doc = {
+            "id": object_url,
+            "type": "Audio",
+            "attributedTo": ACTOR_URL,
+            "name": "Remote Track",
+            "url": {
+                "type": "Link",
+                "href": f"{object_url}/audio?format=mp3",
+                "mediaType": "audio/mpeg",
+            },
+            "track": {
+                "type": "Track",
+                "id": object_url,  # stub shares the Audio's own id
+                "name": "Remote Track",
+                "position": 1,
+            },
+            "to": ["Public"],
+        }
+        fetcher({object_url: audio_doc, ACTOR_URL: ACTOR_DOC})
+        result = await rc.dereference_remote_object(db_session, remote_config, object_url)
+        row = result.remote_object
+        assert row.object_type == "Audio"
+        assert row.resource_type == "track"
+        assert row.audio_url == f"{object_url}/audio?format=mp3"
+        assert row.visibility == "public"
+        assert await rc.resolve_media_url(db_session, row) == f"{object_url}/audio?format=mp3"
+
 
 # ---------------------------------------------------------------------------
 # Cached-only search

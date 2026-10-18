@@ -1306,16 +1306,23 @@ async def _cache_embedded_music_docs(
             continue
         seen.add(doc_id)
         count += 1
-        doc_actor = _attributed_to(doc) or actor_url
-        await _upsert_remote_object_row(
-            session,
-            canonical_url=doc_id,
-            activity=doc,
-            obj=doc,
-            actor_url=doc_actor,
-        )
+        # Embedded docs seed the cache for page rendering — they never
+        # overwrite an existing row. A cached doc carries at least as much
+        # data as a stub embedded in a parent (a Bandwagon ``Audio`` embeds
+        # a ``track`` sharing its own id; upserting it would clobber the
+        # fetched ``Audio`` row's ``audio_url``, payload and visibility),
+        # and a stub must not wipe a previously fetched full document.
         row = await _cached_remote_object(session, doc_id)
-        if row is not None and row.parent_url is None:
+        if row is None:
+            doc_actor = _attributed_to(doc) or actor_url
+            row = await _upsert_remote_object_row(
+                session,
+                canonical_url=doc_id,
+                activity=doc,
+                obj=doc,
+                actor_url=doc_actor,
+            )
+        if row.parent_url is None:
             row.parent_url = _parent_url_of(doc) or container_url
 
 
