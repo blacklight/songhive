@@ -111,6 +111,7 @@ export function attachmentToQueueTrack(
     tags: [],
     genres: [],
     extra_artists: [],
+    artist_credits: [],
     is_external: false,
     stream_url: info.url,
     remote: true,

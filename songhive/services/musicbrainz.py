@@ -784,6 +784,9 @@ class MusicBrainzService:
         if artist_name and _is_missing_artist(artist):
             new_artist = await self._find_or_create_artist(session, artist_name, artist_mbid)
             track.artist_id = str(new_artist.id)
+            from .music import reconcile_primary_credit
+
+            await reconcile_primary_credit(session, track)
         elif (
             artist
             and artist_mbid
@@ -826,6 +829,9 @@ class MusicBrainzService:
                 album.release_year = release_year
             if _is_missing_artist(album.artist) and target_artist_id:
                 album.artist_id = target_artist_id
+                from .music import reconcile_primary_credit
+
+                await reconcile_primary_credit(session, album)
 
         if storage_service and album and release_id:
             await self._maybe_store_cover_art(

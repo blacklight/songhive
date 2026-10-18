@@ -386,6 +386,7 @@ export function playlistItemToQueueTrack(
       tags: [],
       genres: [],
       extra_artists: [],
+      artist_credits: [],
       is_external: false,
       stream_url: episode.audio_url,
       remote: true,

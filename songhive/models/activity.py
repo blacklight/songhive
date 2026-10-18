@@ -73,6 +73,12 @@ class Activity(Base):
     source_actor: Mapped[str] = mapped_column(String(512))
     source_id: Mapped[str] = mapped_column(String(512))
     local_object_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    # Trailing identifier of the delivered envelope's ``id`` (the
+    # ``{actor}/activities/{ap_activity_id}`` URL remote servers saw), so
+    # the activity can be dereferenced at that URL and listed in the
+    # actor's outbox. ``None`` for remote activities and payload-less rows
+    # (whose synthesized envelope id is ``{actor}/activities/{id}``).
+    ap_activity_id: Mapped[Optional[str]] = mapped_column(String(512), nullable=True, index=True)
     owner_user_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"),
         nullable=True,

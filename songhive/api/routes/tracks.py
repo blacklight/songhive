@@ -39,6 +39,7 @@ from ...external.types import ExternalItemRef
 from ...federation import doc_cache
 from ...models import Track, Visibility
 from ...models.album import Album
+from ...models.artist import Artist
 from ...models.audit_log import AuditTargetType
 from ...models.external_track import ExternalTrack
 from ...models.stored_file import StoredFile
@@ -87,6 +88,7 @@ from ..responses import (
     _track_image_url,
     _track_release_year,
     build_album_summary,
+    build_artist_credit_summaries,
     build_artist_summary,
     build_user_summary,
 )
@@ -108,6 +110,20 @@ _MAX_ARTISTS_PER_TRACK = 20
 _MAX_ARTIST_NAME_LENGTH = 256
 
 
+class ArtistCreditInput(BaseModel):
+    """One entry of a track's ``artist_credits`` list."""
+
+    # Either an existing artist id or a name to find-or-create.
+    artist_id: Optional[str] = None
+    artist_name: Optional[str] = None
+    # Display name the artist is credited under; ``null`` credits it under
+    # its canonical name.
+    credit: Optional[str] = None
+    # Text emitted after this credit (e.g. ``" feat. "``); ``null``
+    # defaults to ``", "`` between credits and ``""`` on the last one.
+    joinphrase: Optional[str] = None
+
+
 class TrackUpdate(BaseModel):
     """Track partial update."""
 
@@ -122,6 +138,9 @@ class TrackUpdate(BaseModel):
     filename: Optional[str] = None
     description: Optional[str] = None
     extra_artists: Optional[List[str]] = None
+    # Ordered artist credits — index 0 is the primary artist (it replaces
+    # ``artist_id``). Overrides ``artist_name``/``extra_artists`` when set.
+    artist_credits: Optional[List[ArtistCreditInput]] = None
     # When ``visibility`` transitions to ``public``, ``publish`` also fans out
     # a ``Create(Audio)`` ActivityPub activity to the owner's followers; when
     # unset/false the track is only made publicly accessible (its URL resolves).
@@ -199,6 +218,7 @@ _TRACK_UPDATE_FIELD_MAP = {
     "filename": "filename",
     "description": "description",
     "extra_artists": "artists",
+    "artist_credits": "artists",
 }
 
 _TAG_SYNC_FIELDS = {
@@ -217,6 +237,8 @@ _TAG_SYNC_FIELDS = {
 _PUBLICATION_SYNC_FIELDS = {
     "title",
     "artist_name",
+    "extra_artists",
+    "artist_credits",
     "description",
     "genre",
 }
@@ -585,6 +607,7 @@ async def _build_track_response(
         genre=track.genre,
         description=track.description,
         extra_artists=list(track.extra_artists or []),
+        artist_credits=build_artist_credit_summaries(track),
         audio_url=audio_url,
         external_url=external_url,
         image_url=await _track_image_url(track, storage),
@@ -858,6 +881,7 @@ async def update_track(
         if name:
             artist = await music.find_or_create_artist(db, name)
             track.artist_id = str(artist.id)
+            await music.reconcile_primary_credit(db, track)
 
     album = None
     if body.album_title is not None:
@@ -902,7 +926,53 @@ async def update_track(
                 detail="extra_artists must contain at most 20 non-empty names of at most 256 characters",
             )
 
-        track.extra_artists = names or None
+        # ``extra_artists`` is the name-only legacy shape of the credit list:
+        # writing it replaces the extra (non-primary) credits with
+        # name-resolved artists — the primary credit is untouched.
+        if track.artist is not None:
+            await music.set_track_artist(db, track, track.artist, extra_names=names)
+        else:
+            track.extra_artists = names or None
+        track.metadata_updated_at = datetime.now(timezone.utc)
+
+    if "artist_credits" in body.model_fields_set:
+        items = body.artist_credits or []
+        if (
+            not items
+            or len(items) > _MAX_ARTISTS_PER_TRACK
+            or any(
+                (item.credit is not None and (not item.credit.strip() or len(item.credit) > _MAX_ARTIST_NAME_LENGTH))
+                or (item.joinphrase is not None and len(item.joinphrase) > 64)
+                for item in items
+            )
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "artist_credits must contain 1-20 entries with non-empty credits "
+                    "and joinphrases of at most 64 characters"
+                ),
+            )
+        entries = []
+        for item in items:
+            credit_artist = None
+            if item.artist_id:
+                credit_artist = await db.get(Artist, item.artist_id)
+            elif item.artist_name and item.artist_name.strip():
+                credit_artist = await music.find_or_create_artist(db, item.artist_name.strip())
+            if credit_artist is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail="each artist_credit entry needs an existing artist_id or a non-empty artist_name",
+                )
+            entries.append(
+                {
+                    "artist": credit_artist,
+                    "credit": item.credit.strip() if item.credit else None,
+                    "joinphrase": item.joinphrase,
+                }
+            )
+        await music.set_artist_credits(db, track=track, credits=entries)
         track.metadata_updated_at = datetime.now(timezone.utc)
     if body.visibility is not None:
         track.visibility = body.visibility.value

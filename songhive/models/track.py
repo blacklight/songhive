@@ -21,6 +21,7 @@ from .external_track import ExternalTrack
 if TYPE_CHECKING:
     from .album import Album
     from .artist import Artist
+    from .artist_credit import ArtistCredit
     from .genre import Genre, GenreTrack
     from .tag import Tag, TagTrack
 
@@ -78,6 +79,13 @@ class Track(Base):
     )
 
     artist: Mapped["Artist"] = relationship("Artist", back_populates="tracks", lazy="selectin")
+    artist_credits: Mapped[List["ArtistCredit"]] = relationship(
+        "ArtistCredit",
+        back_populates="track",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="ArtistCredit.index",
+    )
     album: Mapped[Optional["Album"]] = relationship("Album", back_populates="tracks", lazy="selectin")
     audio_file = relationship("StoredFile", foreign_keys=[audio_file_id], lazy="selectin")
     image_file = relationship("StoredFile", foreign_keys=[image_file_id], lazy="selectin")

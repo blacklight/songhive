@@ -755,6 +755,67 @@ class TestRemoteObjectMusicFields:
         fields = rc.remote_object_music_fields(_remote_row())
         assert fields == {"duration": None, "artist_name": None, "album_name": None}
 
+    def test_funkwhale2_document_fields(self):
+        """Funkwhale ≥ 2.0 shape: ``artist_credit`` + ISO-8601 ``duration``."""
+        row = _remote_row(
+            payload={
+                "type": "Audio",
+                "duration": "PT4M10S",
+                "track": {
+                    "type": "Track",
+                    "artist_credit": [
+                        {
+                            "type": "ArtistCredit",
+                            "id": f"{TRACK_URL}/credits/1",
+                            "artist": {"type": "Artist", "id": ARTIST_URL, "name": "Remote Artist"},
+                            "credit": "Alias Name",
+                            "joinphrase": " feat. ",
+                        },
+                        {
+                            "type": "ArtistCredit",
+                            "id": f"{TRACK_URL}/credits/2",
+                            "artist": {"type": "Artist", "id": f"{ARTIST_URL}-2", "name": "Feat Artist"},
+                            "credit": "Feat Artist",
+                            "joinphrase": "",
+                        },
+                    ],
+                    "album": {"type": "Album", "name": "Remote Album"},
+                },
+            }
+        )
+        fields = rc.remote_object_music_fields(row)
+        assert fields == {
+            "duration": 250,
+            "artist_name": "Alias Name feat. Feat Artist",
+            "album_name": "Remote Album",
+        }
+
+    def test_funkwhale2_numeric_duration_string(self):
+        """Bare numeric strings still parse (older producers)."""
+        row = _remote_row(payload={"type": "Audio", "duration": "95"})
+        assert rc.remote_object_music_fields(row)["duration"] == 95
+
+    def test_unparseable_duration(self):
+        row = _remote_row(payload={"type": "Audio", "duration": "forever"})
+        assert rc.remote_object_music_fields(row)["duration"] is None
+
+    def test_artist_credit_unwraps_artist_docs(self):
+        """Embedded-doc iteration yields the wrapped ``Artist``, not the credit."""
+        album_doc = {
+            "type": "Album",
+            "id": ALBUM_URL,
+            "artist_credit": [
+                {
+                    "type": "ArtistCredit",
+                    "id": f"{ALBUM_URL}/credits/1",
+                    "artist": {"type": "Artist", "id": ARTIST_URL, "name": "Remote Artist"},
+                }
+            ],
+        }
+        docs = [doc for doc, _ in rc._iter_embedded_music_docs(album_doc)]
+        assert docs == [{"type": "Artist", "id": ARTIST_URL, "name": "Remote Artist"}]
+        assert rc._parent_url_of(album_doc) == ARTIST_URL
+
 
 # ---------------------------------------------------------------------------
 # Music entity serializers
@@ -801,15 +862,26 @@ class TestMusicSerializers:
         assert doc["released"] == "2020-01-01"
         assert doc["artists"][0]["type"] == "Artist"
         assert doc["artists"][0]["id"] == "https://music.example.com/artists/artist-1"
+        # Funkwhale ≥ 2.0 requires ``artist_credit`` (min_length=1).
+        credit = doc["artist_credit"][0]
+        assert credit["type"] == "ArtistCredit"
+        assert credit["id"] == "https://music.example.com/albums/album-1/credits/artist-1"
+        assert credit["artist"]["id"] == "https://music.example.com/artists/artist-1"
+        assert credit["credit"] == "Local Artist"
 
     def test_track_document(self):
         track, artist = _track()
         doc = track_to_music_track_object(track, artist, "music.example.com", "https://music.example.com/users/u")
         assert doc["type"] == "Track"
+        assert doc["id"] == "https://music.example.com/music/tracks/track-1"
         assert doc["position"] == 3
         assert doc["disc"] == 1
         assert doc["album"]["type"] == "Album"
         assert doc["artists"][0]["name"] == "Local Artist"
+        credit = doc["artist_credit"][0]
+        assert credit["type"] == "ArtistCredit"
+        assert credit["id"] == "https://music.example.com/music/tracks/track-1/credits/artist-1"
+        assert credit["artist"]["name"] == "Local Artist"
 
     def test_library_document(self):
         doc = library_to_music_object(
@@ -849,12 +921,14 @@ class TestMusicSerializers:
             library_url="https://music.example.com/libraries/lib-1",
         )
         assert doc is not None
-        assert doc["duration"] == 195
+        # ``xsd:duration`` — the AS2 form both the spec and Funkwhale ≥ 2.0
+        # require (Funkwhale 1.x accepted integer seconds).
+        assert doc["duration"] == "PT3M15S"
         assert doc["bitrate"] == 0  # no audio_file loaded
         assert doc["size"] == 0
         assert doc["library"] == "https://music.example.com/libraries/lib-1"
         assert doc["track"]["type"] == "Track"
-        assert doc["track"]["id"] == "https://music.example.com/tracks/track-1"
+        assert doc["track"]["id"] == "https://music.example.com/music/tracks/track-1"
 
 
 # ---------------------------------------------------------------------------
@@ -926,3 +1000,133 @@ class TestServedAudioDocument:
         response = fed_client.get(f"/tracks/{track.id}", headers={"Accept": ACTIVITY_JSON})
         assert response.status_code == 200
         assert response.json()["library"] == f"https://music.example.com/libraries/{library.id}"
+
+
+# ---------------------------------------------------------------------------
+# Track/credit dereference + library-page Audio ids
+# ---------------------------------------------------------------------------
+
+
+class TestMusicTrackRoutes:
+    async def _public_track(self, db_session, regular_user, with_album: bool = False) -> Track:
+        artist = Artist(name="Local Artist")
+        db_session.add(artist)
+        await db_session.flush()
+        album = None
+        if with_album:
+            album = Album(title="Local Album", artist_id=str(artist.id), visibility=Visibility.PUBLIC.value)
+            db_session.add(album)
+            await db_session.flush()
+        track = Track(
+            title="Local Track",
+            artist_id=str(artist.id),
+            album_id=str(album.id) if album is not None else None,
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+        )
+        db_session.add(track)
+        await db_session.commit()
+        return track
+
+    async def test_music_track_document(self, fed_client, db_session, regular_user):
+        """``/music/tracks/{id}`` serves the catalog ``Track`` object."""
+        track = await self._public_track(db_session, regular_user, with_album=True)
+        response = fed_client.get(f"/music/tracks/{track.id}", headers={"Accept": ACTIVITY_JSON})
+        assert response.status_code == 200
+        doc = response.json()
+        assert doc["type"] == "Track"
+        assert doc["id"] == f"https://music.example.com/music/tracks/{track.id}"
+        assert doc["album"]["type"] == "Album"
+        assert doc["artist_credit"][0]["type"] == "ArtistCredit"
+
+    async def test_music_track_html_redirects_to_page(self, fed_client, db_session, regular_user):
+        track = await self._public_track(db_session, regular_user)
+        response = fed_client.get(f"/music/tracks/{track.id}", follow_redirects=False)
+        assert response.status_code in (301, 302, 303, 307)
+        assert response.headers["location"] == f"/tracks/{track.id}"
+
+    async def test_music_track_synthesized_album(self, fed_client, db_session, regular_user):
+        """``{track}/album`` answers only for album-less tracks."""
+        track = await self._public_track(db_session, regular_user)
+        response = fed_client.get(f"/music/tracks/{track.id}/album", headers={"Accept": ACTIVITY_JSON})
+        assert response.status_code == 200
+        doc = response.json()
+        assert doc["type"] == "Album"
+        assert doc["id"] == f"https://music.example.com/music/tracks/{track.id}/album"
+
+    async def test_music_track_album_404_for_real_album(self, fed_client, db_session, regular_user):
+        track = await self._public_track(db_session, regular_user, with_album=True)
+        response = fed_client.get(f"/music/tracks/{track.id}/album", headers={"Accept": ACTIVITY_JSON})
+        assert response.status_code == 404
+
+    async def test_track_credit_document(self, fed_client, db_session, regular_user):
+        """``artist_credit`` ids are dereferenceable."""
+        track = await self._public_track(db_session, regular_user)
+        response = fed_client.get(
+            f"/music/tracks/{track.id}/credits/{track.artist_id}",
+            headers={"Accept": ACTIVITY_JSON},
+        )
+        assert response.status_code == 200
+        doc = response.json()
+        assert doc["type"] == "ArtistCredit"
+        assert doc["artist"]["name"] == "Local Artist"
+        assert doc["credit"] == "Local Artist"
+
+    async def test_album_credit_document(self, fed_client, db_session, regular_user):
+        track = await self._public_track(db_session, regular_user, with_album=True)
+        response = fed_client.get(
+            f"/albums/{track.album_id}/credits/{track.artist_id}",
+            headers={"Accept": ACTIVITY_JSON},
+        )
+        assert response.status_code == 200
+        doc = response.json()
+        assert doc["type"] == "ArtistCredit"
+        assert doc["artist"]["name"] == "Local Artist"
+
+    async def test_credit_404_for_unknown_artist(self, fed_client, db_session, regular_user):
+        track = await self._public_track(db_session, regular_user)
+        response = fed_client.get(
+            f"/music/tracks/{track.id}/credits/other-artist",
+            headers={"Accept": ACTIVITY_JSON},
+        )
+        assert response.status_code == 404
+
+
+class TestLibraryAudioIds:
+    async def test_library_page_audio_ids_are_dereferenceable(self, fed_client, db_session, regular_user):
+        """
+        Library items carry the owner's ``objects/{id}`` — the same id a
+        ``Create(Audio)`` delivery would use — and minting persists it.
+        """
+        artist = Artist(name="Local Artist")
+        db_session.add(artist)
+        await db_session.flush()
+        track = Track(
+            title="Local Track",
+            artist_id=str(artist.id),
+            owner_id=str(regular_user.id),
+            visibility=Visibility.PUBLIC.value,
+        )
+        db_session.add(track)
+        await db_session.commit()
+        assert track.federation_object_id is None
+
+        response = fed_client.get("/users/regular/library?page=1", headers={"Accept": ACTIVITY_JSON})
+        assert response.status_code == 200
+        items = response.json()["items"]
+        assert len(items) == 1
+        audio_id = items[0]["id"]
+        actor_url = "https://music.example.com/users/regular"
+        assert audio_id.startswith(f"{actor_url}/objects/")
+        # The minted object id is persisted so later renders and Create
+        # deliveries reference the same Audio.
+        await db_session.refresh(track)
+        assert audio_id == f"{actor_url}/objects/{track.federation_object_id}"
+        # The Audio's ``id`` and its embedded ``track`` are distinct
+        # dereferenceable objects.
+        assert items[0]["track"]["id"] == f"https://music.example.com/music/tracks/{track.id}"
+
+        path = audio_id.replace("https://music.example.com", "")
+        obj = fed_client.get(path, headers={"Accept": ACTIVITY_JSON})
+        assert obj.status_code == 200
+        assert obj.json()["type"] == "Audio"

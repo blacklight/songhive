@@ -259,6 +259,12 @@ def _deliver(activity: dict, inbox_url: str, user: User) -> None:
     deliver_activity.delay(activity, inbox_url, f"{user.actor_url}#main-key", user.private_key_pem)  # type: ignore
 
 
+def _invalidate_following(session: AsyncSession, username: Optional[str]) -> None:
+    """Drop the cached ``following`` collection of a local user."""
+    if username:
+        doc_cache.invalidate_keys(("coll", username, "following"), session=session)
+
+
 async def _follow_local(
     session: AsyncSession,
     config: SonghiveConfig,
@@ -311,6 +317,7 @@ async def _follow_local(
         )
 
     doc_cache.invalidate_keys(("coll", target.username, "followers"), session=session)
+    _invalidate_following(session, user.username)
 
     row = Follow(
         user_id=user.id,
@@ -372,6 +379,7 @@ async def _follow_remote(
     )
     session.add(row)
     await session.flush()
+    _invalidate_following(session, user.username)
     _deliver(activity, inbox_url, user)
     return row
 
@@ -647,6 +655,7 @@ async def unfollow_user(
 
     await session.delete(row)
     await session.flush()
+    _invalidate_following(session, user.username)
 
 
 async def apply_local_follow_decision(
@@ -678,6 +687,9 @@ async def apply_local_follow_decision(
     else:
         await session.delete(row)
     await session.flush()
+    # The requester's actor URL ends with their username
+    # (``https://{domain}/users/{username}``).
+    _invalidate_following(session, row.actor_url.rsplit("/", 1)[-1])
     return True
 
 
@@ -747,6 +759,7 @@ async def apply_follow_decision(session: AsyncSession, *, activity: dict) -> boo
         else:
             continue
         matched = True
+        _invalidate_following(session, row.actor_url.rsplit("/", 1)[-1])
         if activity["type"] == "Accept":
             row.state = FOLLOW_STATE_ACCEPTED
             row.accepted_at = datetime.now(timezone.utc)

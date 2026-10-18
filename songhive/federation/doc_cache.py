@@ -258,6 +258,7 @@ def invalidate_track(
         cache = document_cache()
         if track_id:
             cache.invalidate(("trackpage", track_id))
+            cache.invalidate_prefix(("mtrack", track_id))
         if object_id:
             cache.invalidate_segment(object_id)
         cache.invalidate_prefix(("lib",), ("ulib",))

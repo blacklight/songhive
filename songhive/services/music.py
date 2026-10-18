@@ -7,13 +7,19 @@ import contextlib
 import unicodedata
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple, cast
 
-from sqlalchemy import Select, and_, exists, false, func, or_, select
+from sqlalchemy import Select, and_, delete, exists, false, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from ..federation import doc_cache
 from ..models.album import Album
 from ..models.artist import Artist
+from ..models.artist_credit import joined_artist_credit  # noqa: F401  (re-exported for callers)
+from ..models.artist_credit import (
+    DEFAULT_CREDIT_JOINPHRASE,
+    ArtistCredit,
+    artist_credit_names,
+)
 from ..models.external_item import ExternalItem
 from ..models.external_library import ExternalLibrary
 from ..models.external_track import ExternalTrack
@@ -386,6 +392,174 @@ async def find_or_create_artist(session: AsyncSession, name: str) -> Artist:
     session.add(artist)
     await session.flush()
     return artist
+
+
+async def set_artist_credits(
+    session: AsyncSession,
+    *,
+    track: Optional[Track] = None,
+    album: Optional[Album] = None,
+    credits: List[dict],
+) -> List[ArtistCredit]:
+    """
+    Replace a track's or album's artist credits.
+
+    ``credits`` is an ordered list of ``{"artist": Artist, "credit": str|None,
+    "joinphrase": str|None}`` entries — ``credit`` defaults to ``None`` (the
+    canonical artist name) and ``joinphrase`` to ``", "`` between credits and
+    ``""`` on the last one. The first credit is the primary: the entity's
+    ``artist_id`` and (for tracks) ``extra_artists`` are synced from the
+    list, so callers assigning artists should prefer this over writing
+    ``artist_id`` directly. Existing credits not reproduced by the list are
+    deleted.
+
+    Flushes without committing; the caller owns the transaction.
+    """
+    if (track is None) == (album is None):
+        raise ValueError("Exactly one of track/album must be given")
+    entity = track if track is not None else album
+    assert entity is not None
+    entity_key = "track_id" if track is not None else "album_id"
+    entity_id = str(entity.id)
+
+    # Delete-and-recreate: credit rows have no external references (the
+    # federated credit id derives from entity + artist), and in-place
+    # updates can transiently violate the ``(entity, artist)`` unique
+    # constraint when credits reorder.
+    await session.execute(delete(ArtistCredit).where(getattr(ArtistCredit, entity_key) == entity_id))
+
+    kept: List[ArtistCredit] = []
+    explicit_joinphrases: List[bool] = []
+    seen_artist_ids: Set[str] = set()
+    for entry in credits:
+        artist = entry["artist"]
+        artist_id = str(artist.id)
+        if artist_id in seen_artist_ids:
+            continue
+        seen_artist_ids.add(artist_id)
+        joinphrase = entry.get("joinphrase")
+        explicit_joinphrases.append(joinphrase is not None)
+        row = ArtistCredit(
+            **{entity_key: entity_id},
+            artist_id=artist_id,
+            artist=artist,
+            credit=entry.get("credit"),
+            joinphrase=joinphrase or "",
+            index=len(kept),
+        )
+        session.add(row)
+        kept.append(row)
+    # Default joinphrases: ``", "`` between credits, ``""`` on the last —
+    # assigned after dedup so positions refer to the final list.
+    for index, row in enumerate(kept[:-1]):
+        if not explicit_joinphrases[index]:
+            row.joinphrase = DEFAULT_CREDIT_JOINPHRASE
+
+    if kept:
+        entity.artist_id = str(kept[0].artist_id)
+    if track is not None:
+        extras = [name for name in artist_credit_names(kept[1:]) if name]
+        track.extra_artists = extras or None
+    await session.flush()
+    return kept
+
+
+async def set_track_artist(
+    session: AsyncSession,
+    track: Track,
+    artist: Artist,
+    extra_names: Optional[List[str]] = None,
+) -> List[ArtistCredit]:
+    """
+    Assign a track's primary artist plus extra credits resolved by name.
+
+    The single entry point for "this track is by ``artist`` feat. ``names``"
+    — file-tag import, external-library sync and the ``extra_artists``
+    API field — which never carries artist ids or joinphrases.
+    """
+    credits: List[dict] = [{"artist": artist}]
+    seen = {str(artist.id)}
+    for raw in extra_names or []:
+        name = raw.strip()
+        if not name:
+            continue
+        extra = await find_or_create_artist(session, name)
+        if str(extra.id) in seen:
+            continue
+        seen.add(str(extra.id))
+        credits.append({"artist": extra})
+    return await set_artist_credits(session, track=track, credits=credits)
+
+
+async def set_artist_credits_by_name(
+    session: AsyncSession,
+    *,
+    track: Optional[Track] = None,
+    album: Optional[Album] = None,
+    names: List[str],
+) -> List[ArtistCredit]:
+    """
+    Replace credits from artist *names* (find-or-create per name).
+
+    Used by name-based writers — the ``extra_artists`` API field, file-tag
+    import and external-library sync — which carry no artist ids, credit
+    aliases or joinphrases.
+    """
+    credits: List[dict] = []
+    seen: Set[str] = set()
+    for raw in names:
+        name = raw.strip()
+        if not name or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+        credits.append({"artist": await find_or_create_artist(session, name)})
+    return await set_artist_credits(session, track=track, album=album, credits=credits)
+
+
+async def reconcile_primary_credit(
+    session: AsyncSession,
+    entity,
+) -> None:
+    """
+    Keep an entity's primary credit (index 0) in sync with ``artist_id``.
+
+    Call this wherever ``entity.artist_id`` is reassigned outside
+    :func:`set_artist_credits` — index-0 credit rows would otherwise keep
+    pointing at the previous artist. The credit's display override
+    (``credit``) is cleared: it described the old artist's credit, not the
+    new one's.
+    """
+    entity_key = "track_id" if isinstance(entity, Track) else "album_id"
+    credits = (
+        (
+            await session.execute(
+                select(ArtistCredit)
+                .where(getattr(ArtistCredit, entity_key) == str(entity.id))
+                .order_by(ArtistCredit.index)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not credits or str(credits[0].artist_id) == str(entity.artist_id):
+        return
+    new_primary = await session.get(Artist, str(entity.artist_id))
+    if new_primary is None:
+        return
+    # Rebuild the list with the new primary first — delete-and-recreate
+    # ordering keeps the ``(entity, artist)`` unique constraint safe even
+    # when the new primary already exists as an extra credit.
+    entries = [{"artist": new_primary}] + [
+        {"artist": row.artist, "credit": row.credit, "joinphrase": row.joinphrase}
+        for row in credits[1:]
+        if row.artist is not None
+    ]
+    await set_artist_credits(
+        session,
+        track=entity if isinstance(entity, Track) else None,
+        album=entity if isinstance(entity, Album) else None,
+        credits=entries,
+    )
 
 
 async def find_or_create_album(

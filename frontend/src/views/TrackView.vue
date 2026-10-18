@@ -76,6 +76,34 @@ const queueTrack = computed(() => {
   });
 });
 
+// Ordered ``artist_credits`` — the first entry is the primary artist
+// (mirrors ``track.artist_id``); ``credit`` is the display-name override
+// and ``joinphrase`` the text emitted after that credit.
+const artistCredits = computed(() => track.value?.artist_credits ?? []);
+
+const primaryArtistDisplay = computed(() => {
+  const primary =
+    artistCredits.value.find((credit) => credit.index === 0) ??
+    artistCredits.value[0];
+  return primary
+    ? primary.credit || primary.artist_name
+    : (artist.value?.name ?? "");
+});
+
+// Each extra credit preceded by the joinphrase of the credit before it —
+// e.g. `", "` for a plain list or `" feat. "` for a featured artist.
+const extraCreditSegments = computed(() => {
+  const credits = [...artistCredits.value].sort(
+    (a, b) => (a.index ?? 0) - (b.index ?? 0),
+  );
+  if (credits.length < 2) return null;
+  return credits.slice(1).map((credit, index) => ({
+    joinphrase: credits[index].joinphrase || ", ",
+    name: credit.credit || credit.artist_name,
+    artistId: credit.artist_id ?? null,
+  }));
+});
+
 const coverUrl = computed(
   () => track.value?.image_url || album.value?.cover_url || null,
 );
@@ -432,9 +460,23 @@ watch(
                 :to="`/artists/${track.artist_id}`"
                 class="track-view__link"
               >
-                {{ artist.name }}
+                {{ primaryArtistDisplay || artist.name }}
               </RouterLink>
-              <span v-if="track.extra_artists?.length"
+              <template v-if="extraCreditSegments?.length">
+                <template
+                  v-for="(segment, index) in extraCreditSegments"
+                  :key="index"
+                >
+                  {{ segment.joinphrase
+                  }}<RouterLink
+                    v-if="segment.artistId"
+                    :to="`/artists/${segment.artistId}`"
+                    class="track-view__link"
+                    >{{ segment.name }}</RouterLink
+                  ><span v-else>{{ segment.name }}</span>
+                </template>
+              </template>
+              <span v-else-if="track.extra_artists?.length"
                 >, {{ track.extra_artists.join(", ") }}</span
               >
             </span>

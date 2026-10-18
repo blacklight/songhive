@@ -15,6 +15,7 @@ from pubby import (
     build_update_activity,
     set_quote_target,
 )
+from pubby.content import format_duration
 
 from ..models import Visibility
 from ..models.activity import Activity
@@ -119,8 +120,8 @@ def create_audio_activity(
         set_post_content(audio_object, description, domain, link_href=get_track_url(track, domain))
 
     if duration is not None:
-        # Integer seconds — Funkwhale's UploadSerializer requires an int.
-        audio_object["duration"] = int(duration)
+        # ISO 8601 — the ``xsd:duration`` both AS2 and Funkwhale ≥ 2.0 expect.
+        audio_object["duration"] = format_duration(duration)
 
     return _create_object_activity(actor_url, audio_object, visibility, mention_actor_urls)
 
@@ -488,6 +489,53 @@ def build_activity_object(activity: Activity) -> dict:
         obj["tag"] = tags
 
     return allow_public_quotes(obj)
+
+
+def build_outbox_activity(activity: Activity) -> Optional[dict]:
+    """
+    Rebuild the ActivityPub activity envelope for a stored local activity.
+
+    This is the document listed in the actor's outbox and served when the
+    activity's own ``{actor}/activities/{id}`` URL is dereferenced.
+    Payload-bearing activities reuse the stored envelope — a ``Create``'s
+    embedded object is refreshed through :func:`build_activity_object`, so
+    edits and deleted-object tombstones surface without rewriting stored
+    payloads. Payload-less rows get a synthesized ``Create`` wrapping the
+    object document, matching what :func:`_create_object_activity` would
+    have delivered.
+
+    ``activity.mentions`` and ``activity.in_reply_to_activity`` are read
+    directly — both are ``selectin`` relationships and are expected to be
+    loaded by the caller's query. Returns ``None`` for visibilities that
+    never federate.
+    """
+    try:
+        if not Visibility.federates(Visibility(activity.visibility)):
+            return None
+    except ValueError:
+        return None
+
+    payload = activity.payload if isinstance(activity.payload, dict) else None
+    if payload is not None:
+        envelope = {"@context": AS_CONTEXT, **payload}
+        if envelope.get("type") == "Create":
+            envelope["object"] = build_activity_object(activity)
+        return envelope
+
+    mention_actor_urls: List[str] = [m.actor_url for m in activity.mentions if m.actor_url]  # type: ignore
+    to, cc = activity_audience(activity.visibility, activity.source_actor, mention_actor_urls)
+    envelope = {
+        "@context": AS_CONTEXT,
+        "type": "Create",
+        "id": f"{activity.source_actor}/activities/{activity.id}",
+        "actor": activity.source_actor,
+        "to": to,
+        "cc": cc,
+        "object": build_activity_object(activity),
+    }
+    if activity.published_at is not None:
+        envelope["published"] = activity.published_at.isoformat()
+    return envelope
 
 
 def create_delete_activity(

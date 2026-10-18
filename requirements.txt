@@ -45,7 +45,7 @@ ytmusicapi>=1.10.0
 yt-dlp>=2025.6.9
 
 # Federation
-pubby>=0.3.11
+pubby>=0.3.12
 webmentions>=0.1.27
 beautifulsoup4>=4.12
 

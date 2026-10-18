@@ -1549,15 +1549,197 @@ async def test_inbox_accepts_actor_as_dict(fed_client, regular_user, monkeypatch
     assert len(mock_task.calls) == 1
 
 
+def _local_activity(user: User, suffix: str, **kwargs) -> Activity:
+    """Build a local activity row owned by ``user``."""
+    actor_url = user.actor_url or f"https://music.example.com/users/{user.username}"
+    kwargs.setdefault("entity_type", "user")
+    kwargs.setdefault("entity_id", str(user.id))
+    kwargs.setdefault("activity_type", "create")
+    kwargs.setdefault("source_type", "local")
+    kwargs.setdefault("source_actor", actor_url)
+    kwargs.setdefault("source_id", f"{actor_url}/objects/{suffix}")
+    kwargs.setdefault("local_object_id", suffix)
+    kwargs.setdefault("owner_user_id", str(user.id))
+    kwargs.setdefault("visibility", Visibility.PUBLIC.value)
+    return Activity(**kwargs)
+
+
 async def test_get_outbox_returns_ordered_collection(fed_client, regular_user):
-    """GET /users/{username}/outbox returns an empty OrderedCollection."""
+    """GET /users/{username}/outbox returns an OrderedCollection index."""
     response = fed_client.get("/users/regular/outbox", headers={"Accept": ACTIVITY_JSON})
     assert response.status_code == status.HTTP_200_OK
 
     data = response.json()
     assert data["type"] == "OrderedCollection"
     assert data["totalItems"] == 0
-    assert data["orderedItems"] == []
+    assert data["first"] == "https://music.example.com/users/regular/outbox?page=1"
+    assert data["last"] == "https://music.example.com/users/regular/outbox?page=1"
+
+    page = fed_client.get("/users/regular/outbox?page=1", headers={"Accept": ACTIVITY_JSON})
+    assert page.status_code == status.HTTP_200_OK
+    page_data = page.json()
+    assert page_data["type"] == "OrderedCollectionPage"
+    assert page_data["partOf"] == data["id"]
+    assert page_data["orderedItems"] == []
+
+
+async def test_get_outbox_lists_public_creates(fed_client, regular_user, db_session):
+    """Public create/announce activities appear as envelope items, newest first."""
+    actor_url = "https://music.example.com/users/regular"
+    older = _local_activity(
+        regular_user,
+        "obj-1",
+        content="first post",
+        published_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        payload={
+            "@context": "https://www.w3.org/ns/activitystreams",
+            "id": f"{actor_url}/activities/env-1",
+            "type": "Create",
+            "actor": actor_url,
+            "object": {"type": "Note", "id": f"{actor_url}/objects/obj-1", "content": "first post"},
+            "to": ["https://www.w3.org/ns/activitystreams#Public"],
+            "cc": [],
+        },
+    )
+    newer = _local_activity(
+        regular_user,
+        "obj-2",
+        content="second post",
+        published_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+    )
+    hidden = [
+        _local_activity(regular_user, "obj-3", visibility=Visibility.FOLLOWERS.value),
+        _local_activity(regular_user, "obj-4", visibility=Visibility.PRIVATE.value),
+        _local_activity(regular_user, "obj-5", activity_type="like"),
+        _local_activity(regular_user, "obj-6", source_type="remote", source_actor="https://remote.example/users/x"),
+        _local_activity(regular_user, "obj-7", deleted_at=datetime.now(timezone.utc)),
+        _local_activity(regular_user, "obj-8", retracted=True),
+    ]
+    db_session.add_all([older, newer, *hidden])
+    await db_session.commit()
+
+    index = fed_client.get("/users/regular/outbox", headers={"Accept": ACTIVITY_JSON}).json()
+    assert index["totalItems"] == 2
+
+    page = fed_client.get("/users/regular/outbox?page=1", headers={"Accept": ACTIVITY_JSON}).json()
+    assert [item["object"]["id"] for item in page["orderedItems"]] == [
+        f"{actor_url}/objects/obj-2",
+        f"{actor_url}/objects/obj-1",
+    ]
+    # The stored envelope's id is preserved for payload-bearing activities.
+    assert page["orderedItems"][1]["id"] == f"{actor_url}/activities/env-1"
+    # Payload-less activities get a synthesized ``Create`` envelope whose id
+    # matches the route that dereferences it.
+    assert page["orderedItems"][0]["id"] == f"{actor_url}/activities/{newer.id}"
+    assert page["orderedItems"][0]["object"]["content"] == "second post"
+
+
+async def test_get_outbox_paginates(fed_client, regular_user, db_session):
+    """More than one page of activities produces linked page documents."""
+    for i in range(25):
+        db_session.add(_local_activity(regular_user, f"obj-{i:02d}"))
+    await db_session.commit()
+
+    page1 = fed_client.get("/users/regular/outbox?page=1", headers={"Accept": ACTIVITY_JSON}).json()
+    assert len(page1["orderedItems"]) == 20
+    assert "prev" not in page1
+    assert page1["next"].endswith("?page=2")
+
+    page2 = fed_client.get("/users/regular/outbox?page=2", headers={"Accept": ACTIVITY_JSON}).json()
+    assert len(page2["orderedItems"]) == 5
+    assert page2["prev"].endswith("?page=1")
+    assert "next" not in page2
+
+
+async def test_get_activity_document_serves_stored_envelope(fed_client, regular_user, db_session):
+    """A delivered ``Create`` envelope is dereferenceable at its own id."""
+    actor_url = "https://music.example.com/users/regular"
+    activity = _local_activity(
+        regular_user,
+        "obj-1",
+        content="hello",
+        payload={
+            "@context": "https://www.w3.org/ns/activitystreams",
+            "id": f"{actor_url}/activities/env-1",
+            "type": "Create",
+            "actor": actor_url,
+            "object": {"type": "Note", "id": f"{actor_url}/objects/obj-1", "content": "hello"},
+            "to": ["https://www.w3.org/ns/activitystreams#Public"],
+            "cc": [],
+        },
+        ap_activity_id="env-1",
+    )
+    db_session.add(activity)
+    await db_session.commit()
+
+    response = fed_client.get("/users/regular/activities/env-1", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+    doc = response.json()
+    assert doc["type"] == "Create"
+    assert doc["id"] == f"{actor_url}/activities/env-1"
+    assert doc["object"]["id"] == f"{actor_url}/objects/obj-1"
+
+
+async def test_get_activity_document_synthesizes_envelope(fed_client, regular_user, db_session):
+    """Payload-less activities are dereferenceable under their row id."""
+    activity = _local_activity(regular_user, "obj-1", content="hello")
+    db_session.add(activity)
+    await db_session.commit()
+
+    response = fed_client.get(f"/users/regular/activities/{activity.id}", headers={"Accept": ACTIVITY_JSON})
+    assert response.status_code == status.HTTP_200_OK
+    doc = response.json()
+    assert doc["type"] == "Create"
+    assert doc["actor"].endswith("/users/regular")
+    assert doc["object"]["type"] == "Note"
+    assert doc["object"]["content"] == "hello"
+
+
+async def test_get_activity_document_404s(fed_client, regular_user, other_user, db_session):
+    """Unknown, remote-owned and followers-only activity ids answer 404."""
+    foreign = _local_activity(
+        other_user,
+        "obj-1",
+        source_actor="https://music.example.com/users/other",
+    )
+    private = _local_activity(regular_user, "obj-2", visibility=Visibility.PRIVATE.value)
+    db_session.add_all([foreign, private])
+    await db_session.commit()
+
+    for path in (
+        f"/users/regular/activities/{foreign.id}",
+        f"/users/regular/activities/{private.id}",
+        "/users/regular/activities/nonexistent",
+    ):
+        assert fed_client.get(path, headers={"Accept": ACTIVITY_JSON}).status_code == status.HTTP_404_NOT_FOUND
+
+
+async def test_get_following_lists_accepted_actor_follows(fed_client, regular_user, db_session):
+    """``following`` lists accepted actor follows — not pending or object follows."""
+    from songhive.models.follow import FOLLOW_STATE_PENDING, Follow
+
+    def _follow(target: str, state: str, object_type: str = "Person") -> Follow:
+        return Follow(
+            user_id=str(regular_user.id),
+            actor_url="https://music.example.com/users/regular",
+            target_actor_url=target,
+            state=state,
+            actor_data={"id": target, "type": object_type},
+        )
+
+    db_session.add_all(
+        [
+            _follow("https://remote.example/users/alice", "accepted"),
+            _follow("https://remote.example/libraries/lib-1", "accepted", object_type="Library"),
+            _follow("https://remote.example/users/pending-bob", FOLLOW_STATE_PENDING),
+        ]
+    )
+    await db_session.commit()
+
+    data = fed_client.get("/users/regular/following", headers={"Accept": ACTIVITY_JSON}).json()
+    assert data["type"] == "OrderedCollection"
+    assert data["totalItems"] == 1
+    assert data["orderedItems"] == ["https://remote.example/users/alice"]
 
 
 async def test_get_following_returns_ordered_collection(fed_client, regular_user):

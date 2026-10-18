@@ -452,6 +452,17 @@ async def _create_track_record(
     )
     session.add(track)
     await session.flush()
+    # Write the artist_credits rows — the primary plus any extra names a
+    # multi-valued ``artist`` tag carried (``set_track_artist`` also keeps
+    # ``artist_id``/``extra_artists`` in sync).
+    from .music import set_track_artist
+
+    await set_track_artist(
+        session,
+        track,
+        artist,
+        list(metadata.artists[1:]) if len(metadata.artists) > 1 else None,
+    )
     return track
 
 

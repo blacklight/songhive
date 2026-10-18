@@ -3,6 +3,7 @@ from .activity import Activity, ActivityMention, ActivityTag, ActivityTarget
 from .album import Album
 from .api_token import ApiToken
 from .artist import Artist
+from .artist_credit import ArtistCredit
 from .audit_log import AuditLog, AuditTargetType
 from .base import Base, get_session, init_db, reset_db
 from .collection_item import CollectionItem
@@ -74,6 +75,7 @@ __all__ = [
     "Album",
     "ApiToken",
     "Artist",
+    "ArtistCredit",
     "AuditLog",
     "AuditTargetType",
     "Base",

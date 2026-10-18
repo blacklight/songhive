@@ -18,11 +18,13 @@ from pubby.content import (
 from sqlalchemy import inspect as sa_inspect
 
 from ..models import Album, Artist, StoredFile, Track, Visibility
+from ..models.artist_credit import joined_artist_credit
 from ..services.genres import extract_genres_from_track, genres_to_tags
 from ._common import (
     active_external_item,
     active_external_track,
     gated_stream_url,
+    get_music_track_url,
     get_stream_url,
     get_tag_url,
     get_track_download_path,
@@ -234,8 +236,17 @@ def _track_name(track: Track, artist: Artist) -> str:
     ``normalize_post_content``).  The label is HTML-escaped so a crafted
     artist/title cannot inject markup on servers that still interpolate
     ``name`` unescaped.
+
+    When the track's ``artist_credits`` rows are loaded the rendered
+    credit string (e.g. ``"A feat. B"``) names the object instead of the
+    primary artist alone.
     """
-    return html.escape(f"{artist.name} - {track.title}", quote=False)
+    artist_name = artist.name
+    if "artist_credits" not in getattr(sa_inspect(track), "unloaded", frozenset()):
+        credit_name = joined_artist_credit(getattr(track, "artist_credits", None) or [])
+        if credit_name:
+            artist_name = credit_name
+    return html.escape(f"{artist_name} - {track.title}", quote=False)
 
 
 def _track_attributed_to(artist: Artist, domain: str, actor_url: Optional[str]) -> "str | list":
@@ -324,6 +335,100 @@ def artist_to_music_object(
     return doc
 
 
+def artist_credit_object(
+    credit_id: str,
+    artist_doc: dict,
+    published: str,
+    *,
+    credit: Optional[str] = None,
+    joinphrase: str = "",
+    index: int = 0,
+) -> dict:
+    """
+    Serialize an ``ArtistCredit`` — the FEP-be68 credited-artist entry
+    required by Funkwhale ≥ 2.0 (``artist_credit`` supersedes the 1.x
+    ``artists`` list on ``Track``/``Album`` documents).
+
+    ``credit_id`` must be stable per (entity, artist): Funkwhale
+    ``get_or_create``s credits by their id, so an id that later points at a
+    different artist silently keeps the old mapping. ``credit`` is the
+    credited name (defaults to the artist's canonical name);
+    ``joinphrase`` is the text emitted after this credit when joining a
+    multi-artist credit string (e.g. ``" feat. "``).
+    """
+    return {
+        "type": "ArtistCredit",
+        "id": credit_id,
+        "artist": artist_doc,
+        "credit": credit if credit is not None else artist_doc.get("name"),
+        "joinphrase": joinphrase,
+        "index": index,
+        "published": published,
+    }
+
+
+def _artist_credits(
+    entity_url: str,
+    artist_docs: list[dict],
+    published: str,
+) -> list[dict]:
+    """
+    Build the ``artist_credit`` list for a Track/Album document.
+
+    Until multi-artist credits are modeled, each entity carries a single
+    primary credit; its id derives from the credited artist's id extracted
+    from the artist document URL, keeping the credit id stable across
+    re-serializations and unique per (entity, artist).
+    """
+    credits = []
+    for artist_doc in artist_docs:
+        artist_id = str(artist_doc.get("id") or "").rsplit("/", 1)[-1]
+        if not artist_id:
+            continue
+        credits.append(artist_credit_object(f"{entity_url}/credits/{artist_id}", artist_doc, published))
+    return credits
+
+
+def _artist_docs_and_credits(
+    entity,
+    entity_url: str,
+    fallback_artists: list[dict],
+    published: str,
+    domain: str,
+    actor_url: Optional[str],
+) -> "tuple[list, list]":
+    """
+    Return ``(artist_docs, credit_docs)`` for a track/album document.
+
+    ``artist_credits`` rows — when present — are the source of truth: they
+    carry credit aliases and joinphrases and may list several artists.
+    When the relationship is unloaded or empty the legacy single-artist
+    ``artists`` list plus a synthesized primary credit is emitted.
+    """
+    unloaded: frozenset = getattr(sa_inspect(entity), "unloaded", frozenset())
+    rows = getattr(entity, "artist_credits", None) if "artist_credits" not in unloaded else None
+    if rows:
+        artists, credits = [], []
+        for row in rows:
+            if row.artist is None:
+                continue
+            artist_doc = artist_to_music_object(row.artist, domain, actor_url)
+            artists.append(artist_doc)
+            credits.append(
+                artist_credit_object(
+                    f"{entity_url}/credits/{row.artist_id}",
+                    artist_doc,
+                    published,
+                    credit=row.credit,
+                    joinphrase=row.joinphrase,
+                    index=row.index,
+                )
+            )
+        if credits:
+            return artists, credits
+    return fallback_artists, _artist_credits(entity_url, fallback_artists, published)
+
+
 def album_to_music_object(
     album: Album,
     artist: Optional[Artist],
@@ -338,9 +443,11 @@ def album_to_music_object(
     ``artists`` always carries at least one entry — Funkwhale's
     ``AlbumSerializer`` requires it — so a missing artist relation produces
     a stub artist document. ``released`` is derived from ``release_year``
-    (a year-only value serializes as January 1st).
+    (a year-only value serializes as January 1st). ``artist_credit``
+    mirrors ``artists`` for Funkwhale ≥ 2.0 importers.
     """
-    artists = (
+    album_url = f"https://{domain}/albums/{album.id}"
+    fallback_artists = (
         [artist_to_music_object(artist, domain, actor_url)]
         if artist is not None
         else [
@@ -356,15 +463,19 @@ def album_to_music_object(
             }
         ]
     )
+    artists, credits = _artist_docs_and_credits(
+        album, album_url, fallback_artists, _entity_published(album), domain, actor_url
+    )
     doc: dict = {
         "type": "Album",
-        "id": f"https://{domain}/albums/{album.id}",
+        "id": album_url,
         "name": album.title,
         "published": _entity_published(album),
         "musicbrainzId": album.musicbrainz_id or None,
         "released": f"{album.release_year}-01-01" if album.release_year else None,
         "attributedTo": actor_url,
         "artists": artists,
+        "artist_credit": credits,
         "tag": [],
         "image": None,
     }
@@ -399,8 +510,12 @@ def track_to_music_track_object(
     single-track album document.
     """
     unloaded = _unloaded_attrs(track)
-    track_url = get_track_url(track=track, domain=domain)
+    track_url = get_music_track_url(track=track, domain=domain)
     album = _loaded_album(track, unloaded)
+    fallback_artists = [artist_to_music_object(artist, domain, actor_url)] if artist is not None else []
+    artists, credits = _artist_docs_and_credits(
+        track, track_url, fallback_artists, _entity_published(track), domain, actor_url
+    )
     if album is not None:
         album_doc = album_to_music_object(album, getattr(album, "artist", None) or artist, domain, actor_url)
     else:
@@ -412,7 +527,10 @@ def track_to_music_track_object(
             "musicbrainzId": None,
             "released": f"{track.release_year}-01-01" if track.release_year else None,
             "attributedTo": actor_url,
-            "artists": [artist_to_music_object(artist, domain, actor_url)] if artist is not None else [],
+            "artists": artists,
+            "artist_credit": [
+                {**credit, "id": f"{track_url}/album{credit['id'][len(track_url):]}"} for credit in credits
+            ],
             "tag": [],
             "image": None,
         }
@@ -427,7 +545,8 @@ def track_to_music_track_object(
         "disc": track.disc_number,
         "license": None,
         "copyright": None,
-        "artists": [artist_to_music_object(artist, domain, actor_url)] if artist is not None else [],
+        "artists": artists,
+        "artist_credit": credits,
         "album": album_doc,
         "attributedTo": actor_url,
         "tag": [],
@@ -569,8 +688,6 @@ def track_to_audio_object(
     # Unix epoch when it is missing).
     published = _track_published(track, unloaded)
 
-    # Integer seconds — Funkwhale's ``UploadSerializer.duration`` is an
-    # IntegerField; an ISO-8601 duration would fail its import validation.
     duration_seconds = int(track.duration) if track.duration else 0
     audio_file = getattr(track, "audio_file", None) if "audio_file" not in unloaded else None
     external_track = active_external_track(track)
@@ -629,8 +746,10 @@ def track_to_audio_object(
         # instead of the track page.
         "url": urls,
         "attributedTo": _track_attributed_to(artist, domain, actor_url),
-        # Federated-music (Funkwhale dialect) fields.
-        "duration": duration_seconds,
+        # Federated-music (Funkwhale dialect) fields. ``duration`` is the
+        # AS2 ``xsd:duration`` both the spec and Funkwhale ≥ 2.0 require —
+        # Funkwhale 1.x's integer-seconds form is no longer accepted.
+        "duration": format_duration(duration_seconds),
         "bitrate": bitrate,
         "size": size,
         "track": track_to_music_track_object(track, artist, domain, actor_url),
@@ -654,6 +773,8 @@ def track_to_audio_object(
             "url": stream_url,
             "name": track.title,
         }
+        if track.duration:
+            audio_attachment["duration"] = format_duration(track.duration)
         _enrich_track_attachment(audio_attachment, track, artist, domain)
         obj["attachment"] = [audio_attachment]
     elif browse_link is not None:

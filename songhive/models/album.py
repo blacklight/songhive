@@ -13,6 +13,7 @@ from .base import Base, TZDateTime
 
 if TYPE_CHECKING:
     from .artist import Artist
+    from .artist_credit import ArtistCredit
     from .genre import Genre, GenreAlbum
     from .tag import Tag, TagAlbum
     from .track import Track
@@ -42,6 +43,13 @@ class Album(Base):
     )
 
     artist: Mapped["Artist"] = relationship("Artist", back_populates="albums", lazy="selectin")
+    artist_credits: Mapped[List["ArtistCredit"]] = relationship(
+        "ArtistCredit",
+        back_populates="album",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+        order_by="ArtistCredit.index",
+    )
     cover_file = relationship("StoredFile", foreign_keys=[cover_file_id], lazy="selectin")
     owner = relationship("User", foreign_keys=[owner_id], lazy="selectin")
     tracks: Mapped[List["Track"]] = relationship("Track", back_populates="album", lazy="raise", passive_deletes=True)

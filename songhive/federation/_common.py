@@ -1,5 +1,6 @@
 from typing import Optional, Union
 
+from pubby.content import parse_duration  # noqa: F401  (re-exported)
 from sqlalchemy import inspect as sa_inspect
 
 from ..models.external_item import ExternalItem
@@ -38,6 +39,19 @@ def get_tag_url(domain: str, name: str) -> str:
 def get_track_url(track: Union[Track, str], domain: str) -> str:
     track_id = track.id if isinstance(track, Track) else track
     return f"https://{domain}/tracks/{track_id}"
+
+
+def get_music_track_url(track: Union[Track, str], domain: str) -> str:
+    """
+    Get the dereferenceable ActivityPub URL of a track's ``Track`` object.
+
+    ``/tracks/{id}`` is the human page (its AP dereference returns the
+    published ``Audio``); the catalog ``Track`` document lives under
+    ``/music/tracks/{id}`` — the same entity-per-URI split Funkwhale makes
+    between ``uploads`` and ``tracks``.
+    """
+    track_id = track.id if isinstance(track, Track) else track
+    return f"https://{domain}/music/tracks/{track_id}"
 
 
 def active_external_track(track: Track) -> Optional[ExternalTrack]:

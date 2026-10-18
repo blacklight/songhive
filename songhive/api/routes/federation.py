@@ -4,12 +4,18 @@ Per-user ActivityPub federation routes and WebFinger discovery.
 
 import asyncio
 import base64
+import uuid
 from dataclasses import dataclass
 from typing import Any, Iterable, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse, RedirectResponse
 from pubby.cache import normalize_webfinger_resource
+from pubby.collections import (
+    ordered_collection,
+    ordered_collection_index,
+    ordered_collection_page,
+)
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -19,6 +25,7 @@ from ...federation import doc_cache, get_actor_url, get_stream_url
 from ...federation.activities import (
     activity_audience,
     build_activity_object,
+    build_outbox_activity,
     build_tombstone_object,
 )
 from ...federation.actors import get_federation_storage
@@ -29,9 +36,11 @@ from ...federation.serializers import (
     library_to_music_object,
     music_collection_page,
     track_to_audio_object,
+    track_to_music_track_object,
 )
 from ...models import Activity, Album, Artist, Library, LibraryTrack, Track, User, Visibility
 from ...models.base import get_session
+from ...models.follow import FOLLOW_STATE_ACCEPTED, Follow
 from ...models.moderation import ADMIN_ACTION_SUSPEND, AdminUserModeration
 from ...services import activities as activities_service
 from ...services import moderation as moderation_service
@@ -69,13 +78,28 @@ def _federation_config(request: Request) -> SonghiveConfig:
 
 
 def _ordered_collection(collection_id: str, items: list[str]) -> dict[str, Any]:
-    return {
-        "@context": AP_CONTEXT,
-        "id": collection_id,
-        "type": "OrderedCollection",
-        "totalItems": len(items),
-        "orderedItems": items,
-    }
+    return ordered_collection(collection_id, items, context=AP_CONTEXT)
+
+
+def _paged_collection_index(collection_id: str, total_items: int, page_size: int) -> dict:
+    """Return an ``OrderedCollection`` index linking its page documents."""
+    return ordered_collection_index(collection_id, total_items, page_size, context=AP_CONTEXT)
+
+
+def _paged_collection_page(collection_id: str, page: int, total_items: int, items: list, page_size: int) -> dict:
+    """Return an ``OrderedCollectionPage`` of a paged collection."""
+    return ordered_collection_page(collection_id, page, total_items, items, page_size, context=AP_CONTEXT)
+
+
+def _page_number(request: Request) -> Optional[int]:
+    """Return the normalized ``?page=N`` value — ``None`` when absent."""
+    page = request.query_params.get("page")
+    if page is None:
+        return None
+    try:
+        return max(1, int(page))
+    except ValueError:
+        return 1
 
 
 _FEDERATING_VISIBILITIES = [v.value for v in Visibility if Visibility.federates(v)]
@@ -705,24 +729,120 @@ async def post_inbox(
     return await _enqueue_incoming(request, username=username)
 
 
+# Activity types listed in the actor's outbox — ``create`` and ``announce``
+# match what remote consumers (Funkwhale outbox scans, Mastodon profile
+# backfill) expect; reactions stay off the public outbox.
+_OUTBOX_ACTIVITY_TYPES = ("create", "announce")
+_OUTBOX_PAGE_SIZE = 20
+
+
+def _outbox_conditions(user: User) -> tuple:
+    """Return the predicates selecting an owner's publicly listed activities."""
+    return (
+        Activity.source_type == "local",
+        Activity.owner_user_id == str(user.id),
+        Activity.deleted_at.is_(None),
+        Activity.retracted.is_(False),
+        Activity.visibility == Visibility.PUBLIC.value,
+        Activity.activity_type.in_(_OUTBOX_ACTIVITY_TYPES),
+    )
+
+
 @router.get("/users/{username}/outbox")
 async def get_outbox(
     username: str,
     request: Request,
 ):
-    """Return the user's outbox collection."""
+    """
+    Return the user's outbox collection.
+
+    The index document (``?page`` absent) links paged
+    ``OrderedCollectionPage``s whose ``orderedItems`` carry the full
+    activity envelopes — the shape Funkwhale scans for ``Audio`` uploads
+    and Mastodon-compatible servers use for profile backfill. Only
+    ``public`` ``create``/``announce`` activities of the actor are listed.
+    """
+    config = _federation_config(request)
+    ttl = _document_ttl(config)
+    page_num = _page_number(request)
+    outbox_url = f"{get_actor_url(config.federation.instance_domain, username)}/outbox"
+
+    async def _render() -> Optional[dict]:
+        async with get_session() as db:
+            user = await _federating_user_or_none(db, username)
+            if user is None:
+                return None
+            conditions = _outbox_conditions(user)
+            total = (await db.execute(select(func.count(Activity.id)).where(*conditions))).scalar_one()
+            if page_num is None:
+                return _paged_collection_index(outbox_url, total, _OUTBOX_PAGE_SIZE)
+            rows = (
+                (
+                    await db.execute(
+                        select(Activity)
+                        .options(
+                            selectinload(Activity.mentions),
+                            selectinload(Activity.in_reply_to_activity),
+                        )
+                        .where(*conditions)
+                        .order_by(Activity.published_at.desc(), Activity.id.desc())
+                        .offset((page_num - 1) * _OUTBOX_PAGE_SIZE)
+                        .limit(_OUTBOX_PAGE_SIZE)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            items = [doc for doc in (build_outbox_activity(row) for row in rows) if doc is not None]
+            return _paged_collection_page(outbox_url, page_num, total, items, _OUTBOX_PAGE_SIZE)
+
+    document = await doc_cache.get_or_render(("coll", username, "outbox", page_num), ttl, _render)
+    return _serve_cached_document(request, ("coll", username, "outbox", page_num), ttl, document)
+
+
+@router.get("/users/{username}/activities/{activity_id}")
+async def get_activity_document(
+    username: str,
+    activity_id: str,
+    request: Request,
+):
+    """
+    Dereference an activity envelope id delivered to remote inboxes.
+
+    ``{actor}/activities/{uuid}`` envelopes minted at delivery time are
+    recorded on ``Activity.ap_activity_id``; payload-less activities are
+    dereferenceable under their row id, matching the id
+    ``build_outbox_activity`` synthesizes for them.
+    """
     config = _federation_config(request)
     ttl = _document_ttl(config)
 
     async def _render() -> Optional[dict]:
         async with get_session() as db:
-            if await _federating_user_or_none(db, username) is None:
+            user = await _federating_user_or_none(db, username)
+            if user is None:
                 return None
-        actor_url = get_actor_url(config.federation.instance_domain, username)
-        return _ordered_collection(f"{actor_url}/outbox", [])
+            result = await db.execute(
+                select(Activity)
+                .options(
+                    selectinload(Activity.mentions),
+                    selectinload(Activity.in_reply_to_activity),
+                )
+                .where(
+                    Activity.owner_user_id == str(user.id),
+                    Activity.source_type == "local",
+                    Activity.deleted_at.is_(None),
+                    Activity.retracted.is_(False),
+                    or_(Activity.id == activity_id, Activity.ap_activity_id == activity_id),
+                )
+            )
+            activity = result.scalar_one_or_none()
+            if activity is None:
+                return None
+            return build_outbox_activity(activity)
 
-    document = await doc_cache.get_or_render(("coll", username, "outbox"), ttl, _render)
-    return _serve_cached_document(request, ("coll", username, "outbox"), ttl, document)
+    document = await doc_cache.get_or_render(("actenv", username, activity_id), ttl, _render)
+    return _serve_cached_document(request, ("actenv", username, activity_id), ttl, document)
 
 
 @router.get("/users/{username}/followers")
@@ -761,10 +881,34 @@ async def get_following(
 
     async def _render() -> Optional[dict]:
         async with get_session() as db:
-            if await _federating_user_or_none(db, username) is None:
+            user = await _federating_user_or_none(db, username)
+            if user is None:
                 return None
-        actor_url = get_actor_url(config.federation.instance_domain, username)
-        return _ordered_collection(f"{actor_url}/following", [])
+            follows = (
+                (
+                    await db.execute(
+                        select(Follow)
+                        .where(
+                            Follow.user_id == str(user.id),
+                            Follow.state == FOLLOW_STATE_ACCEPTED,
+                        )
+                        .order_by(Follow.created_at.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            # Object-scoped follows (remote libraries, thread
+            # subscriptions) share the table — only actor follows belong
+            # in the ``following`` collection.
+            actor_urls = [
+                f.target_actor_url
+                for f in follows
+                if (f.actor_data or {}).get("type")
+                in (None, "Person", "Service", "Group", "Organization", "Application")
+            ]
+            actor_url = get_actor_url(config.federation.instance_domain, username)
+            return _ordered_collection(f"{actor_url}/following", actor_urls)
 
     document = await doc_cache.get_or_render(("coll", username, "following"), ttl, _render)
     return _serve_cached_document(request, ("coll", username, "following"), ttl, document)
@@ -946,24 +1090,35 @@ async def _audio_items(
     domain: str,
     actor_url: str,
     library_url: str,
+    config: Optional[SonghiveConfig] = None,
 ) -> list[dict]:
-    tracks = list(tracks)
+    tracks = [track for track in tracks if track.artist is not None]
+    for track in tracks:
+        # The ``Audio`` object id lives under the *owner's* actor — the
+        # ``get_object`` route resolves objects per owning user — so mint
+        # the id lazily here to let library pages and later ``Create``
+        # deliveries share one dereferenceable id for the track's upload.
+        if not track.federation_object_id:
+            track.federation_object_id = str(uuid.uuid4())
+    if tracks:
+        await db.flush()
     gates = await payment_access.effective_gates(db, tracks)
-    return [
-        doc
-        for track in tracks
-        if (
-            doc := track_to_audio_object(
-                track,
-                track.artist,
-                domain,
-                actor_url=actor_url,
-                library_url=library_url,
-                sale=gates.get(str(track.id)),
-            )
+    items = []
+    for track in tracks:
+        owner = getattr(track, "owner", None)
+        item_actor = _owner_actor_url(owner, config) if config is not None and owner is not None else actor_url
+        doc = track_to_audio_object(
+            track,
+            track.artist,
+            domain,
+            actor_url=item_actor,
+            ap_object_id=f"{item_actor}/objects/{track.federation_object_id}",
+            library_url=library_url,
+            sale=gates.get(str(track.id)),
         )
-        is not None
-    ]
+        if doc is not None:
+            items.append(doc)
+    return items
 
 
 def _library_track_query(library_id: str):
@@ -1042,6 +1197,20 @@ async def get_artist_document(
     return _serve_cached_document(request, ("artist", artist_id), ttl, document)
 
 
+async def _album_music_document(db: AsyncSession, album_id: str, config: SonghiveConfig) -> Optional[dict]:
+    """Render the federated ``Album`` document for a public album, or ``None``."""
+    album = (
+        await db.execute(
+            select(Album)
+            .options(selectinload(Album.artist), selectinload(Album.cover_file))
+            .where(Album.id == album_id, Album.visibility == Visibility.PUBLIC.value)
+        )
+    ).scalar_one_or_none()
+    if album is None:
+        return None
+    return album_to_music_object(album, album.artist, config.federation.instance_domain, _instance_actor_url(config))
+
+
 @router.get("/albums/{album_id}")
 async def get_album_document(
     album_id: str,
@@ -1055,23 +1224,164 @@ async def get_album_document(
 
     async def _render() -> Optional[dict]:
         async with get_session() as db:
-            album = (
-                await db.execute(
-                    select(Album)
-                    .options(selectinload(Album.artist), selectinload(Album.cover_file))
-                    .where(Album.id == album_id, Album.visibility == Visibility.PUBLIC.value)
-                )
-            ).scalar_one_or_none()
-            if album is None:
-                return None
-            doc = album_to_music_object(
-                album, album.artist, config.federation.instance_domain, _instance_actor_url(config)
-            )
-            doc["@context"] = MUSIC_ENTITY_CONTEXT
+            doc = await _album_music_document(db, album_id, config)
+            if doc is not None:
+                doc["@context"] = MUSIC_ENTITY_CONTEXT
             return doc
 
     document = await doc_cache.get_or_render(("album", album_id), ttl, _render)
     return _serve_cached_document(request, ("album", album_id), ttl, document)
+
+
+def _find_artist_credit(doc: dict, artist_id: str) -> Optional[dict]:
+    """
+    Return the ``artist_credit`` entry crediting ``artist_id``, or ``None``.
+
+    Credit ids end with ``/credits/{artist_id}`` — matching the suffix (not
+    the contained artist doc) keeps the lookup unambiguous on nested docs.
+    """
+
+    def _match(credits: Any) -> Optional[dict]:
+        for credit in credits or []:
+            if isinstance(credit, dict) and str(credit.get("id") or "").rsplit("/credits/", 1)[-1] == artist_id:
+                return credit
+        return None
+
+    found = _match(doc.get("artist_credit"))
+    if found is None:
+        album = doc.get("album")
+        if isinstance(album, dict):
+            found = _match(album.get("artist_credit"))
+    return found
+
+
+@router.get("/albums/{album_id}/credits/{artist_id}")
+async def get_album_credit_document(
+    album_id: str,
+    artist_id: str,
+    request: Request,
+    config: SonghiveConfig = Depends(get_config),
+) -> Response:
+    """Dereference an ``ArtistCredit`` embedded in an ``Album`` document."""
+    ttl = _document_ttl(config)
+
+    async def _render() -> Optional[dict]:
+        async with get_session() as db:
+            doc = await _album_music_document(db, album_id, config)
+            if doc is None:
+                return None
+            credit = _find_artist_credit(doc, artist_id)
+            if credit is not None:
+                credit = {"@context": MUSIC_ENTITY_CONTEXT, **credit}
+            return credit
+
+    document = await doc_cache.get_or_render(("album", album_id, "credit", artist_id), ttl, _render)
+    return _serve_cached_document(request, ("album", album_id, "credit", artist_id), ttl, document)
+
+
+async def _music_track_document(db: AsyncSession, track_id: str, config: SonghiveConfig) -> Optional[dict]:
+    """Render the federated ``Track`` document for a public track, or ``None``."""
+    track = (
+        await db.execute(
+            select(Track)
+            .options(
+                selectinload(Track.artist).selectinload(Artist.image_file),
+                selectinload(Track.album).selectinload(Album.artist),
+                selectinload(Track.album).selectinload(Album.cover_file),
+                selectinload(Track.owner),
+            )
+            .where(Track.id == track_id, Track.visibility == Visibility.PUBLIC.value)
+        )
+    ).scalar_one_or_none()
+    if track is None or track.artist is None:
+        return None
+    return track_to_music_track_object(
+        track,
+        track.artist,
+        config.federation.instance_domain,
+        _owner_actor_url(track.owner, config),
+    )
+
+
+@router.get("/music/tracks/{track_id}")
+async def get_music_track_document(
+    track_id: str,
+    request: Request,
+    config: SonghiveConfig = Depends(get_config),
+) -> Response:
+    """
+    Serve a public track's federated ``Track`` document.
+
+    ``/tracks/{id}`` stays the human page (its AP dereference returns the
+    published ``Audio``); the catalog ``Track`` object dereferences at
+    ``/music/tracks/{id}`` — matching the upload/recording split Funkwhale
+    makes between its ``uploads`` and ``tracks`` federation URLs.
+    """
+    if _accepts_html(request) and not _accepts_activitypub(request):
+        return RedirectResponse(url=f"/tracks/{track_id}", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
+    ttl = _document_ttl(config)
+
+    async def _render() -> Optional[dict]:
+        async with get_session() as db:
+            doc = await _music_track_document(db, track_id, config)
+            if doc is not None:
+                doc["@context"] = MUSIC_ENTITY_CONTEXT
+            return doc
+
+    document = await doc_cache.get_or_render(("mtrack", track_id), ttl, _render)
+    return _serve_cached_document(request, ("mtrack", track_id), ttl, document)
+
+
+@router.get("/music/tracks/{track_id}/album")
+async def get_music_track_album_document(
+    track_id: str,
+    request: Request,
+    config: SonghiveConfig = Depends(get_config),
+) -> Response:
+    """
+    Serve the synthesized single-track ``Album`` of an album-less track.
+
+    Real albums dereference at ``/albums/{id}``; only tracks without an
+    album answer here, matching the ``{track}/album`` document embedded in
+    their ``Audio`` objects.
+    """
+    ttl = _document_ttl(config)
+
+    async def _render() -> Optional[dict]:
+        async with get_session() as db:
+            doc = await _music_track_document(db, track_id, config)
+            album = doc.get("album") if doc is not None else None
+            if doc is None or not isinstance(album, dict) or album.get("id") != f"{doc.get('id')}/album":
+                return None
+            return {"@context": MUSIC_ENTITY_CONTEXT, **album}
+
+    document = await doc_cache.get_or_render(("mtrack", track_id, "album"), ttl, _render)
+    return _serve_cached_document(request, ("mtrack", track_id, "album"), ttl, document)
+
+
+@router.get("/music/tracks/{track_id}/album/credits/{artist_id}")
+@router.get("/music/tracks/{track_id}/credits/{artist_id}")
+async def get_music_track_credit_document(
+    track_id: str,
+    artist_id: str,
+    request: Request,
+    config: SonghiveConfig = Depends(get_config),
+) -> Response:
+    """Dereference an ``ArtistCredit`` embedded in a ``Track`` document."""
+    ttl = _document_ttl(config)
+
+    async def _render() -> Optional[dict]:
+        async with get_session() as db:
+            doc = await _music_track_document(db, track_id, config)
+            if doc is None:
+                return None
+            credit = _find_artist_credit(doc, artist_id)
+            if credit is not None:
+                credit = {"@context": MUSIC_ENTITY_CONTEXT, **credit}
+            return credit
+
+    document = await doc_cache.get_or_render(("mtrack", track_id, "credit", artist_id), ttl, _render)
+    return _serve_cached_document(request, ("mtrack", track_id, "credit", artist_id), ttl, document)
 
 
 @router.get("/libraries/{library_id}")
@@ -1150,7 +1460,7 @@ async def get_library_document(
                 library_url,
                 page_num,
                 total,
-                await _audio_items(db, tracks, domain, actor_url, library_url),
+                await _audio_items(db, tracks, domain, actor_url, library_url, config=config),
                 actor_url,
                 page_size=_LIBRARY_PAGE_SIZE,
             )
@@ -1269,7 +1579,7 @@ async def get_user_library_document(
                 library_url,
                 page_num,
                 total,
-                await _audio_items(db, tracks, domain, actor_url, library_url),
+                await _audio_items(db, tracks, domain, actor_url, library_url, config=config),
                 actor_url,
                 page_size=_LIBRARY_PAGE_SIZE,
             )

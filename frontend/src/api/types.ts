@@ -6742,6 +6742,34 @@ export interface components {
       cover_url?: string | null;
     };
     /**
+     * ArtistCreditSummary
+     * @description One entry of a track's ``artist_credits`` list.
+     */
+    ArtistCreditSummary: {
+      /**
+       * Artist Id
+       * @default null
+       */
+      artist_id?: string | null;
+      /** Artist Name */
+      artist_name: string;
+      /**
+       * Credit
+       * @default null
+       */
+      credit?: string | null;
+      /**
+       * Joinphrase
+       * @default ""
+       */
+      joinphrase?: string;
+      /**
+       * Index
+       * @default 0
+       */
+      index?: number;
+    };
+    /**
      * ArtistUpdate
      * @description Artist partial update.
      */
@@ -10207,6 +10235,15 @@ export interface components {
        * @default []
        */
       extra_artists: string[];
+      /**
+       * Artist Credits
+       * @description Ordered artist credits — index 0 is the primary credit (mirrors
+       *     ``artist_id``); ``credit`` overrides the artist's canonical name for
+       *     display and ``joinphrase`` is the text emitted after the credit in
+       *     the joined credit string (e.g. ``"A feat. B"``).
+       * @default []
+       */
+      artist_credits: components["schemas"]["ArtistCreditSummary"][];
       /** Audio Url */
       audio_url?: string | null;
       /** Image Url */

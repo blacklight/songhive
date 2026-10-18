@@ -153,7 +153,7 @@ def test_create_audio_activity_duration_override():
     )
 
     assert activity is not None
-    assert activity["object"]["duration"] == 195
+    assert activity["object"]["duration"] == "PT3M15S"
 
 
 def test_outbox_caller_skips_non_public_tracks():
@@ -320,6 +320,7 @@ def test_track_to_audio_object_external_track():
             "mediaType": "audio/flac",
             "url": "https://music.example.com/api/v1/tracks/track-1/download",
             "name": "TestTrack",
+            "duration": "PT2M",
             "songhive:trackTitle": "TestTrack",
             "songhive:artistName": "TestArtist",
             "songhive:trackUrl": "https://music.example.com/tracks/track-1",

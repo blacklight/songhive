@@ -31,6 +31,7 @@ from sqlalchemy import delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import SonghiveConfig
+from ..federation._common import parse_duration
 from ..federation.fetch import FetchError, FetchNotFound, FetchResult, guarded_fetch
 from ..models.activity import Activity, ActivityMention
 from ..models.collection_item import CollectionItem
@@ -851,10 +852,10 @@ def _parent_url_of(obj: dict) -> Optional[str]:
     if obj_type == "Track":
         return _as_url(obj.get("album"))
     if obj_type == "Album":
-        artists = obj.get("artists") or obj.get("artist_credit")
-        if isinstance(artists, list) and artists:
+        artists = _embedded_artist_docs(obj)
+        if artists:
             return _as_url(artists[0])
-        return _as_url(artists)
+        return _as_url(obj.get("artists") or obj.get("artist_credit"))
     if obj_type in _COLLECTION_PAGE_TYPES:
         return _as_url(obj.get("partOf"))
     return None
@@ -1241,11 +1242,11 @@ def _iter_embedded_music_docs(obj: dict):
             album = track.get("album")
             if isinstance(album, dict):
                 yield album, _as_url(track.get("album"))
-                for artist_doc, _ in _yield_doc(album.get("artists") or album.get("artist_credit"), album.get("id")):
+                for artist_doc in _embedded_artist_docs(album):
                     yield artist_doc, None
-            for artist_doc, _ in _yield_doc(track.get("artists") or track.get("artist_credit"), track.get("id")):
+            for artist_doc in _embedded_artist_docs(track):
                 yield artist_doc, None
-        for artist_doc, _ in _yield_doc(obj.get("artists") or obj.get("artist_credit"), obj_id):
+        for artist_doc in _embedded_artist_docs(obj):
             yield artist_doc, None
         library = obj.get("library")
         if isinstance(library, dict):
@@ -1254,12 +1255,12 @@ def _iter_embedded_music_docs(obj: dict):
         album = obj.get("album")
         if isinstance(album, dict):
             yield album, obj_id
-            for artist_doc, _ in _yield_doc(album.get("artists") or album.get("artist_credit"), album.get("id")):
+            for artist_doc in _embedded_artist_docs(album):
                 yield artist_doc, None
-        for artist_doc, _ in _yield_doc(obj.get("artists") or obj.get("artist_credit"), obj_id):
+        for artist_doc in _embedded_artist_docs(obj):
             yield artist_doc, None
     elif obj_type == "Album":
-        for artist_doc, _ in _yield_doc(obj.get("artists") or obj.get("artist_credit"), obj_id):
+        for artist_doc in _embedded_artist_docs(obj):
             yield artist_doc, None
     elif obj_type in _COLLECTION_PAGE_TYPES:
         items = obj.get("items") or obj.get("orderedItems")
@@ -1842,25 +1843,81 @@ def remote_object_display_name(remote_object: RemoteObject) -> Optional[str]:
     return remote_object.name
 
 
+def _artist_credit_docs(doc: dict) -> list:
+    """Return the ``ArtistCredit`` docs declared on a music entity doc."""
+    credits = doc.get("artist_credit")
+    if isinstance(credits, dict):
+        credits = [credits]
+    return [c for c in credits or [] if isinstance(c, dict)]
+
+
+def _embedded_artist_docs(doc: dict) -> list:
+    """
+    Return the ``Artist`` docs credited on a music entity doc.
+
+    Handles both dialects: legacy ``artists`` (a list of ``Artist`` docs)
+    and FEP-be68 ``artist_credit`` (``ArtistCredit`` docs wrapping an
+    ``artist`` — the credit's own id/name never stands in for the artist's).
+    """
+    credits = _artist_credit_docs(doc)
+    if credits:
+        artists = []
+        for credit in credits:
+            artist = credit.get("artist")
+            if isinstance(artist, dict):
+                artists.append(artist)
+        if artists:
+            return artists
+    artists = doc.get("artists") or []
+    if isinstance(artists, dict):
+        artists = [artists]
+    return [a for a in artists if isinstance(a, dict)]
+
+
+def _artist_credit_name(doc: dict) -> Optional[str]:
+    """
+    Return the credited-artist display string for a music entity doc.
+
+    For ``artist_credit`` entries this joins each ``credit`` (falling back
+    to ``artist.name``) with its ``joinphrase`` — e.g. ``"A feat. B"``.
+    For legacy ``artists`` entries it returns the first artist's name.
+    """
+    credits = _artist_credit_docs(doc)
+    if credits:
+        parts = []
+        for credit in credits:
+            artist = credit.get("artist")
+            name = credit.get("credit")
+            if not isinstance(name, str) or not name:
+                name = artist.get("name") if isinstance(artist, dict) else None
+            if not isinstance(name, str) or not name:
+                continue
+            parts.append(name)
+            joinphrase = credit.get("joinphrase")
+            if isinstance(joinphrase, str) and joinphrase:
+                parts.append(joinphrase)
+        if parts:
+            return "".join(parts)
+    artists = _embedded_artist_docs(doc)
+    if artists:
+        name = artists[0].get("name")
+        if isinstance(name, str) and name:
+            return name
+    return None
+
+
 def _music_fields(payload: dict) -> dict:
     track = payload.get("track")
     if not isinstance(track, dict):
         track = payload
-    artists = track.get("artists") or track.get("artist_credit") or []
-    artist_name: Optional[str] = None
-    if isinstance(artists, list) and artists:
-        first = artists[0]
-        if isinstance(first, dict):
-            artist_name = first.get("name") if isinstance(first.get("name"), str) else None
-    elif isinstance(artists, dict):
-        artist_name = artists.get("name") if isinstance(artists.get("name"), str) else None
+    artist_name = _artist_credit_name(track)
     album = track.get("album")
     album_name = album.get("name") if isinstance(album, dict) and isinstance(album.get("name"), str) else None
-    duration = payload.get("duration")
-    if not isinstance(duration, (int, float)) or isinstance(duration, bool):
-        duration = track.get("duration")
+    duration = parse_duration(payload.get("duration"))
+    if duration is None:
+        duration = parse_duration(track.get("duration"))
     return {
-        "duration": int(duration) if isinstance(duration, (int, float)) and not isinstance(duration, bool) else None,
+        "duration": int(duration) if duration is not None else None,
         "artist_name": artist_name,
         "album_name": album_name,
     }

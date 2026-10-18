@@ -26,6 +26,9 @@ class AudioMetadata:
 
     title: Optional[str] = None
     artist: Optional[str] = None
+    # All values of a multi-valued ``artist`` tag — the first is the
+    # primary artist; the rest become extra ``artist_credits``.
+    artists: list = field(default_factory=list)
     album: Optional[str] = None
     track_number: Optional[int] = None
     disc_number: Optional[int] = None
@@ -270,6 +273,7 @@ def extract_metadata(file_path: Path) -> AudioMetadata:
     return AudioMetadata(
         title=_first(audio_easy.get("title")),
         artist=_first(audio_easy.get("artist")),
+        artists=list(audio_easy.get("artist") or []),
         album=_first(audio_easy.get("album")),
         track_number=_int(audio_easy.get("tracknumber")),
         disc_number=_int(audio_easy.get("discnumber")),

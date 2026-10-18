@@ -21,6 +21,7 @@ from ..models._enums import Visibility
 from ..models.activity import Activity, ActivityTarget
 from ..models.album import Album
 from ..models.artist import Artist
+from ..models.artist_credit import ArtistCredit
 from ..models.collection_item import CollectionItem
 from ..models.external_item import ExternalItem
 from ..models.external_library import ExternalLibrary
@@ -425,7 +426,10 @@ async def delete_artist(
 
     track_count = await session.scalar(select(func.count(Track.id)).where(Track.artist_id == artist_id))
     album_count = await session.scalar(select(func.count(Album.id)).where(Album.artist_id == artist_id))
-    if not recursive and (track_count or album_count):
+    # Extra (non-primary) credits also keep the artist "associated" — the
+    # FK cascade would otherwise silently drop still-linked credits.
+    credit_count = await session.scalar(select(func.count(ArtistCredit.id)).where(ArtistCredit.artist_id == artist_id))
+    if not recursive and (track_count or album_count or credit_count):
         raise DeletionError("Artist has associated tracks or albums", 409)
 
     deletion = DeletionResult()
@@ -703,6 +707,13 @@ async def _delete_empty_artist(session: AsyncSession, storage: StorageService, a
 
     track_count = await session.scalar(select(func.count(Track.id)).where(Track.artist_id == artist_id))
     if track_count:
+        return
+
+    # Extra (non-primary) credits reference artists without going through
+    # ``Track.artist_id`` — an artist still credited somewhere is not
+    # empty.
+    credit_count = await session.scalar(select(func.count(ArtistCredit.id)).where(ArtistCredit.artist_id == artist_id))
+    if credit_count:
         return
 
     album_ids = list((await session.execute(select(Album.id).where(Album.artist_id == artist_id))).scalars().all())

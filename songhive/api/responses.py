@@ -91,6 +91,18 @@ class TrackSummary(BaseModel):
     currency: Optional[str] = None
 
 
+class ArtistCreditSummary(BaseModel):
+    """One entry of a track's ``artist_credits`` list."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    artist_id: Optional[str] = None
+    artist_name: str
+    credit: Optional[str] = None
+    joinphrase: str = ""
+    index: int = 0
+
+
 class TrackResponse(BaseModel):
     """Public track response."""
 
@@ -106,6 +118,11 @@ class TrackResponse(BaseModel):
     genre: Optional[str] = None
     description: Optional[str] = None
     extra_artists: List[str] = []
+    # Ordered artist credits — index 0 is the primary credit (mirrors
+    # ``artist_id``); ``credit`` overrides the artist's canonical name for
+    # display and ``joinphrase`` is the text emitted after the credit in
+    # the joined credit string (e.g. ``"A feat. B"``).
+    artist_credits: List[ArtistCreditSummary] = []
     audio_url: Optional[str] = None
     external_url: Optional[str] = None
     image_url: Optional[str] = None
@@ -145,6 +162,48 @@ class TrackResponse(BaseModel):
     # ``created_at``/``updated_at`` sort fields.
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+
+
+def build_artist_credit_summaries(track) -> List[ArtistCreditSummary]:
+    """
+    Return a track's ordered artist credits for API responses.
+
+    ``artist_credits`` rows are the source of truth; tracks that predate
+    them (or were never credited through the credit API) synthesize a
+    primary credit from ``artist_id`` plus name-only extras from
+    ``extra_artists``.
+    """
+    credits = track.artist_credits if _is_loaded(track, "artist_credits") else None
+    if credits:
+        return [
+            ArtistCreditSummary(
+                artist_id=str(row.artist_id),
+                artist_name=row.artist.name if row.artist is not None else "",
+                credit=row.credit,
+                joinphrase=row.joinphrase or "",
+                index=row.index,
+            )
+            for row in credits
+        ]
+    extras = list(track.extra_artists or [])
+    primary_name = track.artist.name if _is_loaded(track, "artist") and track.artist is not None else ""
+    out = [
+        ArtistCreditSummary(
+            artist_id=str(track.artist_id) if track.artist_id else None,
+            artist_name=primary_name,
+            joinphrase=", " if extras else "",
+            index=0,
+        )
+    ]
+    for index, name in enumerate(extras, start=1):
+        out.append(
+            ArtistCreditSummary(
+                artist_name=name,
+                joinphrase="" if index == len(extras) else ", ",
+                index=index,
+            )
+        )
+    return out
 
 
 async def build_artist_summary(

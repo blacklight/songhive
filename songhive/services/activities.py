@@ -1489,6 +1489,14 @@ async def create_local_activity(
     object_id = str(uuid.uuid4())
     rendered_content = content if content is not None else content_source
 
+    # The trailing segment of the delivered envelope's ``id`` makes the
+    # activity dereferenceable at the URL remote servers received.
+    ap_activity_id: Optional[str] = None
+    if isinstance(payload, dict):
+        payload_id = payload.get("id")
+        if isinstance(payload_id, str) and "/activities/" in payload_id:
+            ap_activity_id = payload_id.rsplit("/", 1)[-1]
+
     activity = Activity(
         entity_type=entity_type,
         entity_id=str(entity_id),
@@ -1497,6 +1505,7 @@ async def create_local_activity(
         source_actor=source_actor,
         source_id=f"{source_actor}/objects/{object_id}",
         local_object_id=object_id,
+        ap_activity_id=ap_activity_id,
         owner_user_id=author.id,
         visibility=activity_visibility.value,
         in_reply_to_activity_id=in_reply_to_activity_id,
@@ -1521,6 +1530,9 @@ async def create_local_activity(
 
     await session.flush()
     await _record_activity_mentions(session, activity=activity, author=author, mention_dicts=mentions or [])
+
+    # The author's outbox/followers collections reflect new activities.
+    doc_cache.invalidate_prefix(("coll", author.username), session=session)
 
     source_text = content_source if content_source is not None else content
     await _sync_activity_tags(session, activity, _extract_hashtags(source_text))
@@ -1768,6 +1780,11 @@ async def update_activity(
         # Content/attachment edits can change the first URL — re-run the
         # card pipeline so a stale link is refreshed or cleared.
         schedule_preview_card_fetch(activity, force=True)
+    if activity.owner_user_id:
+        # Cached outbox pages embed the edited object document.
+        owner = await session.get(User, activity.owner_user_id)
+        if owner is not None:
+            doc_cache.invalidate_prefix(("coll", owner.username), session=session)
     await session.flush()
     await session.refresh(activity, ["mentions"])
 
@@ -4359,6 +4376,10 @@ async def retract_activity(session: AsyncSession, activity: Activity) -> None:
         object_ids=(activity.local_object_id, activity.source_id),
         session=session,
     )
+    if activity.owner_user_id:
+        owner = await session.get(User, activity.owner_user_id)
+        if owner is not None:
+            doc_cache.invalidate_prefix(("coll", owner.username), session=session)
     if activity.entity_type == "track" and activity.entity_id:
         doc_cache.invalidate_track(str(activity.entity_id), session=session)
 

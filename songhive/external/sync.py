@@ -32,6 +32,7 @@ from ..models.stored_file import StoredFile
 from ..models.track import Track
 from ..services.genres import set_genres_for_entity
 from ..services.import_ import _find_or_create_album, _find_or_create_artist
+from ..services.music import set_track_artist
 from ..services.redis import get_redis_client
 from ..services.secrets import decrypt_json
 from .errors import ExternalLibraryError
@@ -303,6 +304,12 @@ async def _apply_metadata(
         )
         session.add(new_track)
         await session.flush()
+        await set_track_artist(
+            session,
+            new_track,
+            artist,
+            list(metadata.artists[1:]) if len(metadata.artists) > 1 else None,
+        )
         external_track.track_id = str(new_track.id)
         external_track.write_back_pending = False
         external_track.write_back_error = None
@@ -341,7 +348,6 @@ async def _apply_metadata(
                 album.cover_url = metadata.cover_url
 
         track.title = metadata.title
-        track.artist_id = str(artist.id)
         track.album_id = str(album.id) if album else None
         track.track_number = metadata.track_number
         track.disc_number = metadata.disc_number
@@ -351,6 +357,14 @@ async def _apply_metadata(
         track.release_year = metadata.release_year
         track.raw_metadata = metadata.raw_metadata
         track.external_metadata_synced_at = _utcnow()
+        # ``set_track_artist`` also assigns ``artist_id`` and
+        # ``extra_artists`` — writes the artist_credits rows in one pass.
+        await set_track_artist(
+            session,
+            track,
+            artist,
+            list(metadata.artists[1:]) if len(metadata.artists) > 1 else None,
+        )
 
         mime_type = metadata.raw_metadata.get("mimetype") if metadata.raw_metadata else None
         if mime_type is None:
@@ -837,8 +851,12 @@ async def _heal_entity_track_artist(
         musicbrainz_id=(metadata.provider_ids or {}).get("MusicBrainzArtist"),
         match_musicbrainz=match_musicbrainz,
     )
-    track.artist_id = str(artist.id)
-    track.extra_artists = list(metadata.artists[1:]) if len(metadata.artists) > 1 else None
+    await set_track_artist(
+        session,
+        track,
+        artist,
+        list(metadata.artists[1:]) if len(metadata.artists) > 1 else None,
+    )
     _queue_artist_image(counters, str(artist.id), metadata.artist_provider_key)
     _entity_bump(counters, "track_artists_healed")
 
@@ -1017,7 +1035,6 @@ async def _apply_entity_track(
             description=metadata.description,
             musicbrainz_id=metadata.musicbrainz_id,
             release_year=metadata.release_year,
-            extra_artists=extra_artists,
             source="external",
             owner_id=owner_id,
             visibility=visibility,
@@ -1029,6 +1046,7 @@ async def _apply_entity_track(
         )
         session.add(track)
         await session.flush()
+        await set_track_artist(session, track, artist, extra_artists)
         _entity_bump(counters, "tracks_created")
     elif immutable:
         # ISRC-dedup link on an immutable provider: attach the provider
@@ -1095,9 +1113,11 @@ async def _apply_entity_track(
         track.description = metadata.description
         track.musicbrainz_id = metadata.musicbrainz_id
         track.release_year = metadata.release_year
-        track.extra_artists = extra_artists
         track.raw_metadata = raw_track_metadata
         track.external_metadata_synced_at = _utcnow()
+        # ``set_track_artist`` also assigns ``artist_id`` and
+        # ``extra_artists`` — writes the artist_credits rows in one pass.
+        await set_track_artist(session, track, artist, extra_artists)
         if item.mime_type:
             track.audio_mime_type = item.mime_type
         _entity_bump(counters, "tracks_updated")
