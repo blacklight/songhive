@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `federation`: Actor profile links now emit bare URLs in
+  `PropertyValue` attachments instead of `rel="me"` HTML anchors —
+  Funkwhale <= 2.0.x declares `attachment[].value` as a URL field, so
+  the anchor form made actor documents fail validation whenever a
+  remote Funkwhale dereferenced a track, album or library attributed
+  to a Songhive user (fetches errored with `attachment: Enter a valid
+  URL`). Verified-link (`rel="me"`) badges are unaffected — Mastodon
+  linkifies bare URLs in profile fields.
+  ([`f369a14`](https://git.platypush.tech/blacklight/songhive/commit/f369a14d21da91d16b492c433477eea554df00cf)).
+
 ## 0.4.15
 
 ### Added
