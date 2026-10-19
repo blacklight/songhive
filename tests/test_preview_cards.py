@@ -510,3 +510,76 @@ class TestSchedulePreviewCardFetch:
         monkeypatch.setattr(task_mod, "fetch_preview_card", _Task)
         pc.schedule_preview_card_fetch(activity, author=_Author())
         assert sent == []
+
+
+class TestFetchPreviewCardTask:
+    """Tests for the ``fetch_preview_card`` Celery task wrapper."""
+
+    def _self(self, retries=0):
+        from unittest.mock import MagicMock
+
+        from celery.exceptions import Retry
+
+        self = MagicMock()
+        self.request.retries = retries
+        self.max_retries = 5
+        self.retry.side_effect = Retry()
+        return self
+
+    def _patch_config(self, monkeypatch, config):
+        import songhive.tasks.preview_cards as task_mod
+
+        monkeypatch.setattr(task_mod, "load_config", lambda *_: config)
+
+    async def test_missing_activity_retries(self, db_session, engine, config, monkeypatch):
+        """A missing activity retries — the enqueue races the commit."""
+        import asyncio
+
+        import pytest
+        from celery.exceptions import Retry
+
+        from songhive.models.base import init_db
+        from songhive.tasks.preview_cards import fetch_preview_card
+
+        init_db(engine=engine, force=True)
+        self._patch_config(monkeypatch, config)
+
+        self = self._self(retries=0)
+        with pytest.raises(Retry):
+            await asyncio.to_thread(fetch_preview_card.run.__func__, self, "missing-id")
+        self.retry.assert_called_once()
+        assert self.retry.call_args.kwargs["countdown"] == 5
+
+    async def test_missing_activity_drops_after_max_retries(self, db_session, engine, config, monkeypatch):
+        import asyncio
+
+        from songhive.models.base import init_db
+        from songhive.tasks.preview_cards import fetch_preview_card
+
+        init_db(engine=engine, force=True)
+        self._patch_config(monkeypatch, config)
+
+        self = self._self(retries=5)
+        result = await asyncio.to_thread(fetch_preview_card.run.__func__, self, "missing-id")
+        assert result is None
+        self.retry.assert_not_called()
+
+    async def test_existing_activity_processed(self, db_session, engine, config, monkeypatch):
+        import asyncio
+        from unittest.mock import AsyncMock
+
+        from songhive.models.base import init_db
+        from songhive.tasks.preview_cards import fetch_preview_card
+
+        init_db(engine=engine, force=True)
+        self._patch_config(monkeypatch, config)
+
+        activity = _make_activity(db_session, content_source="see https://x.example/a")
+        await db_session.commit()
+
+        processed = AsyncMock()
+        monkeypatch.setattr("songhive.services.preview_cards.process_activity_preview_card", processed)
+
+        result = await asyncio.to_thread(fetch_preview_card.run.__func__, self._self(), str(activity.id))
+        assert result == "done"
+        processed.assert_awaited_once()

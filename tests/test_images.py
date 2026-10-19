@@ -430,6 +430,69 @@ def test_enrich_images_task_returns_false_when_artist_images_off(monkeypatch, tm
     assert result is False
 
 
+def test_enrich_images_task_runs_service(monkeypatch, engine):
+    """The Celery task delegates to ``MusicBrainzService.enrich_images``."""
+    from songhive.models.base import init_db
+    from songhive.tasks.images import bulk_enrich_images
+
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr("songhive.config.load_config", lambda *_: _make_mb_config())
+    mb_service = Mock()
+    mb_service.enrich_images = AsyncMock(return_value=True)
+    monkeypatch.setattr("songhive.services.musicbrainz.MusicBrainzService", lambda *_: mb_service)
+    monkeypatch.setattr("songhive.storage.get_storage", lambda *_: Mock())
+
+    assert enrich_images("track-1") is True
+    mb_service.enrich_images.assert_awaited_once()
+    assert mb_service.enrich_images.await_args.args[1] == "track-1"
+
+    # The bulk variant delegates to services.admin_tasks.bulk_enrich_images.
+    counts = {"artists": 2, "albums": 1, "updated": 3, "failed": 0}
+    bulk = AsyncMock(return_value=counts)
+    monkeypatch.setattr("songhive.services.admin_tasks.bulk_enrich_images", bulk)
+    assert bulk_enrich_images(all_=True) == counts
+    assert bulk.await_args.kwargs["all_"] is True
+
+
+def test_enrich_images_task_swallows_errors(monkeypatch, engine):
+    """A failing enrichment surfaces as ``False``, not an exception."""
+    from songhive.models.base import init_db
+
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr("songhive.config.load_config", lambda *_: _make_mb_config())
+    mb_service = Mock()
+    mb_service.enrich_images = AsyncMock(side_effect=RuntimeError("mb down"))
+    monkeypatch.setattr("songhive.services.musicbrainz.MusicBrainzService", lambda *_: mb_service)
+    monkeypatch.setattr("songhive.storage.get_storage", lambda *_: Mock())
+
+    assert enrich_images("track-1") is False
+
+
+def test_bulk_enrich_images_task_disabled(monkeypatch):
+    """The bulk Celery task short-circuits when image enrichment is off."""
+    from songhive.tasks.images import bulk_enrich_images
+
+    monkeypatch.setattr("songhive.config.load_config", lambda *_: _make_mb_config(enabled=False))
+    assert bulk_enrich_images(all_=True) == {"artists": 0, "albums": 0, "updated": 0, "failed": 0}
+
+
+def test_bulk_enrich_images_task_swallows_errors(monkeypatch, engine):
+    """A failing bulk enrichment returns zeroed counts."""
+    from songhive.models.base import init_db
+    from songhive.tasks.images import bulk_enrich_images
+
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr("songhive.config.load_config", lambda *_: _make_mb_config())
+    monkeypatch.setattr(
+        "songhive.services.admin_tasks.bulk_enrich_images",
+        AsyncMock(side_effect=RuntimeError("boom")),
+    )
+    monkeypatch.setattr("songhive.storage.get_storage", lambda *_: Mock())
+    monkeypatch.setattr("songhive.services.musicbrainz.MusicBrainzService", lambda *_: Mock())
+
+    assert bulk_enrich_images(all_=True) == {"artists": 0, "albums": 0, "updated": 0, "failed": 0}
+
+
 @pytest.mark.asyncio
 async def test_enrich_artist_image_by_id(
     db_session,
