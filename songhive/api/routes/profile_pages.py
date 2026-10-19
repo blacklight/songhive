@@ -9,7 +9,6 @@ shell with ``rel="me"`` and ``rel="alternate"`` discovery hints.
 
 from __future__ import annotations
 
-from html import escape
 from pathlib import Path
 from typing import Any, Optional, Sequence
 from urllib.parse import quote
@@ -35,6 +34,7 @@ from ..semantic_meta import (
     inject_head_tags,
     public_base_url,
     user_head_tags,
+    void_tag,
 )
 
 router = APIRouter(include_in_schema=False)
@@ -122,9 +122,9 @@ def _spa_response(
 
     if me_urls:
         for url in me_urls:
-            tags.append(f'<link rel="me" href="{escape(url, quote=True)}">')
+            tags.append(void_tag("link", {"rel": "me", "href": url}))
     if alternate_url:
-        tag = f'<link rel="alternate" type="{ACTIVITY_JSON}" href="{escape(alternate_url, quote=True)}">'
+        tag = void_tag("link", {"rel": "alternate", "type": ACTIVITY_JSON, "href": alternate_url})
         tags.append(tag)
         headers["Link"] = f'<{alternate_url}>; rel="alternate"; type="{ACTIVITY_JSON}"'
     if extra_tags:

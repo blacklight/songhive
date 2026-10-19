@@ -22,6 +22,17 @@ def _h(value: Optional[Any]) -> str:
     return html.escape(str(value) if value is not None else "")
 
 
+def _tag(name: str, attrs: dict[str, Any]) -> str:
+    """Build a void HTML tag (``<meta>``, ``<link>``, ``<img>``).
+
+    Attribute values are HTML-escaped; attributes whose value is ``None``
+    are dropped. Building tags from structured attributes keeps untrusted
+    values out of markup literals.
+    """
+    rendered = " ".join(f'{key}="{_h(value)}"' for key, value in attrs.items() if value is not None)
+    return f"<{name} {rendered}>"
+
+
 def _base_url(request: Request) -> str:
     """Return the base URL for the request without a trailing slash."""
     return str(request.base_url).rstrip("/")
@@ -110,15 +121,15 @@ def _render_og_meta(
 ) -> str:
     """Build OpenGraph ``<meta>`` tags for social media previews."""
     tags = [
-        f'<meta property="og:title" content="{_h(title)}">',
-        f'<meta property="og:description" content="{_h(description)}">',
-        f'<meta property="og:type" content="{_h(og_type)}">',
-        f'<meta property="og:url" content="{_h(url)}">',
+        _tag("meta", {"property": "og:title", "content": title}),
+        _tag("meta", {"property": "og:description", "content": description}),
+        _tag("meta", {"property": "og:type", "content": og_type}),
+        _tag("meta", {"property": "og:url", "content": url}),
     ]
     if image:
-        tags.append(f'<meta property="og:image" content="{_h(image)}">')
+        tags.append(_tag("meta", {"property": "og:image", "content": image}))
     if audio:
-        tags.append(f'<meta property="og:audio" content="{_h(audio)}">')
+        tags.append(_tag("meta", {"property": "og:audio", "content": audio}))
     tags.extend(
         [
             '<meta name="twitter:card" content="summary_large_image">',
@@ -315,7 +326,7 @@ def _render_header(
     """Render the header block with cover, title, metadata, and actions."""
     meta_html = "\n".join(f"<span>{_h(m)}</span>" for m in (meta or []) if m)
     actions_html = "\n".join(actions or [])
-    cover = f'<img class="cover" src="{_h(image)}" alt="{_h(title)}">' if image else ""
+    cover = _tag("img", {"class": "cover", "src": image, "alt": title}) if image else ""
     subtitle_html = f'<p class="description">{_h(subtitle)}</p>' if subtitle else ""
     description_html = (
         f'<p class="description">{_h(description)}</p>' if description and not subtitle else subtitle_html

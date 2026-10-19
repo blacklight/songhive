@@ -109,6 +109,18 @@ def _h(value: Optional[Any]) -> str:
     return escape(" ".join(str(value).split()))
 
 
+def void_tag(name: str, attrs: dict[str, Any]) -> str:
+    """
+    Build a void HTML tag (``<meta>``, ``<link>``, ``<img>``).
+
+    Attribute values are HTML-escaped; attributes whose value is ``None``
+    are dropped. Building tags from structured attributes keeps untrusted
+    values out of markup literals.
+    """
+    rendered = " ".join(f'{key}="{_h(value)}"' for key, value in attrs.items() if value is not None)
+    return f"<{name} {rendered}>"
+
+
 def public_base_url(request: Request, config: SonghiveConfig) -> str:
     """Return the public base URL, preferring the configured instance domain."""
     domain = config.federation.instance_domain
@@ -141,17 +153,17 @@ def _og_tags(
 ) -> list[str]:
     """Build the OpenGraph ``<meta>`` and ``rel="tag"`` tags for an entity."""
     tags = [
-        f'<meta property="og:title" content="{_h(title)}">',
-        f'<meta property="og:type" content="{_h(og_type)}">',
-        f'<meta property="og:url" content="{_h(url)}">',
-        f'<meta property="og:site_name" content="{_h(site_name)}">',
+        void_tag("meta", {"property": "og:title", "content": title}),
+        void_tag("meta", {"property": "og:type", "content": og_type}),
+        void_tag("meta", {"property": "og:url", "content": url}),
+        void_tag("meta", {"property": "og:site_name", "content": site_name}),
     ]
     if description:
-        tags.append(f'<meta property="og:description" content="{_h(description)}">')
+        tags.append(void_tag("meta", {"property": "og:description", "content": description}))
     if image:
-        tags.append(f'<meta property="og:image" content="{_h(image)}">')
+        tags.append(void_tag("meta", {"property": "og:image", "content": image}))
     for name in tag_names:
-        tags.append(f'<link rel="tag" href="/tags/{quote(name)}" title="{_h(name)}">')
+        tags.append(void_tag("link", {"rel": "tag", "href": f"/tags/{quote(name)}", "title": name}))
     tags.extend(extra)
     tags.append('<meta name="twitter:card" content="summary_large_image">')
     return tags
@@ -163,7 +175,7 @@ def _profile_url(base_url: str, username: str) -> str:
 
 def _music_relation(property_name: str, url: str) -> str:
     """Build an OpenGraph music relation tag (``music:musician`` etc.)."""
-    return f'<meta property="{property_name}" content="{_h(url)}">'
+    return void_tag("meta", {"property": property_name, "content": url})
 
 
 def _uploader_tags(owner: Optional[User], base_url: str) -> list[str]:
@@ -176,13 +188,16 @@ def _uploader_tags(owner: Optional[User], base_url: str) -> list[str]:
     if owner is None:
         return []
     tags = [
-        f'<link rel="author" href="{_h(_profile_url(base_url, owner.username))}" ' f'title="{_h(owner.username)}">',
-        f'<meta name="author" content="{_h(owner.username)}">',
+        void_tag(
+            "link",
+            {"rel": "author", "href": _profile_url(base_url, owner.username), "title": owner.username},
+        ),
+        void_tag("meta", {"name": "author", "content": owner.username}),
     ]
     host = urlparse(base_url).hostname
     if host:
         handle = f"@{owner.username}@{host}"
-        tags.append(f'<meta name="fediverse:creator" content="{_h(handle)}">')
+        tags.append(void_tag("meta", {"name": "fediverse:creator", "content": handle}))
     return tags
 
 
@@ -227,7 +242,7 @@ async def _track_tags(
     if track.album is not None:
         extra.append(_music_relation("music:album", f"{base_url}/albums/{track.album.id}"))
     if track.duration:
-        extra.append(f'<meta property="music:duration" content="{int(track.duration)}">')
+        extra.append(void_tag("meta", {"property": "music:duration", "content": int(track.duration)}))
     extra += _uploader_tags(track.owner, base_url)
 
     return _og_tags(
@@ -414,8 +429,15 @@ async def _podcast_tags(
         og_type=_OG_TYPES["podcast"],
         image=_absolute(base_url, podcast.image_url),
         extra=[
-            f'<link rel="alternate" type="application/rss+xml" href="{_h(podcast.feed_url)}" '
-            f'title="{_h(podcast.title)}">'
+            void_tag(
+                "link",
+                {
+                    "rel": "alternate",
+                    "type": "application/rss+xml",
+                    "href": podcast.feed_url,
+                    "title": podcast.title,
+                },
+            )
         ],
     )
 
@@ -430,7 +452,7 @@ def user_head_tags(user: User, base_url: str, site_name: str) -> list[str]:
         site_name=site_name,
         og_type=_OG_TYPES["user"],
         image=_absolute(base_url, user.avatar_url),
-        extra=[f'<meta property="profile:username" content="{_h(user.username)}">'],
+        extra=[void_tag("meta", {"property": "profile:username", "content": user.username})],
     )
 
 
@@ -447,8 +469,19 @@ def feed_link_tags(kind: str, key: str, base_url: str, *, activities: bool = Fal
     else:
         build = lambda fmt: feeds_service.activities_feed_path(kind, key, fmt)  # noqa: E731
     return [
-        f'<link rel="alternate" type="application/rss+xml" href="{_h(base_url + build("rss"))}" title="RSS feed">',
-        f'<link rel="alternate" type="application/atom+xml" href="{_h(base_url + build("atom"))}" title="Atom feed">',
+        void_tag(
+            "link",
+            {"rel": "alternate", "type": "application/rss+xml", "href": base_url + build("rss"), "title": "RSS feed"},
+        ),
+        void_tag(
+            "link",
+            {
+                "rel": "alternate",
+                "type": "application/atom+xml",
+                "href": base_url + build("atom"),
+                "title": "Atom feed",
+            },
+        ),
     ]
 
 

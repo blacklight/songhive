@@ -53,7 +53,7 @@ WEBAUTHN_STATE_TTL = 600
 RECOVERY_CODE_COUNT = 10
 """Number of recovery codes generated per batch."""
 
-_TOTP_SECRET_KEY = "2fa:totp-setup:{}"
+_TOTP_SETUP_KEY = "2fa:totp-setup:{}"
 _PENDING_LOGIN_KEY = "2fa:pending:{}"
 _WEBAUTHN_REG_KEY = "2fa:webauthn-reg:{}"
 _WEBAUTHN_AUTH_KEY = "2fa:webauthn-auth:{}"
@@ -129,7 +129,7 @@ async def begin_totp_setup(user: User, config: SonghiveConfig, redis: Redis) -> 
     secret = pyotp.random_base32()
     issuer = config.federation.instance_name or "Songhive"
     uri = cast(str, pyotp.TOTP(secret).provisioning_uri(name=user.email, issuer_name=issuer))
-    await redis.set(_TOTP_SECRET_KEY.format(user.id), secret, ex=TOTP_SETUP_TTL)
+    await redis.set(_TOTP_SETUP_KEY.format(user.id), secret, ex=TOTP_SETUP_TTL)
     return secret, uri
 
 
@@ -157,7 +157,7 @@ async def confirm_totp_setup(session: AsyncSession, user: User, code: str, redis
     On success the encrypted secret is stored on the user and a fresh batch
     of recovery codes is generated and returned (shown once to the caller).
     """
-    key = _TOTP_SECRET_KEY.format(user.id)
+    key = _TOTP_SETUP_KEY.format(user.id)
     secret = await redis.get(key)
     if not secret:
         raise TwoFactorError("No pending TOTP setup; call the setup endpoint first", status_code=400)
