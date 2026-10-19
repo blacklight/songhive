@@ -134,7 +134,7 @@ class ScrobblerClient:
     def _signature(params: Dict[str, str], secret: str) -> str:
         """Compute the ``api_sig`` MD5 signature over the sorted params."""
         raw = "".join(f"{key}{params[key]}" for key in sorted(params)) + secret
-        return hashlib.md5(raw.encode("utf-8")).hexdigest()
+        return hashlib.md5(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
 
     def _send_scrobble_request(self, payload: Dict[str, Any]) -> requests.Response:
         try:
