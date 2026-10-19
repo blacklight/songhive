@@ -140,7 +140,7 @@ def document_response(
     if document is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
     body = json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-    etag = hashlib.sha1(body).hexdigest()
+    etag = hashlib.sha1(body, usedforsecurity=False).hexdigest()
     remaining = ttl if freshness is None else freshness
     # With freshness left, advertise it; exhausted freshness on a cache that
     # is enabled means the representation is not provably fresh
