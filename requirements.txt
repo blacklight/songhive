@@ -50,7 +50,7 @@ webmentions>=0.1.27
 beautifulsoup4>=4.12
 
 # Markdown support
-mistune>=3.0
+mistune>=3.3.0
 
 # Config
 tomli>=2.0; python_version < "3.11"
