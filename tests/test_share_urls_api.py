@@ -6,6 +6,9 @@ import pytest
 
 from songhive.models._enums import Visibility
 from songhive.models.artist import Artist
+from songhive.models.external_library import ExternalLibrary
+from songhive.models.external_track import ExternalTrack
+from songhive.models.library import Library
 from songhive.models.track import Track
 
 
@@ -63,6 +66,48 @@ async def private_track(db_session, regular_user, audio_file):
         visibility=Visibility.PRIVATE.value,
     )
     db_session.add(track)
+    await db_session.flush()
+    return track
+
+
+@pytest.fixture
+async def external_track(db_session, regular_user):
+    """Create a private track backed by an active external-library item."""
+    library = Library(name="Provider Shelf", owner_id=str(regular_user.id))
+    db_session.add(library)
+    await db_session.flush()
+    ext_lib = ExternalLibrary(
+        name="provider",
+        provider_type="fake",
+        library_id=str(library.id),
+        created_by_id=str(regular_user.id),
+        config={},
+        capabilities={"read_bytes": True},
+    )
+    db_session.add(ext_lib)
+    await db_session.flush()
+
+    artist = Artist(name="Provider Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    track = Track(
+        title="External Track",
+        artist_id=artist.id,
+        audio_file_id=None,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+        source="external",
+    )
+    db_session.add(track)
+    await db_session.flush()
+    db_session.add(
+        ExternalTrack(
+            track_id=str(track.id),
+            external_library_id=str(ext_lib.id),
+            provider_key="song.mp3",
+            state="active",
+        )
+    )
     await db_session.flush()
     return track
 
@@ -246,3 +291,31 @@ def test_public_resolver_invalid_token(client):
     response = client.get("/api/v1/share/not-a-valid-token", follow_redirects=False)
     assert response.status_code == 404
     assert "text/html" in response.headers["content-type"]
+
+
+def test_public_resolver_renders_player_for_external_track(client, regular_user, auth_headers, external_track):
+    """External-library tracks get an ``<audio>`` player pointing at the stream endpoint."""
+    data = _create_share_url(client, regular_user, auth_headers, "track", str(external_track.id))
+    token = data["token"]
+
+    response = client.get(f"/api/v1/share/{token}", follow_redirects=False)
+    assert response.status_code == 200
+    assert f'<audio controls src="/api/v1/stream/{external_track.id}?token={token}"' in response.text
+    assert "Download" not in response.text
+
+
+def test_public_resolver_external_track_policy_denied(client, regular_user, auth_headers, external_track, monkeypatch):
+    """A restrictive provider stream policy hides the player for anonymous viewers."""
+    from songhive.services import streaming as streaming_service
+
+    monkeypatch.setattr(streaming_service, "_provider_stream_policy", lambda _p: "owner")
+    data = _create_share_url(client, regular_user, auth_headers, "track", str(external_track.id))
+    token = data["token"]
+
+    anonymous = client.get(f"/api/v1/share/{token}", follow_redirects=False)
+    assert anonymous.status_code == 200
+    assert "<audio" not in anonymous.text
+
+    authed = client.get(f"/api/v1/share/{token}", headers=auth_headers(regular_user), follow_redirects=False)
+    assert authed.status_code == 200
+    assert f"/api/v1/stream/{external_track.id}" in authed.text

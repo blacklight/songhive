@@ -458,6 +458,15 @@
   config fragments in short-lived Redis keys bound to the initiating user,
   and the SPA's "Connect" button merges the claimed fragment into the form
   for a normal save.
+  External-backed tracks have `audio_file_id = NULL`, so anything that
+  builds an audio URL from `track.audio_file_id` alone (e.g. the public
+  share-page renderer `api/share_page.py`) silently drops them. The share
+  route resolves players through
+  `services.streaming.streamable_external_track_ids`, which yields
+  `/api/v1/stream/{id}?token=` URLs only when the external ref is `active`,
+  its library is enabled and byte/stream-url capable, and the provider's
+  `stream_policy` admits the requester — anonymous share viewers get no
+  player under `owner`/`anyone`/`listener_account` policies.
 - Outbound follows (a local user following a local or remote actor) live in
   the `follows` table (`models/follow.py`) — pubby's
   `federation_followers`/`federation_follow_requests` tables only track the

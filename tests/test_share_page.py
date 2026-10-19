@@ -82,6 +82,19 @@ def test_track_audio_url_no_file():
     assert share_page._track_audio_url(track, TOKEN) is None
 
 
+def test_track_audio_url_external_streamable():
+    track = _make_track()
+    track.id = "t-ext"
+    track.audio_file_id = None
+    assert share_page._track_audio_url(track, TOKEN, streamable_ids={"t-ext"}) == (
+        f"/api/v1/stream/t-ext?token={TOKEN}"
+    )
+    # External bytes are never offered as a download through share links.
+    assert share_page._track_audio_url(track, TOKEN, "attachment", streamable_ids={"t-ext"}) is None
+    # Tracks outside the streamable set get no URL.
+    assert share_page._track_audio_url(track, TOKEN, streamable_ids=set()) is None
+
+
 def test_track_audio_url_gated():
     track = _make_track(audio_file_id="af-1")
     track.id = "t-gated"
@@ -131,6 +144,17 @@ def test_render_track_without_file_or_relations():
     assert "Unknown artist" in html
     assert "<audio" not in html
     assert 'property="og:audio"' not in html
+
+
+def test_render_external_track_uses_stream_endpoint():
+    track = _make_track(title="Remote", duration=95.0)
+    track.id = "t-ext"
+    track.audio_file_id = None
+
+    html = share_page.render_share_page(track, "track", TOKEN, REQUEST, streamable_ids={"t-ext"})
+    assert f'<audio controls src="/api/v1/stream/t-ext?token={TOKEN}"' in html
+    assert 'property="og:audio" content="https://music.example/api/v1/stream/t-ext' in html
+    assert "Download" not in html
 
 
 def test_render_track_gated_uses_stream_endpoint():

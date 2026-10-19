@@ -54,6 +54,7 @@ def _track_audio_url(
     disposition: str = "inline",
     *,
     gated_ids: Optional[set] = None,
+    streamable_ids: Optional[set] = None,
 ) -> Optional[str]:
     """Return an authorized audio URL for a track, or ``None`` if it has no file."""
     if gated_ids is not None and str(track.id) in gated_ids:
@@ -65,6 +66,10 @@ def _track_audio_url(
         return None
     if track.audio_file_id:
         return _file_url(track.audio_file_id, token, disposition)
+    if disposition == "inline" and streamable_ids is not None and str(track.id) in streamable_ids:
+        # External-library tracks have no stored file; the stream endpoint
+        # resolves provider bytes itself and honors the share token.
+        return f"/api/v1/stream/{track.id}?token={token}"
     return None
 
 
@@ -139,7 +144,6 @@ def _render_og_meta(
 
 
 def _render_page(
-    request: Request,
     title: str,
     description: str,
     body: str,
@@ -315,7 +319,6 @@ def _render_page(
 
 
 def _render_header(
-    request: Request,
     title: str,
     subtitle: Optional[str] = None,
     description: Optional[str] = None,
@@ -342,9 +345,14 @@ def _render_header(
 </div>"""
 
 
-def _track_row(track: Track, token: str, request: Request, gated_ids: Optional[set] = None) -> str:
+def _track_row(
+    track: Track,
+    token: str,
+    gated_ids: Optional[set] = None,
+    streamable_ids: Optional[set] = None,
+) -> str:
     """Render a single track row for lists."""
-    audio_url = _track_audio_url(track, token, gated_ids=gated_ids)
+    audio_url = _track_audio_url(track, token, gated_ids=gated_ids, streamable_ids=streamable_ids)
     number = track.track_number or ""
     duration = _format_duration(track.duration)
     number_html = f'<span class="track-number">{_h(number)}</span>' if number else ""
@@ -363,20 +371,31 @@ def _track_row(track: Track, token: str, request: Request, gated_ids: Optional[s
 </li>"""
 
 
-def _track_list(tracks: list[Track], token: str, request: Request, gated_ids: Optional[set] = None) -> str:
+def _track_list(
+    tracks: list[Track],
+    token: str,
+    gated_ids: Optional[set] = None,
+    streamable_ids: Optional[set] = None,
+) -> str:
     """Render a list of tracks."""
-    rows = "".join(_track_row(t, token, request, gated_ids) for t in tracks if t)
+    rows = "".join(_track_row(t, token, gated_ids, streamable_ids) for t in tracks if t)
     return f'<ul class="track-list">{rows}</ul>'
 
 
-def _render_track(item: Track, request: Request, token: str, gated_ids: Optional[set] = None) -> str:
+def _render_track(
+    item: Track,
+    request: Request,
+    token: str,
+    gated_ids: Optional[set] = None,
+    streamable_ids: Optional[set] = None,
+) -> str:
     """Render an HTML preview for a shared track."""
     title = item.title or "Shared track"
     artist = item.artist.name if item.artist else None
     album = item.album.title if item.album else None
     description = f"{artist or 'Unknown artist'}{f' · {album}' if album else ''}"
-    audio_url = _track_audio_url(item, token, gated_ids=gated_ids)
-    download_url = _track_audio_url(item, token, "attachment", gated_ids=gated_ids)
+    audio_url = _track_audio_url(item, token, gated_ids=gated_ids, streamable_ids=streamable_ids)
+    download_url = _track_audio_url(item, token, "attachment", gated_ids=gated_ids, streamable_ids=streamable_ids)
     cover = _track_cover_url(item)
     canonical = _abs_url(request, f"/api/v1/share/{token}")
     image = _abs_url(request, cover) if cover and not cover.startswith("http") else cover
@@ -389,7 +408,6 @@ def _render_track(item: Track, request: Request, token: str, gated_ids: Optional
         actions.append(f'<a class="btn secondary" href="{_h(download_url)}">Download</a>')
 
     body = _render_header(
-        request,
         title,
         description=description,
         image=image,
@@ -397,7 +415,6 @@ def _render_track(item: Track, request: Request, token: str, gated_ids: Optional
         actions=actions,
     )
     return _render_page(
-        request,
         title,
         description,
         body,
@@ -408,7 +425,13 @@ def _render_track(item: Track, request: Request, token: str, gated_ids: Optional
     )
 
 
-def _render_album(item: Album, request: Request, token: str, gated_ids: Optional[set] = None) -> str:
+def _render_album(
+    item: Album,
+    request: Request,
+    token: str,
+    gated_ids: Optional[set] = None,
+    streamable_ids: Optional[set] = None,
+) -> str:
     """Render an HTML preview for a shared album."""
     title = item.title or "Shared album"
     artist = item.artist.name if item.artist else None
@@ -422,10 +445,9 @@ def _render_album(item: Album, request: Request, token: str, gated_ids: Optional
         (t for t in (item.tracks or []) if t),
         key=lambda t: (t.disc_number or 0, t.track_number or 0, t.title or ""),
     )
-    track_list = _track_list(tracks, token, request, gated_ids)
+    track_list = _track_list(tracks, token, gated_ids, streamable_ids)
     body = (
         _render_header(
-            request,
             title,
             subtitle=artist,
             description=description,
@@ -435,7 +457,6 @@ def _render_album(item: Album, request: Request, token: str, gated_ids: Optional
         + f"<h2>Tracks</h2>\n{track_list}"
     )
     return _render_page(
-        request,
         title,
         description or artist or "",
         body,
@@ -445,7 +466,13 @@ def _render_album(item: Album, request: Request, token: str, gated_ids: Optional
     )
 
 
-def _render_artist(item: Artist, request: Request, token: str, gated_ids: Optional[set] = None) -> str:
+def _render_artist(
+    item: Artist,
+    request: Request,
+    token: str,
+    gated_ids: Optional[set] = None,
+    streamable_ids: Optional[set] = None,
+) -> str:
     """Render an HTML preview for a shared artist."""
     title = item.name or "Shared artist"
     image = _artist_image_url(item)
@@ -458,14 +485,12 @@ def _render_artist(item: Artist, request: Request, token: str, gated_ids: Option
     )[:50]
     body = (
         _render_header(
-            request,
             title,
             image=image_abs,
         )
-        + f"<h2>Tracks</h2>\n{_track_list(tracks, token, request, gated_ids)}"
+        + f"<h2>Tracks</h2>\n{_track_list(tracks, token, gated_ids, streamable_ids)}"
     )
     return _render_page(
-        request,
         title,
         "",
         body,
@@ -475,7 +500,14 @@ def _render_artist(item: Artist, request: Request, token: str, gated_ids: Option
     )
 
 
-def _render_playlist_or_library(item, request: Request, token: str, title: str, gated_ids: Optional[set] = None) -> str:
+def _render_playlist_or_library(
+    item,
+    request: Request,
+    token: str,
+    title: str,
+    gated_ids: Optional[set] = None,
+    streamable_ids: Optional[set] = None,
+) -> str:
     """Render an HTML preview for a shared playlist or library."""
     name = item.name
     owner = item.owner.username if item.owner else None
@@ -490,16 +522,14 @@ def _render_playlist_or_library(item, request: Request, token: str, title: str, 
 
     body = (
         _render_header(
-            request,
             name,
             subtitle=title,
             description=description,
             meta=meta,
         )
-        + f"<h2>Tracks</h2>\n{_track_list(tracks, token, request, gated_ids)}"
+        + f"<h2>Tracks</h2>\n{_track_list(tracks, token, gated_ids, streamable_ids)}"
     )
     return _render_page(
-        request,
         name,
         description or title,
         body,
@@ -516,7 +546,6 @@ def _render_radio(item: Radio, request: Request, token: str) -> str:
     canonical = _abs_url(request, f"/api/v1/share/{token}")
     body = (
         _render_header(
-            request,
             title,
             subtitle="Radio station",
             description=description,
@@ -525,7 +554,6 @@ def _render_radio(item: Radio, request: Request, token: str) -> str:
         + "<p>Open the Songhive app to listen to this radio station.</p>"
     )
     return _render_page(
-        request,
         title,
         description or "",
         body,
@@ -550,13 +578,11 @@ def _render_file(item: StoredFile, request: Request, token: str) -> str:
         )
 
     body = _render_header(
-        request,
         title,
         description=description,
         actions=actions,
     )
     return _render_page(
-        request,
         title,
         description,
         body,
@@ -572,7 +598,6 @@ def _render_missing(request: Request) -> str:
     body = f"""<h1 class="error">{_h(title)}</h1>
 <p>The shared link is invalid, expired, or has been revoked.</p>"""
     return _render_page(
-        request,
         title,
         "The shared link is invalid, expired, or has been revoked.",
         body,
@@ -580,20 +605,27 @@ def _render_missing(request: Request) -> str:
     )
 
 
-def render_share_page(item: Any, item_type: str, token: str, request: Request, gated_ids: Optional[set] = None) -> str:
+def render_share_page(
+    item: Any,
+    item_type: str,
+    token: str,
+    request: Request,
+    gated_ids: Optional[set] = None,
+    streamable_ids: Optional[set] = None,
+) -> str:
     """Render the appropriate HTML preview for a shared item."""
     if item is None:
         return _render_missing(request)
     if item_type == "track":
-        return _render_track(item, request, token, gated_ids)
+        return _render_track(item, request, token, gated_ids, streamable_ids)
     if item_type == "album":
-        return _render_album(item, request, token, gated_ids)
+        return _render_album(item, request, token, gated_ids, streamable_ids)
     if item_type == "artist":
-        return _render_artist(item, request, token, gated_ids)
+        return _render_artist(item, request, token, gated_ids, streamable_ids)
     if item_type == "playlist":
-        return _render_playlist_or_library(item, request, token, "Playlist", gated_ids)
+        return _render_playlist_or_library(item, request, token, "Playlist", gated_ids, streamable_ids)
     if item_type == "library":
-        return _render_playlist_or_library(item, request, token, "Library", gated_ids)
+        return _render_playlist_or_library(item, request, token, "Library", gated_ids, streamable_ids)
     if item_type == "radio":
         return _render_radio(item, request, token)
     if item_type == "file":

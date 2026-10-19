@@ -19,8 +19,10 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.stored_file import StoredFile
+from ...models.user import User
 from ...services import acl, music, sharing
-from ..deps import get_db
+from ...services.streaming import streamable_external_track_ids
+from ..deps import get_current_user_optional, get_db
 from ..middleware.rate_limit import rate_limit
 from ..share_page import render_share_page
 
@@ -115,6 +117,7 @@ async def resolve_share_url(
     request: Request,
     db: AsyncSession = Depends(get_db),
     download: bool = Query(False),
+    user: Optional[User] = Depends(get_current_user_optional),
 ):
     """Resolve a raw share token to the item it grants access to.
 
@@ -167,6 +170,11 @@ async def resolve_share_url(
     # visibility but never upgrades payment rights.
     from ...services.payments import access as payment_access
 
-    gates = await payment_access.effective_gates(db, _item_tracks(item, row.item_type))
-    html = render_share_page(item, row.item_type, token, request, gated_ids=set(gates))
+    tracks = _item_tracks(item, row.item_type)
+    gates = await payment_access.effective_gates(db, tracks)
+    # External-library tracks have no stored file; their player points at the
+    # stream endpoint, but only when the provider's stream policy admits this
+    # requester (anonymous share viewers are denied under restrictive policies).
+    streamable = await streamable_external_track_ids(db, tracks, user)
+    html = render_share_page(item, row.item_type, token, request, gated_ids=set(gates), streamable_ids=streamable)
     return HTMLResponse(content=html, status_code=status.HTTP_200_OK)

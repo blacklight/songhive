@@ -376,6 +376,40 @@ async def external_stream_allowed(
     return allowed
 
 
+async def streamable_external_track_ids(
+    session: AsyncSession,
+    tracks,
+    user,
+) -> set:
+    """Return the ids of externally backed tracks ``user`` may stream.
+
+    A track qualifies when it has no local backing file, an ``active``
+    external reference whose library is enabled and advertises byte or URL
+    streaming, and the provider's stream policy admits the requester —
+    anonymous included where the policy allows. Used by share-page
+    rendering, where a share token authorizes ACL access but provider
+    policies still apply per-requester.
+    """
+    ids = set()
+    cache: dict = {}
+    for track in tracks:
+        if track.audio_file_id:
+            continue
+        external_ref = getattr(track, "external_track", None) or getattr(track, "external_item", None)
+        if external_ref is None or external_ref.state != "active":
+            continue
+        external_library = external_ref.external_library
+        if external_library is None or not external_library.enabled:
+            continue
+        capabilities = external_library.capabilities or {}
+        if not (capabilities.get("read_bytes") or capabilities.get("stream_url")):
+            continue
+        if not await external_stream_allowed(session, external_library, user, cache=cache):
+            continue
+        ids.add(str(track.id))
+    return ids
+
+
 async def _mark_unavailable(
     session: AsyncSession,
     external_library: ExternalLibrary,
