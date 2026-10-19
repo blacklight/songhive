@@ -1908,7 +1908,10 @@
       "createLibrary": "Crear biblioteca",
       "newPlaylist": "Nueva lista de reproducción",
       "newLibrary": "Nueva biblioteca",
-      "alphabetIndex": "Índice alfabético"
+      "alphabetIndex": "Índice alfabético",
+      "perPage": "Por página",
+      "customPageSize": "Personalizado…",
+      "customPageSizeInput": "Tamaño de página personalizado"
     },
     "detail": {
       "tracks": "Pistas",

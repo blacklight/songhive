@@ -21,6 +21,7 @@ import AppIcon from "@/components/ui/AppIcon.vue";
 import AppModal from "@/components/feedback/AppModal.vue";
 import SkeletonLoader from "@/components/feedback/SkeletonLoader.vue";
 import AppSpinner from "@/components/feedback/AppSpinner.vue";
+import PageSizeControl from "@/components/ui/PageSizeControl.vue";
 import ContextMenu from "@/components/ui/ContextMenu.vue";
 import EntityActions, {
   type ActionItem,
@@ -84,6 +85,14 @@ export interface Props {
   total?: number;
   hasMore?: boolean;
   /**
+   * Current API page size. When set, the header shows a per-page selector
+   * (presets plus a free-text custom value) that emits
+   * ``update:pageSize`` — the parent is expected to apply it as the
+   * ``limit`` of its next fetch.
+   */
+  pageSize?: number;
+  pageSizeOptions?: number[];
+  /**
    * When provided, the header shows a "Shuffle play" button. The fetcher
    * must return a fresh random chunk of queue tracks from the whole
    * collection (e.g. a ``sort_by=random`` listing call) — it is invoked
@@ -116,6 +125,7 @@ const emit = defineEmits<{
   removed: [trackIds: string[]];
   updated: [trackIds: string[]];
   reorder: [payload: { trackIds: string[]; position?: number }];
+  "update:pageSize": [value: number];
 }>();
 
 const { t } = useI18n();
@@ -1642,6 +1652,15 @@ async function onMenuSelect(key: string) {
         </template>
         <EntityActions :actions="bulkActions" @select="onBulkAction" />
       </div>
+
+      <PageSizeControl
+        v-if="props.pageSize != null"
+        class="track-list__page-size"
+        :model-value="props.pageSize"
+        :options="props.pageSizeOptions"
+        :disabled="isFullLoading"
+        @update:model-value="(value) => emit('update:pageSize', value)"
+      />
     </div>
 
     <template v-if="!isCompact">
@@ -2233,6 +2252,7 @@ async function onMenuSelect(key: string) {
 .track-list__header {
   display: flex;
   justify-content: flex-end;
+  align-items: flex-end;
   flex-wrap: wrap;
   gap: var(--space-3);
 }

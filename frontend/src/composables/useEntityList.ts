@@ -159,6 +159,13 @@ export function useEntityList<T>(
     return load(true);
   }
 
+  function setLimit(value: number) {
+    if (value === limit.value) return;
+    limit.value = value;
+    offset.value = 0;
+    return load(true);
+  }
+
   function refresh() {
     return load(true);
   }
@@ -183,6 +190,7 @@ export function useEntityList<T>(
     loadMore,
     search,
     setSort,
+    setLimit,
     refresh,
     retry,
   };

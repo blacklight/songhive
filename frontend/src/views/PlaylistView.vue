@@ -78,6 +78,7 @@ const {
   hasMore: tracksHasMore,
   offset: trackOffset,
   total: trackTotal,
+  limit: tracksLimit,
   sortBy: trackSortBy,
   sortDir: trackSortDir,
   query: tracksQuery,
@@ -85,6 +86,7 @@ const {
   loadMore: loadMoreTracks,
   search: searchTracks,
   setSort: setTrackSort,
+  setLimit: setTracksLimit,
   retry: retryTracks,
   refresh: refreshTracks,
 } = useEntityList<PlaylistItemResponse>(
@@ -623,11 +625,13 @@ watch(
           :offset="trackOffset"
           :total="trackTotal"
           :has-more="tracksHasMore"
+          :page-size="tracksLimit"
           :shuffle-fetch="shuffleFetch"
           @share="onTrackShare"
           @removed="onTracksRemoved"
           @updated="onTracksRemoved"
           @reorder="onReorder"
+          @update:page-size="setTracksLimit"
         />
 
         <div class="playlist-view__footer">

@@ -39,6 +39,7 @@ const {
   hasMore,
   hasPrevious,
   total,
+  limit,
   sortBy,
   sortDir,
   load,
@@ -47,6 +48,7 @@ const {
   loadAround,
   search,
   setSort,
+  setLimit,
   retry,
   refresh,
 } = useChunkList<TrackResponse>(
@@ -96,6 +98,7 @@ const {
   query,
   sortBy,
   sortDir,
+  limit,
 });
 
 const mergedHasMore = computed(() => hasMore.value || remoteHasMore.value);
@@ -268,10 +271,12 @@ watch(
         :loading-more="loadingMore"
         :loading-previous="loadingPrevious"
         :deletable="authStore.isAuthenticated"
+        :page-size="limit"
         :shuffle-fetch="shuffleFetch"
         @share="onTrackShare"
         @removed="onRemoved"
         @updated="onRemoved"
+        @update:page-size="setLimit"
       />
     </template>
 

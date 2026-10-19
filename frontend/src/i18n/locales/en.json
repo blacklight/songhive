@@ -1908,7 +1908,10 @@
       "createLibrary": "Create library",
       "newPlaylist": "New playlist",
       "newLibrary": "New library",
-      "alphabetIndex": "Alphabet index"
+      "alphabetIndex": "Alphabet index",
+      "perPage": "Per page",
+      "customPageSize": "Custom…",
+      "customPageSizeInput": "Custom page size"
     },
     "detail": {
       "tracks": "Tracks",

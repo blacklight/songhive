@@ -93,8 +93,10 @@ const {
   loadingMore: tracksLoadingMore,
   error: tracksError,
   hasMore: tracksHasMore,
+  limit: tracksLimit,
   load: loadTracks,
   loadMore: loadMoreTracks,
+  setLimit: setTracksLimit,
   retry: retryTracks,
   refresh: refreshTracks,
 } = useEntityList<TrackResponse>((params: EntityListParams) =>
@@ -670,9 +672,11 @@ watch(
           :context="library.name"
           :removable-from="removableFrom"
           :deletable="true"
+          :page-size="tracksLimit"
           @share="onTrackShare"
           @removed="onTracksRemoved"
           @updated="onTracksRemoved"
+          @update:page-size="setTracksLimit"
         />
 
         <div class="library-edit-view__footer">

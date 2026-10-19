@@ -66,7 +66,7 @@ const auth = useAuthStore();
 const { busyStreams, toggleEnabled, togglePlayback } = useStreamActions();
 
 const username = computed(() => String(route.params.username));
-const limit = 20;
+const limit = ref(20);
 
 const loading = ref(false);
 const loadingMore = ref(false);
@@ -153,7 +153,7 @@ async function load(append = false) {
         include_boosts: includeBoosts.value,
         include_replies: includeReplies.value,
         reveal: props.reveal || undefined,
-        limit,
+        limit: limit.value,
       });
       activities.value = result;
       activitiesCursor.value = result.next_cursor ?? null;
@@ -162,7 +162,7 @@ async function load(append = false) {
       const result = await listTracksWithMeta({
         owner_username: username.value,
         include: "artist,album",
-        limit,
+        limit: limit.value,
         offset: offset.value,
       });
       if (append && tracksResult.value) {
@@ -178,7 +178,7 @@ async function load(append = false) {
     } else if (props.tab === "albums") {
       const result: ListAlbumsResult = await listAlbumsWithMeta({
         owner_username: username.value,
-        limit,
+        limit: limit.value,
         offset: offset.value,
       });
       if (append) {
@@ -190,7 +190,7 @@ async function load(append = false) {
     } else if (props.tab === "libraries") {
       const result: ListLibrariesResult = await listLibrariesWithMeta({
         owner_username: username.value,
-        limit,
+        limit: limit.value,
         offset: offset.value,
       });
       if (append) {
@@ -202,7 +202,7 @@ async function load(append = false) {
     } else if (props.tab === "playlists") {
       const result: ListPlaylistsResult = await listPlaylistsWithMeta({
         owner_username: username.value,
-        limit,
+        limit: limit.value,
         offset: offset.value,
       });
       if (append) {
@@ -226,8 +226,15 @@ async function load(append = false) {
 
 function loadMoreEntities() {
   if (loading.value || loadingMore.value || !hasMoreEntities.value) return;
-  offset.value += limit;
+  offset.value += limit.value;
   void load(true);
+}
+
+function onPageSizeChange(value: number) {
+  if (value === limit.value) return;
+  limit.value = value;
+  offset.value = 0;
+  void load();
 }
 
 async function loadMoreActivities() {
@@ -240,7 +247,7 @@ async function loadMoreActivities() {
       include_replies: includeReplies.value,
       reveal: props.reveal || undefined,
       cursor: activitiesCursor.value,
-      limit,
+      limit: limit.value,
     });
     activities.value = {
       ...result,
@@ -362,7 +369,9 @@ watch([includeBoosts, includeReplies], () => {
         :loading-more="loadingMore"
         :total="tracksResult.total"
         :offset="tracksResult.offset"
+        :page-size="limit"
         :shuffle-fetch="shuffleFetch"
+        @update:page-size="onPageSizeChange"
       />
       <p v-else class="user-profile-tab__empty">{{ emptyMessage }}</p>
       <div

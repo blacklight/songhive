@@ -23,7 +23,9 @@ export function useRemoteEntities(
     query: Ref<string>;
     sortBy?: Ref<string>;
     sortDir?: Ref<"asc" | "desc">;
-    limit?: number;
+    // Reactive so the local list's page-size selector keeps remote
+    // paging in lockstep — a change refetches from offset 0.
+    limit?: Ref<number>;
   },
 ) {
   const items = ref<RemoteObject[]>([]);
@@ -31,7 +33,6 @@ export function useRemoteEntities(
   const loadingMore = ref(false);
   const hasMore = ref(false);
   const total = ref(0);
-  const pageSize = options.limit ?? 20;
   // Filter/sort changes restart paging at offset 0 — the generation
   // counter drops a slow response that would otherwise append rows
   // fetched under the previous filters.
@@ -42,7 +43,7 @@ export function useRemoteEntities(
       resource_type: kind,
       q: options.query.value.trim() || undefined,
       collection: options.collection.value || undefined,
-      limit: pageSize,
+      limit: options.limit?.value ?? 20,
       offset,
       sort_by: options.sortBy?.value,
       sort_dir: options.sortDir?.value,
@@ -88,12 +89,13 @@ export function useRemoteEntities(
     }
   }
 
-  const watchables: Ref<string | boolean | undefined>[] = [
+  const watchables: Ref<string | number | boolean | undefined>[] = [
     options.collection,
     options.query,
   ];
   if (options.sortBy) watchables.push(options.sortBy);
   if (options.sortDir) watchables.push(options.sortDir);
+  if (options.limit) watchables.push(options.limit);
   watch(watchables, load, { immediate: true });
 
   return {

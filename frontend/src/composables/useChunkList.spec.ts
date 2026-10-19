@@ -246,6 +246,54 @@ describe("useChunkList", () => {
     );
   });
 
+  it("setLimit changes the page size and reloads from the start", async () => {
+    const fetcher = buildFetcher([
+      {
+        items: Array.from({ length: 20 }, (_, i) => `item-${i}`),
+        offset: 0,
+        total: 100,
+      },
+      {
+        items: Array.from({ length: 20 }, (_, i) => `item-${20 + i}`),
+        offset: 20,
+        total: 100,
+      },
+      {
+        items: Array.from({ length: 50 }, (_, i) => `big-${i}`),
+        offset: 0,
+        total: 100,
+      },
+    ]);
+    const wrapper = createList(fetcher);
+    await wrapper.vm.load();
+    await wrapper.vm.loadMore();
+    expect(wrapper.vm.items.length).toBe(40);
+
+    await wrapper.vm.setLimit(50);
+
+    expect(wrapper.vm.limit).toBe(50);
+    expect(wrapper.vm.items.length).toBe(50);
+    expect(wrapper.vm.startOffset).toBe(0);
+    expect(fetcher).toHaveBeenLastCalledWith({
+      q: "",
+      limit: 50,
+      offset: 0,
+      around_track_id: undefined,
+      sort_by: "created_at",
+      sort_dir: "desc",
+    });
+  });
+
+  it("setLimit is a no-op when the size is unchanged", async () => {
+    const fetcher = buildFetcher([{ items: ["a"], offset: 0, total: 10 }]);
+    const wrapper = createList(fetcher);
+    await wrapper.vm.load();
+
+    await wrapper.vm.setLimit(20);
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("debounces search and resets the list", async () => {
     const fetcher = buildFetcher([
       { items: ["old"], offset: 0, total: 1 },

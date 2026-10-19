@@ -109,11 +109,13 @@ const {
   loadingMore: tracksLoadingMore,
   error: tracksError,
   hasMore: tracksHasMore,
+  limit: tracksLimit,
   sortBy: trackSortBy,
   sortDir: trackSortDir,
   load: loadTracks,
   loadMore: loadMoreTracks,
   setSort: setTrackSort,
+  setLimit: setTracksLimit,
   retry: retryTracks,
   refresh: refreshTracks,
 } = useEntityList<TrackResponse>(
@@ -550,10 +552,12 @@ watch(
           :auto-scroll="false"
           :context="artist.name"
           :deletable="true"
+          :page-size="tracksLimit"
           :shuffle-fetch="shuffleFetch"
           @share="onTrackShare"
           @removed="onTracksRemoved"
           @updated="onTracksRemoved"
+          @update:page-size="setTracksLimit"
         />
 
         <div class="artist-view__footer">

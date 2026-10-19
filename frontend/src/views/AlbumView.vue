@@ -86,8 +86,10 @@ const {
   loadingMore: tracksLoadingMore,
   error: tracksError,
   hasMore: tracksHasMore,
+  limit: tracksLimit,
   load: loadTracks,
   loadMore: loadMoreTracks,
+  setLimit: setTracksLimit,
   retry: retryTracks,
   refresh: refreshTracks,
 } = useEntityList<TrackResponse>((params: EntityListParams) =>
@@ -618,10 +620,12 @@ watch(
           :context="artistName"
           :show-artwork="true"
           :deletable="true"
+          :page-size="tracksLimit"
           :shuffle-fetch="shuffleFetch"
           @share="onTrackShare"
           @removed="onTracksRemoved"
           @updated="onTracksRemoved"
+          @update:page-size="setTracksLimit"
         />
 
         <div class="album-view__footer">

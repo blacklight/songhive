@@ -1589,4 +1589,39 @@ describe("TrackList", () => {
 
     expect(wrapper.find(".track-list__added-by").exists()).toBe(false);
   });
+
+  it("hides the page-size control when no pageSize is provided", async () => {
+    ({ wrapper } = mountTrackList({ tracks: [makeTrack()] }));
+    await flushPromises();
+
+    expect(wrapper.find(".track-list__page-size").exists()).toBe(false);
+  });
+
+  it("emits update:pageSize when a preset page size is picked", async () => {
+    ({ wrapper } = mountTrackList({
+      tracks: [makeTrack()],
+      pageSize: 20,
+    }));
+    await flushPromises();
+
+    const control = wrapper.find(".track-list__page-size");
+    expect(control.exists()).toBe(true);
+    await control.find("select").setValue("50");
+    expect(wrapper.emitted("update:pageSize")?.[0]).toEqual([50]);
+  });
+
+  it("emits update:pageSize with the custom page size", async () => {
+    ({ wrapper } = mountTrackList({
+      tracks: [makeTrack()],
+      pageSize: 20,
+    }));
+    await flushPromises();
+
+    const control = wrapper.find(".track-list__page-size");
+    await control.find("select").setValue("custom");
+    const input = control.find('input[type="number"]');
+    await input.setValue("30");
+    await input.trigger("keyup.enter");
+    expect(wrapper.emitted("update:pageSize")?.[0]).toEqual([30]);
+  });
 });

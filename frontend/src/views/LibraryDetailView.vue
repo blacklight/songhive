@@ -66,6 +66,7 @@ const {
   loadingMore: tracksLoadingMore,
   error: tracksError,
   hasMore: tracksHasMore,
+  limit: tracksLimit,
   sortBy: trackSortBy,
   sortDir: trackSortDir,
   query: tracksQuery,
@@ -73,6 +74,7 @@ const {
   loadMore: loadMoreTracks,
   search: searchTracks,
   setSort: setTrackSort,
+  setLimit: setTracksLimit,
   retry: retryTracks,
   refresh: refreshTracks,
 } = useEntityList<TrackResponse>(
@@ -479,10 +481,12 @@ watch(
           :collection-owner-id="library.owner_id"
           :removable-from="removableFrom"
           :deletable="true"
+          :page-size="tracksLimit"
           :shuffle-fetch="shuffleFetch"
           @share="onTrackShare"
           @removed="onTracksRemoved"
           @updated="onTracksRemoved"
+          @update:page-size="setTracksLimit"
         />
 
         <div class="library-detail-view__footer">

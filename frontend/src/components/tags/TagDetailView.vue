@@ -75,7 +75,7 @@ const authStore = useAuthStore();
 const confirm = useConfirmStore();
 const toast = useToastStore();
 
-const LIMIT = 24;
+const limit = ref(24);
 
 const items = ref<Item[]>([]);
 const tracks = ref<TrackResponse[]>([]);
@@ -95,7 +95,7 @@ const activityCursor = ref<string | null>(null);
 const activityHasMore = ref(false);
 const activityLoadingMore = ref(false);
 
-const page = computed(() => Math.floor(offset.value / LIMIT) + 1);
+const page = computed(() => Math.floor(offset.value / limit.value) + 1);
 const isTrackActive = computed(() => activeType.value === "track");
 const isActivityActive = computed(() => activeType.value === "activity");
 
@@ -150,7 +150,7 @@ async function fetchActivityPage(append: boolean, cursor: string | null) {
   if (!props.activityLoader) return;
 
   const result = await props.activityLoader(props.name, {
-    limit: LIMIT,
+    limit: limit.value,
     cursor: cursor ?? undefined,
   });
 
@@ -169,7 +169,7 @@ async function fetchItems() {
   try {
     if (activeType.value === "track") {
       const result = await listTracksWithMeta({
-        limit: LIMIT,
+        limit: limit.value,
         offset: offset.value,
         sort_by: sortBy.value,
         sort_dir: sortDir.value,
@@ -186,7 +186,7 @@ async function fetchItems() {
       await fetchActivityPage(false, null);
     } else {
       const result = await props.loadItems(props.name, {
-        limit: LIMIT,
+        limit: limit.value,
         offset: offset.value,
         sort_by: sortBy.value,
         sort_dir: sortDir.value,
@@ -304,7 +304,14 @@ async function loadMoreActivities() {
 }
 
 function onPageChange(nextPage: number) {
-  offset.value = (nextPage - 1) * LIMIT;
+  offset.value = (nextPage - 1) * limit.value;
+  void load();
+}
+
+function onPageSizeChange(value: number) {
+  if (value === limit.value) return;
+  limit.value = value;
+  offset.value = 0;
   void load();
 }
 
@@ -473,9 +480,12 @@ onMounted(() => loadVisibleTypes());
       :show-artwork="true"
       :deletable="authStore.isAdmin"
       :auto-scroll="true"
+      :page-size="limit"
+      :page-size-options="[12, 24, 48, 96]"
       :shuffle-fetch="shuffleFetch"
       @removed="load"
       @updated="load"
+      @update:page-size="onPageSizeChange"
     />
 
     <template v-else-if="isActivityActive">
@@ -518,10 +528,10 @@ onMounted(() => loadVisibleTypes());
     </template>
 
     <AppPagination
-      v-if="!isActivityActive && total > LIMIT"
+      v-if="!isActivityActive && total > limit"
       :page="page"
       :total="total"
-      :per-page="LIMIT"
+      :per-page="limit"
       @update:page="onPageChange"
     />
   </div>

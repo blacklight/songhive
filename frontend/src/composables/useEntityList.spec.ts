@@ -114,6 +114,41 @@ describe("useEntityList", () => {
     });
   });
 
+  it("setLimit changes the page size and reloads the first page", async () => {
+    const fetcher = buildFetcher([
+      Array.from({ length: 20 }, (_, i) => `item-${i}`),
+      Array.from({ length: 20 }, (_, i) => `item-${20 + i}`),
+      Array.from({ length: 50 }, (_, i) => `big-${i}`),
+    ]);
+    const wrapper = createList(fetcher);
+    await wrapper.vm.load();
+    await wrapper.vm.loadMore();
+    expect(wrapper.vm.items.length).toBe(40);
+
+    await wrapper.vm.setLimit(50);
+
+    expect(wrapper.vm.limit).toBe(50);
+    expect(wrapper.vm.offset).toBe(0);
+    expect(wrapper.vm.items.length).toBe(50);
+    expect(fetcher).toHaveBeenLastCalledWith({
+      q: "",
+      limit: 50,
+      offset: 0,
+      sort_by: "name",
+      sort_dir: "asc",
+    });
+  });
+
+  it("setLimit is a no-op when the size is unchanged", async () => {
+    const fetcher = buildFetcher([["a"]]);
+    const wrapper = createList(fetcher);
+    await wrapper.vm.load();
+
+    await wrapper.vm.setLimit(20);
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it("debounces search and resets the list", async () => {
     const fetcher = buildFetcher([["first-page"], ["search-a", "search-b"]]);
     const wrapper = createList(fetcher);

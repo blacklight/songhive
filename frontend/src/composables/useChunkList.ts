@@ -223,6 +223,12 @@ export function useChunkList<T>(
     return load(true);
   }
 
+  function setLimit(value: number) {
+    if (value === limit.value) return;
+    limit.value = value;
+    return load(true);
+  }
+
   function refresh() {
     return load(true);
   }
@@ -253,6 +259,7 @@ export function useChunkList<T>(
     loadAt,
     search,
     setSort,
+    setLimit,
     refresh,
     retry,
   };

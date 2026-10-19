@@ -1908,7 +1908,10 @@
       "createLibrary": "Crea libreria",
       "newPlaylist": "Nuova playlist",
       "newLibrary": "Nuova libreria",
-      "alphabetIndex": "Indice alfabetico"
+      "alphabetIndex": "Indice alfabetico",
+      "perPage": "Per pagina",
+      "customPageSize": "Personalizzato…",
+      "customPageSizeInput": "Dimensione di pagina personalizzata"
     },
     "detail": {
       "tracks": "Brani",

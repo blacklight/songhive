@@ -33,12 +33,14 @@ const {
   query,
   hasMore,
   total,
+  limit,
   sortBy,
   sortDir,
   load,
   loadMore,
   search,
   setSort,
+  setLimit,
   retry,
 } = useChunkList<TrackResponse>(
   async (params) => {
@@ -235,11 +237,13 @@ onMounted(() => {
         :favorite-label="t('common.unfavorite')"
         :favorite-managed="true"
         :deletable="true"
+        :page-size="limit"
         :shuffle-fetch="shuffleFetch"
         @toggle-favorite="onToggleFavorite"
         @share="onTrackShare"
         @removed="onTracksRemoved"
         @updated="onTracksRemoved"
+        @update:page-size="setLimit"
       />
 
       <section v-if="remoteFavorites.length" class="favorites-view__remote">

@@ -1908,7 +1908,10 @@
       "createLibrary": "إنشاء مكتبة",
       "newPlaylist": "قائمة تشغيل جديدة",
       "newLibrary": "مكتبة جديدة",
-      "alphabetIndex": "فهرس أبجدي"
+      "alphabetIndex": "فهرس أبجدي",
+      "perPage": "لكل صفحة",
+      "customPageSize": "مخصص…",
+      "customPageSizeInput": "حجم صفحة مخصص"
     },
     "detail": {
       "tracks": "المقاطع",
