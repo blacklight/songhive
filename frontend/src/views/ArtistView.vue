@@ -309,7 +309,7 @@ const actions = computed(() => [
   },
 ]);
 
-const actionHandlers: Record<string, () => void | Promise<unknown>> = {
+const actionHandlers: Record<string, () => unknown> = {
   play: () => player.playAll(queueTracks.value),
   shuffle: () => shufflePlay(),
   enqueue: () => {
