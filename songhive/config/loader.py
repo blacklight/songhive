@@ -66,62 +66,34 @@ def build_cli_parser() -> argparse.ArgumentParser:
         prog="songhive",
         description="Songhive - A federated music sharing service",
     )
-    parser.add_argument(
-        "-c",
-        "--config",
-        type=str,
-        default=os.environ.get("SONGHIVE_CONFIG"),
-        help="Path to config.toml file (also read from SONGHIVE_CONFIG env var)",
-    )
-    parser.add_argument(
-        "--host",
-        type=str,
-        default=None,
-        help="Server bind address",
-    )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=None,
-        help="Server listen port",
-    )
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        default=None,
-        help="Enable debug mode",
-    )
-    parser.add_argument(
-        "--db-url",
-        type=str,
-        default=None,
-        help="Database URL",
-    )
-    parser.add_argument(
-        "--redis-url",
-        type=str,
-        default=None,
-        help="Redis URL",
-    )
-    parser.add_argument(
-        "--domain",
-        type=str,
-        default=None,
-        help="Public domain for federation",
-    )
-    parser.add_argument(
-        "--workers",
-        type=int,
-        default=None,
-        help="Number of worker processes",
-    )
-    parser.add_argument(
-        "--cors-origins",
-        type=str,
-        nargs="+",
-        default=None,
-        help="Allowed CORS origins (can be given multiple times or as comma-separated values)",
-    )
+    server_options = [
+        (
+            ("-c", "--config"),
+            {
+                "type": str,
+                "default": os.environ.get("SONGHIVE_CONFIG"),
+                "help": "Path to config.toml file (also read from SONGHIVE_CONFIG env var)",
+            },
+        ),
+        (("--host",), {"type": str, "default": None, "help": "Server bind address"}),
+        (("--port",), {"type": int, "default": None, "help": "Server listen port"}),
+        (("--debug",), {"action": "store_true", "default": None, "help": "Enable debug mode"}),
+        (("--db-url",), {"type": str, "default": None, "help": "Database URL"}),
+        (("--redis-url",), {"type": str, "default": None, "help": "Redis URL"}),
+        (("--domain",), {"type": str, "default": None, "help": "Public domain for federation"}),
+        (("--workers",), {"type": int, "default": None, "help": "Number of worker processes"}),
+        (
+            ("--cors-origins",),
+            {
+                "type": str,
+                "nargs": "+",
+                "default": None,
+                "help": "Allowed CORS origins (can be given multiple times or as comma-separated values)",
+            },
+        ),
+    ]
+    for args, kwargs in server_options:
+        parser.add_argument(*args, **kwargs)  # type: ignore[arg-type]
     return parser
 
 

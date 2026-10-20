@@ -379,59 +379,80 @@ class LiveIngestHandler(AuthenticatedWebSocket):
         acknowledgement, exceeding the start timeout closes with 4415; after
         it, the flag disappearing means the worker ended the broadcast.
         """
-        redis = self._redis
         meta_key = stream_meta_key(self._mount)
         deadline = time.monotonic() + float(self.config.streams.live_start_timeout_seconds)
         listener_at = 0.0
         try:
             while True:
                 await asyncio.sleep(self._META_POLL_SECONDS)
-                live_ingest_id = None
-                meta_present = False
-                try:
-                    assert redis  # for mypy
-                    raw = await redis.get(meta_key)
-                    if raw is not None:
-                        meta_present = True
-                        meta = json.loads(raw)
-                        if isinstance(meta, dict):
-                            live_ingest_id = meta.get("live_ingest_id")
-                except Exception:
+                polled = await self._poll_meta(meta_key)
+                if polled is None:
                     # A transient error must not flap the broadcast.
                     continue
+                live_ingest_id, meta_present = polled
 
                 if not self._on_air:
-                    if live_ingest_id == self._ingest_id:
-                        self._on_air = True
-                        self._send_json({"type": "on_air", "ingest_id": self._ingest_id})
-                    elif time.monotonic() >= deadline:
-                        await self._terminate(
-                            4415,
-                            "stream worker did not acknowledge the broadcast",
-                            error_code="start_timeout",
-                        )
+                    if await self._await_on_air(live_ingest_id, deadline):
                         return
                     continue
 
                 if live_ingest_id != self._ingest_id:
-                    reason = "stream offline" if not meta_present else "broadcast ended"
-                    self._send_json({"type": "stopped", "reason": reason})
-                    code = 4504 if not meta_present else 1000
-                    await self._terminate(code, reason)
+                    await self._broadcast_stopped(meta_present)
                     return
 
-                if time.monotonic() - listener_at >= self._LISTENER_POLL_SECONDS:
-                    listener_at = time.monotonic()
-                    try:
-                        count = 0
-                        async for _ in redis.scan_iter(match=stream_listener_pattern(self._mount), count=100):
-                            count += 1
-                        self._send_json({"type": "listeners", "count": count})
-                    except Exception:
-                        pass
+                listener_at = await self._maybe_send_listener_count(listener_at)
         except asyncio.CancelledError:
             logger.warning("Meta poll cancelled for %s", self._output_id)
             raise
+
+    async def _poll_meta(self, meta_key: str) -> Optional[tuple]:
+        """Read the mount meta; ``None`` on transient errors."""
+        live_ingest_id = None
+        meta_present = False
+        try:
+            assert self._redis  # for mypy
+            raw = await self._redis.get(meta_key)
+            if raw is not None:
+                meta_present = True
+                meta = json.loads(raw)
+                if isinstance(meta, dict):
+                    live_ingest_id = meta.get("live_ingest_id")
+        except Exception:
+            return None
+        return live_ingest_id, meta_present
+
+    async def _await_on_air(self, live_ingest_id, deadline: float) -> bool:
+        """Await worker acknowledgement; True when the loop must return."""
+        if live_ingest_id == self._ingest_id:
+            self._on_air = True
+            self._send_json({"type": "on_air", "ingest_id": self._ingest_id})
+        elif time.monotonic() >= deadline:
+            await self._terminate(
+                4415,
+                "stream worker did not acknowledge the broadcast",
+                error_code="start_timeout",
+            )
+            return True
+        return False
+
+    async def _broadcast_stopped(self, meta_present: bool) -> None:
+        reason = "stream offline" if not meta_present else "broadcast ended"
+        self._send_json({"type": "stopped", "reason": reason})
+        code = 4504 if not meta_present else 1000
+        await self._terminate(code, reason)
+
+    async def _maybe_send_listener_count(self, listener_at: float) -> float:
+        if time.monotonic() - listener_at < self._LISTENER_POLL_SECONDS:
+            return listener_at
+        try:
+            count = 0
+            assert self._redis
+            async for _ in self._redis.scan_iter(match=stream_listener_pattern(self._mount), count=100):
+                count += 1
+            self._send_json({"type": "listeners", "count": count})
+        except Exception:
+            pass
+        return time.monotonic()
 
     async def _max_duration_reached(self) -> None:
         """End the broadcast when the configured maximum duration elapses."""
@@ -464,6 +485,15 @@ class LiveIngestHandler(AuthenticatedWebSocket):
         """Schedule resource cleanup after the socket closes."""
         asyncio.ensure_future(self._cleanup())
 
+    async def _cancel_and_await(self, task) -> None:
+        if task is None:
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
     async def _cleanup(self) -> None:
         """Release the live claim and mark the ingest stream ended."""
         if self._cleaned:
@@ -474,43 +504,10 @@ class LiveIngestHandler(AuthenticatedWebSocket):
             self._deadline_timer.cancel()
             self._deadline_timer = None
         for task in (self._meta_task, self._refresh_task):
-            if task is not None:
-                task.cancel()
-                try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+            await self._cancel_and_await(task)
 
-        redis = self._redis
-        output_id = self._output_id
-        ingest_id = self._ingest_id
-        payload = self._live_payload
-
-        if redis is not None and ingest_id is not None:
-            # Signal the worker's ingest iterator to finish promptly even if
-            # the writer task is gone, then release the claim only if it is
-            # still ours (compare-and-delete).
-            try:
-                await redis.xadd(
-                    ingest_key(output_id),
-                    {"end": ingest_id},
-                    maxlen=self.config.streams.live_ingest_max_entries,
-                    approximate=True,
-                )
-            except Exception:
-                pass
-            if self._writer_task is not None:
-                # Let a still-running writer drain its queue briefly so
-                # in-flight chunks are not dropped by a graceful stop.
-                try:
-                    await asyncio.wait_for(asyncio.shield(self._writer_task), timeout=2.0)
-                except Exception:
-                    pass
-            try:
-                await delete_live_key(redis, output_id, payload or "")
-                await drop_ingest_header(redis, output_id, ingest_id)
-            except Exception:
-                pass
+        if self._redis is not None and self._ingest_id is not None:
+            await self._release_live_claim()
 
         if self._writer_task is not None:
             self._writer_task.cancel()
@@ -519,3 +516,34 @@ class LiveIngestHandler(AuthenticatedWebSocket):
             except asyncio.CancelledError:
                 pass
             self._writer_task = None
+
+    async def _release_live_claim(self) -> None:
+        """Signal end-of-ingest and release the claim if it is still ours."""
+        redis = self._redis
+        output_id = self._output_id
+        ingest_id = self._ingest_id
+
+        # Signal the worker's ingest iterator to finish promptly even if
+        # the writer task is gone, then release the claim only if it is
+        # still ours (compare-and-delete).
+        try:
+            await redis.xadd(
+                ingest_key(output_id),
+                {"end": ingest_id},
+                maxlen=self.config.streams.live_ingest_max_entries,
+                approximate=True,
+            )
+        except Exception:
+            pass
+        if self._writer_task is not None:
+            # Let a still-running writer drain its queue briefly so
+            # in-flight chunks are not dropped by a graceful stop.
+            try:
+                await asyncio.wait_for(asyncio.shield(self._writer_task), timeout=2.0)
+            except Exception:
+                pass
+        try:
+            await delete_live_key(redis, output_id, self._live_payload or "")
+            await drop_ingest_header(redis, output_id, ingest_id or "")
+        except Exception:
+            pass

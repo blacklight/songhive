@@ -1160,22 +1160,7 @@ async def enrich_images(
     if not any((body.artist_id, body.album_id, body.all)):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="At least one scope is required")
 
-    result = None
-    if not body.dry_run:
-        try:
-            result = bulk_enrich_images.delay(
-                artist_id=body.artist_id,
-                album_id=body.album_id,
-                all_=body.all,
-                force=body.force,
-                dry_run=False,
-            )  # type: ignore
-        except (KombuOperationalError, RedisConnectionError, OSError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Celery broker unavailable",
-            ) from exc
-
+    result = _enqueue_bulk_enrich(body)
     artist_ids, album_ids = await resolve_image_enrichment_targets(
         db,
         artist_id=body.artist_id,
@@ -1184,12 +1169,6 @@ async def enrich_images(
         force=body.force,
     )
 
-    scope = {
-        "artist_id": body.artist_id,
-        "album_id": body.album_id,
-        "all": body.all,
-        "force": body.force,
-    }
     await audit.log_action(
         db,
         actor_id=admin.id,
@@ -1197,7 +1176,12 @@ async def enrich_images(
         target_type=AuditTargetType.IMAGES,
         target_id=None,
         details={
-            "scope": scope,
+            "scope": {
+                "artist_id": body.artist_id,
+                "album_id": body.album_id,
+                "all": body.all,
+                "force": body.force,
+            },
             "artists": len(artist_ids),
             "albums": len(album_ids),
             "dry_run": body.dry_run,
@@ -1213,6 +1197,25 @@ async def enrich_images(
         task_id=None if body.dry_run or not result else result.id,
         status=run_status,
     )
+
+
+def _enqueue_bulk_enrich(body: EnrichImagesRequest):
+    """Dispatch the Celery bulk-enrich task; ``None`` on dry runs."""
+    if body.dry_run:
+        return None
+    try:
+        return bulk_enrich_images.delay(
+            artist_id=body.artist_id,
+            album_id=body.album_id,
+            all_=body.all,
+            force=body.force,
+            dry_run=False,
+        )  # type: ignore
+    except (KombuOperationalError, RedisConnectionError, OSError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Celery broker unavailable",
+        ) from exc
 
 
 class RehashAudioRequest(BaseModel):

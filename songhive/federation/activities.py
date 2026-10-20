@@ -3,8 +3,9 @@ Activity creation and processing for federation.
 """
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable, List, Optional, Tuple
+from typing import Any, Iterable, List, Optional, Tuple
 
 from pubby import (
     allow_public_quotes,
@@ -66,17 +67,24 @@ def _create_object_activity(
     }
 
 
+@dataclass
+class AudioActivityOptions:
+    """Object-shaping options for :func:`create_audio_activity`."""
+
+    description: Optional[str] = None
+    duration: Optional[float] = None
+    ap_object_id: Optional[str] = None
+    library_url: Optional[str] = None
+    sale: Any = None
+
+
 def create_audio_activity(
     actor_url: str,
     track: Track,
     artist: Artist,
     domain: str,
     *,
-    description: Optional[str] = None,
-    duration: Optional[float] = None,
-    ap_object_id: Optional[str] = None,
-    library_url: Optional[str] = None,
-    sale=None,
+    options: Optional[AudioActivityOptions] = None,
     visibility: "Visibility | str" = Visibility.PUBLIC,
     mention_actor_urls: Iterable[str] = (),
 ) -> Optional[dict]:
@@ -101,6 +109,7 @@ def create_audio_activity(
     """
     if track.visibility != Visibility.PUBLIC.value:
         return None
+    options = options or AudioActivityOptions()
 
     stream_url = get_stream_url(track=track, domain=domain)
     audio_object = track_to_audio_object(
@@ -109,19 +118,19 @@ def create_audio_activity(
         domain,
         stream_url,
         actor_url=actor_url,
-        ap_object_id=ap_object_id,
-        library_url=library_url,
-        sale=sale,
+        ap_object_id=options.ap_object_id,
+        library_url=options.library_url,
+        sale=options.sale,
     )
     if audio_object is None:
         return None
 
-    if description:
-        set_post_content(audio_object, description, domain, link_href=get_track_url(track, domain))
+    if options.description:
+        set_post_content(audio_object, options.description, domain, link_href=get_track_url(track, domain))
 
-    if duration is not None:
+    if options.duration is not None:
         # ISO 8601 — the ``xsd:duration`` both AS2 and Funkwhale ≥ 2.0 expect.
-        audio_object["duration"] = format_duration(duration)
+        audio_object["duration"] = format_duration(options.duration)
 
     return _create_object_activity(actor_url, audio_object, visibility, mention_actor_urls)
 

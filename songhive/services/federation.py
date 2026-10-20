@@ -457,45 +457,7 @@ def search_remote_actors(
     domain_part = domain_part.lower()
     local_domain = normalize_instance_domain(config.federation.instance_domain or "")
 
-    candidates: dict[str, RemoteActorMatch] = {}
-    session = storage.session_factory()
-    try:
-        # Followers first so a duplicate cache row cannot clobber the flag.
-        for model, is_follower in (
-            (storage.follower_model, True),
-            (storage.actor_cache_model, False),
-        ):
-            for row in session.query(model).filter(_remote_actor_query(model, term, domain_part)).all():
-                actor_id = row.actor_id
-                if (
-                    actor_id in candidates
-                    or not isinstance(actor_id, str)
-                    or not actor_id.startswith(("http://", "https://"))
-                ):
-                    continue
-                domain = extract_domain(actor_id)
-                if (
-                    not domain
-                    or domain == local_domain
-                    or (domain_part and domain_part not in domain)
-                    or is_domain_blocked(domain, config)
-                ):
-                    continue
-                actor_doc = row.actor_data if isinstance(row.actor_data, dict) else {}
-                username = _actor_doc_username(actor_doc, actor_id)
-                if not username:
-                    continue
-                candidates[actor_id] = RemoteActorMatch(
-                    actor_url=actor_id,
-                    username=username,
-                    domain=domain,
-                    display_name=_actor_doc_display_name(actor_doc),
-                    avatar_url=_actor_doc_avatar_url(actor_doc),
-                    profile_url=_actor_doc_profile_url(actor_doc, actor_id),
-                    follower=is_follower,
-                )
-    finally:
-        session.close()
+    candidates = _remote_actor_candidates(storage, term, domain_part, local_domain, config)
 
     def _rank(match: RemoteActorMatch) -> tuple:
         username = match.username.lower()
@@ -510,6 +472,64 @@ def search_remote_actors(
         return score, not match.follower, username, match.domain
 
     return sorted(candidates.values(), key=_rank)
+
+
+def _remote_actor_candidates(
+    storage,
+    term: str,
+    domain_part: str,
+    local_domain: str,
+    config: SonghiveConfig,
+) -> dict[str, RemoteActorMatch]:
+    candidates: dict[str, RemoteActorMatch] = {}
+    session = storage.session_factory()
+    try:
+        # Followers first so a duplicate cache row cannot clobber the flag.
+        for model, is_follower in (
+            (storage.follower_model, True),
+            (storage.actor_cache_model, False),
+        ):
+            for row in session.query(model).filter(_remote_actor_query(model, term, domain_part)).all():
+                match = _remote_actor_match(row, is_follower, candidates, domain_part, local_domain, config)
+                if match is not None:
+                    candidates[match.actor_url] = match
+    finally:
+        session.close()
+    return candidates
+
+
+def _remote_actor_match(
+    row,
+    is_follower: bool,
+    candidates: dict[str, RemoteActorMatch],
+    domain_part: str,
+    local_domain: str,
+    config: SonghiveConfig,
+) -> Optional[RemoteActorMatch]:
+    actor_id = row.actor_id
+    if actor_id in candidates or not isinstance(actor_id, str) or not actor_id.startswith(("http://", "https://")):
+        return None
+    domain = extract_domain(actor_id)
+    if (
+        not domain
+        or domain == local_domain
+        or (domain_part and domain_part not in domain)
+        or is_domain_blocked(domain, config)
+    ):
+        return None
+    actor_doc = row.actor_data if isinstance(row.actor_data, dict) else {}
+    username = _actor_doc_username(actor_doc, actor_id)
+    if not username:
+        return None
+    return RemoteActorMatch(
+        actor_url=actor_id,
+        username=username,
+        domain=domain,
+        display_name=_actor_doc_display_name(actor_doc),
+        avatar_url=_actor_doc_avatar_url(actor_doc),
+        profile_url=_actor_doc_profile_url(actor_doc, actor_id),
+        follower=is_follower,
+    )
 
 
 def resolve_actor_inbox(

@@ -9,7 +9,7 @@ importing real providers; the worker owns driver/runtime details.
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Awaitable, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 from fastapi import HTTPException, status
 from sqlalchemy import delete, select
@@ -605,6 +605,49 @@ COMMAND_HANDLERS: dict[str, Callable[..., Awaitable[None]]] = {
 }
 
 
+def _int_command_arg(args: dict, name: str, default: int = 0):
+    value = args.get(name, default)
+    if isinstance(value, int):
+        return value
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"{name} must be an integer",
+        )
+
+
+def _float_command_arg(args: dict, name: str, default: float = 0.0):
+    try:
+        return float(args.get(name, default))
+    except (TypeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"{name} must be a number",
+        )
+
+
+def _queue_command_arg(args: dict):
+    queue = args.get("queue", [])
+    if not isinstance(queue, list):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="queue must be a list",
+        )
+    return queue
+
+
+_ARG_NORMALIZERS: dict[str, Callable[[dict], Any]] = {
+    "play_at": lambda args: _int_command_arg(args, "index"),
+    "seek": lambda args: _float_command_arg(args, "seconds"),
+    "set_queue": _queue_command_arg,
+    "set_repeat": lambda args: args.get("repeat", "off"),
+    "set_shuffle": lambda args: args.get("shuffle", False),
+    "set_volume": lambda args: _float_command_arg(args, "volume", 1.0),
+}
+
+
 async def handle_command(
     db: AsyncSession,
     session: PlaybackSession,
@@ -620,51 +663,11 @@ async def handle_command(
             detail=f"Unknown command: {command}",
         )
 
-    # Normalize empty args for ``play_at``/``seek``/``set_queue``.
-    if command == "play_at":
-        index = args.get("index", 0)
-        if not isinstance(index, int):
-            try:
-                index = int(index)
-            except (TypeError, ValueError):
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                    detail="index must be an integer",
-                )
-        await cmd_play_at(db, session, index, connection_id)
-    elif command == "seek":
-        seconds = args.get("seconds", 0)
-        try:
-            seconds = float(seconds)
-        except (TypeError, ValueError):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="seconds must be a number",
-            )
-        await cmd_seek(db, session, seconds, connection_id)
-    elif command == "set_queue":
-        queue = args.get("queue", [])
-        if not isinstance(queue, list):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="queue must be a list",
-            )
-        await cmd_set_queue(db, session, queue, connection_id)
-    elif command == "set_repeat":
-        await cmd_set_repeat(db, session, args.get("repeat", "off"), connection_id)
-    elif command == "set_shuffle":
-        await cmd_set_shuffle(db, session, args.get("shuffle", False), connection_id)
-    elif command == "set_volume":
-        try:
-            volume = float(args.get("volume", 1.0))
-        except (TypeError, ValueError):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="volume must be a number",
-            )
-        await cmd_set_volume(db, session, volume, connection_id)
-    else:
+    normalizer = _ARG_NORMALIZERS.get(command)
+    if normalizer is None:
         await handler(db, session, connection_id)
+        return
+    await handler(db, session, normalizer(args), connection_id)
 
 
 async def record_server_listen(

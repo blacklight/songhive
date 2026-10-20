@@ -670,16 +670,10 @@ def track_to_audio_object(
         return None
 
     track_url = get_track_url(track=track, domain=domain)
-    stream_url = stream_url or get_stream_url(track=track, domain=domain)
     # Metadata-only providers (e.g. TIDAL) never federate audio bytes;
     # remote servers get a provider browse link instead.
     browse_link = provider_browse_link(track)
-    if browse_link is not None:
-        stream_url = None
-    if sale is not None:
-        # A sale-gated track advertises the policy-enforcing stream URL —
-        # never the raw file path, which anonymous remote fetches cannot pay.
-        stream_url = gated_stream_url(track, domain, sale)
+    stream_url = _resolve_stream_url(track, domain, stream_url, browse_link, sale)
     object_id = ap_object_id or track_url
     unloaded = _unloaded_attrs(track)
     media_type = _track_media_type(track, unloaded)
@@ -690,50 +684,10 @@ def track_to_audio_object(
 
     duration_seconds = int(track.duration) if track.duration else 0
     audio_file = getattr(track, "audio_file", None) if "audio_file" not in unloaded else None
-    external_track = active_external_track(track)
-    external_item = active_external_item(track)
-    size = int(audio_file.size) if audio_file is not None and audio_file.size else 0
-    if not size and external_track is not None and external_track.provider_size:
-        size = int(external_track.provider_size)
-    if not size and external_item is not None:
-        raw_size = (external_item.raw_metadata or {}).get("Size")
-        if raw_size:
-            try:
-                size = int(raw_size)
-            except (TypeError, ValueError):
-                pass
+    size = _audio_size(track, audio_file)
     bitrate = int(size * 8 / duration_seconds) if size and duration_seconds else 0
 
-    # The ``text/html`` page link is always present so remote renderers can
-    # link the human page; the media link is only emitted for playable
-    # tracks — an HTML page labeled ``audio/*`` breaks remote media fetches.
-    urls = [
-        {
-            "type": "Link",
-            "href": track_url,
-            "mediaType": "text/html",
-            "mimeType": "text/html",
-        },
-    ]
-    if stream_url:
-        urls.insert(
-            0,
-            {
-                "type": "Link",
-                "href": stream_url,
-                "mediaType": media_type,
-                "mimeType": media_type,
-            },
-        )
-    if browse_link is not None:
-        urls.append(
-            {
-                "type": "Link",
-                "href": browse_link,
-                "mediaType": "text/html",
-                "mimeType": "text/html",
-            }
-        )
+    urls = _audio_urls(track_url, stream_url, browse_link, media_type)
 
     obj = {
         "type": "Audio",
@@ -766,6 +720,95 @@ def track_to_audio_object(
 
     set_post_content(obj, getattr(track, "description", None), domain, link_href=track_url)
 
+    attachment = _audio_attachment(track, artist, domain, stream_url, browse_link, media_type)
+    if attachment is not None:
+        obj["attachment"] = attachment
+
+    return allow_public_quotes(obj)
+
+
+def _resolve_stream_url(
+    track: Track,
+    domain: str,
+    stream_url: Optional[str],
+    browse_link: Optional[str],
+    sale,
+) -> Optional[str]:
+    """Compute the effective audio URL for the serialized object."""
+    url = stream_url or get_stream_url(track=track, domain=domain)
+    if browse_link is not None:
+        url = None
+    if sale is not None:
+        # A sale-gated track advertises the policy-enforcing stream URL —
+        # never the raw file path, which anonymous remote fetches cannot pay.
+        url = gated_stream_url(track, domain, sale)
+    return url
+
+
+def _audio_size(track: Track, audio_file) -> int:
+    """Best-effort byte size from the stored file or the external metadata."""
+    external_track = active_external_track(track)
+    external_item = active_external_item(track)
+    size = int(audio_file.size) if audio_file is not None and audio_file.size else 0
+    if not size and external_track is not None and external_track.provider_size:
+        size = int(external_track.provider_size)
+    if not size and external_item is not None:
+        raw_size = (external_item.raw_metadata or {}).get("Size")
+        if raw_size:
+            try:
+                size = int(raw_size)
+            except (TypeError, ValueError):
+                pass
+    return size
+
+
+def _audio_urls(
+    track_url: str,
+    stream_url: Optional[str],
+    browse_link: Optional[str],
+    media_type: str,
+) -> list:
+    # The ``text/html`` page link is always present so remote renderers can
+    # link the human page; the media link is only emitted for playable
+    # tracks — an HTML page labeled ``audio/*`` breaks remote media fetches.
+    urls = [
+        {
+            "type": "Link",
+            "href": track_url,
+            "mediaType": "text/html",
+            "mimeType": "text/html",
+        },
+    ]
+    if stream_url:
+        urls.insert(
+            0,
+            {
+                "type": "Link",
+                "href": stream_url,
+                "mediaType": media_type,
+                "mimeType": media_type,
+            },
+        )
+    if browse_link is not None:
+        urls.append(
+            {
+                "type": "Link",
+                "href": browse_link,
+                "mediaType": "text/html",
+                "mimeType": "text/html",
+            }
+        )
+    return urls
+
+
+def _audio_attachment(
+    track: Track,
+    artist: Artist,
+    domain: str,
+    stream_url: Optional[str],
+    browse_link: Optional[str],
+    media_type: str,
+) -> Optional[list]:
     if stream_url:
         audio_attachment: dict = {
             "type": "Document",
@@ -776,9 +819,9 @@ def track_to_audio_object(
         if track.duration:
             audio_attachment["duration"] = format_duration(track.duration)
         _enrich_track_attachment(audio_attachment, track, artist, domain)
-        obj["attachment"] = [audio_attachment]
-    elif browse_link is not None:
-        obj["attachment"] = [
+        return [audio_attachment]
+    if browse_link is not None:
+        return [
             {
                 "type": "Document",
                 "mediaType": "text/html",
@@ -786,8 +829,7 @@ def track_to_audio_object(
                 "name": track.title,
             }
         ]
-
-    return allow_public_quotes(obj)
+    return None
 
 
 def track_to_note_object(

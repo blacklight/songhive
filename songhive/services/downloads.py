@@ -158,39 +158,52 @@ async def resolve_archive_items(
     skipped = 0
 
     if track_ids:
-        accessible = await acl.filter_accessible_track_ids(session, user, list(track_ids))
-        skipped += len(track_ids) - len(accessible)
-        wanted = [track_id for track_id in track_ids if track_id in accessible]
-        if wanted:
-            result = await session.execute(
-                select(Track).where(Track.id.in_(wanted)).options(selectinload(Track.artist))
-            )
-            by_id = {track.id: track for track in result.scalars().all()}
-            items.extend(_track_item(by_id[track_id]) for track_id in wanted if track_id in by_id)
+        tracks, track_skips = await _resolve_track_items(session, user, track_ids)
+        items.extend(tracks)
+        skipped += track_skips
 
     if remote_object_ids:
-        for remote_id in remote_object_ids:
-            if await acl.can_access(session, user, "remote", remote_id):
-                row = await session.get(RemoteObject, remote_id)
-                if row is not None:
-                    items.append(_remote_item(row))
-                    continue
-            skipped += 1
+        remotes, remote_skips = await _resolve_remote_items(session, user, remote_object_ids)
+        items.extend(remotes)
+        skipped += remote_skips
 
     if episode_ids:
-        episode_result = await session.execute(
-            select(PodcastEpisode)
-            .where(PodcastEpisode.id.in_(episode_ids))
-            .options(selectinload(PodcastEpisode.podcast))
-        )
-        episodes_by_id = {episode.id: episode for episode in episode_result.scalars().all()}
-        for episode_id in episode_ids:
-            episode = episodes_by_id.get(episode_id)
-            if episode is None:
-                skipped += 1
-            else:
-                items.append(_episode_item(episode))
+        episodes, episode_skips = await _resolve_episode_items(session, episode_ids)
+        items.extend(episodes)
+        skipped += episode_skips
 
+    items.extend(
+        await _container_items(
+            session,
+            user,
+            max_items,
+            album_id=album_id,
+            artist_id=artist_id,
+            library_id=library_id,
+            playlist_id=playlist_id,
+        )
+    )
+
+    # Payment layer: ACL visibility never upgrades download rights. Tracks
+    # gated by an active sale stay out of the ZIP unless the requester has
+    # ``full`` access (owner/seller/admin or an active entitlement).
+    items, paywalled = await _drop_paywalled_tracks(session, items, user)
+    skipped += paywalled
+    return items[:max_items], skipped
+
+
+async def _container_items(
+    session: AsyncSession,
+    user: User,
+    max_items: int,
+    *,
+    album_id: Optional[str],
+    artist_id: Optional[str],
+    library_id: Optional[str],
+    playlist_id: Optional[str],
+) -> list[ArchiveItem]:
+    """Resolve the container selectors into archive items in order."""
+    items: list[ArchiveItem] = []
     if album_id is not None:
         await _require_container_access(session, user, "album", album_id)
         tracks, _ = await music.list_tracks(session, album_id=album_id, user=user, limit=max_items, include={"artist"})
@@ -216,21 +229,77 @@ async def resolve_archive_items(
 
     if playlist_id is not None:
         await _require_container_access(session, user, "playlist", playlist_id)
-        entries = await music.list_playlist_items(session, playlist_id, user=user, limit=max_items, include={"artist"})
-        for entry in entries:
-            if entry.track is not None:
-                items.append(_track_item(entry.track))
-            elif entry.episode is not None:
-                items.append(_episode_item(entry.episode))
-            elif entry.remote_object is not None:
-                items.append(_remote_item(entry.remote_object))
+        items.extend(await _resolve_playlist_items(session, user, playlist_id, max_items))
+    return items
 
-    # Payment layer: ACL visibility never upgrades download rights. Tracks
-    # gated by an active sale stay out of the ZIP unless the requester has
-    # ``full`` access (owner/seller/admin or an active entitlement).
-    items, paywalled = await _drop_paywalled_tracks(session, items, user)
-    skipped += paywalled
-    return items[:max_items], skipped
+
+async def _resolve_track_items(
+    session: AsyncSession,
+    user: User,
+    track_ids: Sequence[str],
+) -> Tuple[list[ArchiveItem], int]:
+    accessible = await acl.filter_accessible_track_ids(session, user, list(track_ids))
+    wanted = [track_id for track_id in track_ids if track_id in accessible]
+    items: list[ArchiveItem] = []
+    if wanted:
+        result = await session.execute(select(Track).where(Track.id.in_(wanted)).options(selectinload(Track.artist)))
+        by_id = {track.id: track for track in result.scalars().all()}
+        items = [_track_item(by_id[track_id]) for track_id in wanted if track_id in by_id]
+    return items, len(track_ids) - len(accessible)
+
+
+async def _resolve_remote_items(
+    session: AsyncSession,
+    user: User,
+    remote_object_ids: Sequence[str],
+) -> Tuple[list[ArchiveItem], int]:
+    items: list[ArchiveItem] = []
+    skipped = 0
+    for remote_id in remote_object_ids:
+        if await acl.can_access(session, user, "remote", remote_id):
+            row = await session.get(RemoteObject, remote_id)
+            if row is not None:
+                items.append(_remote_item(row))
+                continue
+        skipped += 1
+    return items, skipped
+
+
+async def _resolve_episode_items(
+    session: AsyncSession,
+    episode_ids: Sequence[str],
+) -> Tuple[list[ArchiveItem], int]:
+    episode_result = await session.execute(
+        select(PodcastEpisode).where(PodcastEpisode.id.in_(episode_ids)).options(selectinload(PodcastEpisode.podcast))
+    )
+    episodes_by_id = {episode.id: episode for episode in episode_result.scalars().all()}
+    items: list[ArchiveItem] = []
+    skipped = 0
+    for episode_id in episode_ids:
+        episode = episodes_by_id.get(episode_id)
+        if episode is None:
+            skipped += 1
+        else:
+            items.append(_episode_item(episode))
+    return items, skipped
+
+
+async def _resolve_playlist_items(
+    session: AsyncSession,
+    user: User,
+    playlist_id: str,
+    max_items: int,
+) -> list[ArchiveItem]:
+    entries = await music.list_playlist_items(session, playlist_id, user=user, limit=max_items, include={"artist"})
+    items: list[ArchiveItem] = []
+    for entry in entries:
+        if entry.track is not None:
+            items.append(_track_item(entry.track))
+        elif entry.episode is not None:
+            items.append(_episode_item(entry.episode))
+        elif entry.remote_object is not None:
+            items.append(_remote_item(entry.remote_object))
+    return items
 
 
 async def _drop_paywalled_tracks(

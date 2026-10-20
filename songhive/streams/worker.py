@@ -787,11 +787,37 @@ class SessionDriver:
             await self._reload_driver()
             return
 
+        applied = await self._apply_batch(envelopes, commands)
+        if applied is None:
+            return
+        session, source, metadata = applied
+
+        if self.driver is None:
+            return
+
+        if self._live_ingest_id is not None:
+            # The broadcast owns the mount: the committed session state
+            # takes effect when it ends — except explicit transport
+            # commands, which cancel the pending queue resume.
+            if any(command in ("play", "pause", "stop", "play_at", "next", "prev") for command in commands):
+                self._resume_after_live = False
+            return
+
+        await self._sync_driver_to_state(session, source, metadata, commands)
+
+        if "set_volume" in commands:
+            try:
+                await self.driver.set_volume(session.volume)
+            except Exception:
+                logger.exception("Failed to set driver volume for %s", self.session_id)
+
+    async def _apply_batch(self, envelopes: list[dict], commands: list[str]):
+        """Apply the commands and resolve the new source; ``None`` on failure."""
         try:
             async with get_session() as db:
                 session = await self._load_session(db)
                 if session is None:
-                    return
+                    return None
 
                 for envelope in envelopes:
                     command = str(envelope.get("command") or "")
@@ -807,19 +833,13 @@ class SessionDriver:
                 source, metadata = await self._resolve_source(db, session)
         except Exception:
             logger.exception("Commands %s failed for session %s", commands, self.session_id)
-            return
+            return None
+        return session, source, metadata
 
+    async def _sync_driver_to_state(self, session, source, metadata, commands: list[str]) -> None:
+        """Sync the driver to the committed session state."""
         if self.driver is None:
             return
-
-        if self._live_ingest_id is not None:
-            # The broadcast owns the mount: the committed session state
-            # takes effect when it ends — except explicit transport
-            # commands, which cancel the pending queue resume.
-            if any(command in ("play", "pause", "stop", "play_at", "next", "prev") for command in commands):
-                self._resume_after_live = False
-            return
-
         track_id = _current_track_id(session)
         if source is not None and session.state == "playing":
             # Restart the decoder only when the track changed, a command
@@ -863,12 +883,6 @@ class SessionDriver:
             except Exception:
                 logger.exception("Failed to pause driver for %s", self.session_id)
 
-        if "set_volume" in commands:
-            try:
-                await self.driver.set_volume(session.volume)
-            except Exception:
-                logger.exception("Failed to set driver volume for %s", self.session_id)
-
     async def _reload_driver(self) -> None:
         """Restart the provider driver after the output's config changed."""
         logger.info("Reloading driver for output %s", self.output_stream_id)
@@ -895,63 +909,10 @@ class SessionDriver:
     ) -> None:
         """Mutate the session state for a control command."""
         now = _now_utc()
-
-        if command == "play":
-            track = _current_track(session)
-            if track is not None:
-                session.state = "playing"
-                session.position_anchor_at = now
-
-        elif command == "pause":
-            if session.state == "playing":
-                session.position_seconds = _live_position_seconds(session, now)
-                session.position_anchor_at = None
-                session.state = "paused"
-
-        elif command == "seek":
-            seconds = args.get("seconds", 0)
-            try:
-                seconds = float(seconds)
-            except (TypeError, ValueError):
-                seconds = 0.0
-            duration = _track_duration(session)
-            session.position_seconds = _clamp_position(seconds, duration)
-            if session.state == "playing":
-                session.position_anchor_at = now
-            else:
-                session.position_anchor_at = None
-
-        # Index-changing commands (next/prev/play_at/set_queue) are already
-        # persisted by the playback API before the command reaches the worker;
-        # the worker only needs to sync the driver to the updated session.
-
-        elif command == "set_repeat":
-            repeat = args.get("repeat", "off")
-            if repeat in ("off", "all", "one"):
-                session.repeat = repeat
-
-        elif command == "set_shuffle":
-            session.shuffle = bool(args.get("shuffle", False))
-
-        elif command == "set_volume":
-            try:
-                volume = float(args.get("volume", session.volume or 1.0))
-            except (TypeError, ValueError):
-                volume = session.volume or 1.0
-            session.volume = min(max(volume, 0.0), 1.0)
-
-        elif command == "stop":
-            session.state = "idle"
-            session.position_seconds = 0.0
-            session.position_anchor_at = None
-
-        elif command == "take_control":
-            if connection_id:
-                session.controller_connection_id = connection_id
-
-        elif command == "release_control" and connection_id and session.controller_connection_id == connection_id:
-            session.controller_connection_id = None
-
+        if command in _TRANSPORT_COMMANDS:
+            _apply_transport_command(session, command, args, now)
+        else:
+            _apply_control_command(session, command, args, connection_id)
         session.last_active_at = now
 
     async def _advance_index(
@@ -1089,34 +1050,10 @@ class SessionDriver:
             await self._end_live()
             return
         try:
-            async with get_session() as db:
-                session = await self._load_session(db)
-                if session is None:
-                    return
-
-                # Only move the queue forward while it still points at the
-                # track the driver just finished. Otherwise the advance
-                # already happened (a command resynced, or this is a retry
-                # of a failed attempt whose index update committed) — jump
-                # straight to reconciling the driver instead of skipping
-                # the listener's track. The ``_advanced`` marker on the
-                # event covers the queue-end case, where the committed
-                # advance leaves the index unchanged.
-                finished = _current_track_id(session)
-                advance_pending = not (event or {}).get("_advanced")
-                if advance_pending and (self._active_track_id is None or finished == self._active_track_id):
-                    if finished and self._record_listens:
-                        await record_server_listen(db, session, finished)
-
-                    # Always advance autonomously: the controller only sends
-                    # commands on explicit user actions, so pausing here would
-                    # just starve the encoder until someone presses play again.
-                    await self._advance_index(session, direction="next")
-                    await db.flush()
-                    state = await session_state_dict(db, session)
-                    await self._publish_state(state)
-
-                source, metadata = await self._resolve_source(db, session)
+            applied = await self._advance_after_ended(event)
+            if applied is None:
+                return
+            session, source, metadata = applied
         except Exception:
             logger.exception("source_ended handling failed for %s", self.session_id)
             self._schedule_advance_retry(event)
@@ -1153,6 +1090,38 @@ class SessionDriver:
                 self._schedule_advance_retry(event)
                 return
         self._clear_advance_retry()
+
+    async def _advance_after_ended(self, event: Optional[dict]):
+        """Record the listen and advance the queue; ``None`` gives up."""
+        async with get_session() as db:
+            session = await self._load_session(db)
+            if session is None:
+                return None
+
+            # Only move the queue forward while it still points at the
+            # track the driver just finished. Otherwise the advance
+            # already happened (a command resynced, or this is a retry
+            # of a failed attempt whose index update committed) — jump
+            # straight to reconciling the driver instead of skipping
+            # the listener's track. The ``_advanced`` marker on the
+            # event covers the queue-end case, where the committed
+            # advance leaves the index unchanged.
+            finished = _current_track_id(session)
+            advance_pending = not (event or {}).get("_advanced")
+            if advance_pending and (self._active_track_id is None or finished == self._active_track_id):
+                if finished and self._record_listens:
+                    await record_server_listen(db, session, finished)
+
+                # Always advance autonomously: the controller only sends
+                # commands on explicit user actions, so pausing here would
+                # just starve the encoder until someone presses play again.
+                await self._advance_index(session, direction="next")
+                await db.flush()
+                state = await session_state_dict(db, session)
+                await self._publish_state(state)
+
+            source, metadata = await self._resolve_source(db, session)
+        return session, source, metadata
 
     async def _resolve_metadata(self, db, session: PlaybackSession) -> Optional[TrackMeta]:
         """Resolve the current queue track to a TrackMeta without touching audio."""
@@ -1368,6 +1337,66 @@ class SessionDriver:
             await loop.run_in_executor(None, _publish_sync, self.user_id, state)
         except Exception:
             logger.exception("Failed to publish playback state for %s", self.user_id)
+
+
+_TRANSPORT_COMMANDS = frozenset({"play", "pause", "seek"})
+
+
+def _apply_transport_command(session: PlaybackSession, command: str, args: dict, now) -> None:
+    if command == "play":
+        track = _current_track(session)
+        if track is not None:
+            session.state = "playing"
+            session.position_anchor_at = now
+    elif command == "pause":
+        if session.state == "playing":
+            session.position_seconds = _live_position_seconds(session, now)
+            session.position_anchor_at = None
+            session.state = "paused"
+    elif command == "seek":
+        seconds = args.get("seconds", 0)
+        try:
+            seconds = float(seconds)
+        except (TypeError, ValueError):
+            seconds = 0.0
+        duration = _track_duration(session)
+        session.position_seconds = _clamp_position(seconds, duration)
+        if session.state == "playing":
+            session.position_anchor_at = now
+        else:
+            session.position_anchor_at = None
+
+
+def _apply_control_command(
+    session: PlaybackSession,
+    command: str,
+    args: dict,
+    connection_id: Optional[str],
+) -> None:
+    # Index-changing commands (next/prev/play_at/set_queue) are already
+    # persisted by the playback API before the command reaches the worker;
+    # the worker only needs to sync the driver to the updated session.
+    if command == "set_repeat":
+        repeat = args.get("repeat", "off")
+        if repeat in ("off", "all", "one"):
+            session.repeat = repeat
+    elif command == "set_shuffle":
+        session.shuffle = bool(args.get("shuffle", False))
+    elif command == "set_volume":
+        try:
+            volume = float(args.get("volume", session.volume or 1.0))
+        except (TypeError, ValueError):
+            volume = session.volume or 1.0
+        session.volume = min(max(volume, 0.0), 1.0)
+    elif command == "stop":
+        session.state = "idle"
+        session.position_seconds = 0.0
+        session.position_anchor_at = None
+    elif command == "take_control":
+        if connection_id:
+            session.controller_connection_id = connection_id
+    elif command == "release_control" and connection_id and session.controller_connection_id == connection_id:
+        session.controller_connection_id = None
 
 
 def _current_track_id(session: PlaybackSession) -> Optional[str]:

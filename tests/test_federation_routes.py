@@ -204,7 +204,7 @@ async def test_webfinger_wrong_domain_returns_404(fed_client, regular_user):
 async def test_inbox_returns_202_for_allowed_sender(fed_client, regular_user, monkeypatch):
     """POST /users/{username}/inbox accepts allowed senders and enqueues processing."""
     mock_task = _MockCeleryTask()
-    monkeypatch.setattr("songhive.api.routes.federation.process_incoming", mock_task)
+    monkeypatch.setattr("songhive.api.routes.federation_social.process_incoming", mock_task)
 
     activity = {"type": "Follow", "actor": "https://good.example/users/bob"}
     response = fed_client.post("/users/regular/inbox", json=activity)
@@ -224,7 +224,7 @@ async def test_inbox_returns_202_for_allowed_sender(fed_client, regular_user, mo
 async def test_inbox_returns_403_for_blocked_sender(fed_client, regular_user, monkeypatch):
     """POST /users/{username}/inbox rejects blocked senders without enqueuing."""
     mock_task = _MockCeleryTask()
-    monkeypatch.setattr("songhive.api.routes.federation.process_incoming", mock_task)
+    monkeypatch.setattr("songhive.api.routes.federation_social.process_incoming", mock_task)
 
     activity = {"type": "Follow", "actor": "https://evil.example/users/bob"}
     response = fed_client.post("/users/regular/inbox", json=activity)
@@ -236,7 +236,7 @@ async def test_inbox_returns_403_for_blocked_sender(fed_client, regular_user, mo
 async def test_inbox_returns_404_for_unknown_user(fed_client, monkeypatch):
     """POST /users/{username}/inbox returns 404 for unknown users."""
     mock_task = _MockCeleryTask()
-    monkeypatch.setattr("songhive.api.routes.federation.process_incoming", mock_task)
+    monkeypatch.setattr("songhive.api.routes.federation_social.process_incoming", mock_task)
 
     activity = {"type": "Follow", "actor": "https://good.example/users/bob"}
     response = fed_client.post("/users/nobody/inbox", json=activity)
@@ -313,7 +313,7 @@ async def test_get_followers_returns_only_requested_actors_followers(fed_client,
 
     storage = MagicMock()
     storage.get_followers.return_value = [remote_a, remote_b]
-    monkeypatch.setattr("songhive.api.routes.federation.get_federation_storage", lambda *_: storage)
+    monkeypatch.setattr("songhive.api.routes.federation_social.get_federation_storage", lambda *_: storage)
 
     response = fed_client.get("/users/regular/followers", headers={"Accept": ACTIVITY_JSON})
     assert response.status_code == status.HTTP_200_OK
@@ -463,7 +463,7 @@ async def test_get_object_followers_unknown_object_404(fed_client, regular_user)
 
 async def test_get_object_returns_404_when_audio_object_is_none(fed_client, db_session, regular_user, monkeypatch):
     """GET /users/{username}/objects/{object_id} returns 404 when serialization fails."""
-    monkeypatch.setattr("songhive.api.routes.federation.track_to_audio_object", lambda *args, **kwargs: None)
+    monkeypatch.setattr("songhive.api.routes.federation_common.track_to_audio_object", lambda *args, **kwargs: None)
 
     artist = Artist(name="Artist")
     db_session.add(artist)
@@ -1087,7 +1087,7 @@ async def test_concurrent_fetches_coalesce_to_one_render(fed_client, db_session,
         time.sleep(0.05)
         return track_to_audio_object(*args, **kwargs)
 
-    monkeypatch.setattr("songhive.api.routes.federation.track_to_audio_object", _counting_render)
+    monkeypatch.setattr("songhive.api.routes.federation_common.track_to_audio_object", _counting_render)
 
     results: list = []
     failures: list = []
@@ -1516,7 +1516,7 @@ async def test_activity_page_serves_spa_for_unknown_activity(fed_client, tmp_pat
 async def test_inbox_rejects_invalid_json(fed_client, regular_user, monkeypatch):
     """POST /users/{username}/inbox rejects non-JSON bodies."""
     mock_task = _MockCeleryTask()
-    monkeypatch.setattr("songhive.api.routes.federation.process_incoming", mock_task)
+    monkeypatch.setattr("songhive.api.routes.federation_social.process_incoming", mock_task)
 
     response = fed_client.post(
         "/users/regular/inbox",
@@ -1530,7 +1530,7 @@ async def test_inbox_rejects_invalid_json(fed_client, regular_user, monkeypatch)
 async def test_inbox_accepts_actor_as_list(fed_client, regular_user, monkeypatch):
     """POST /users/{username}/inbox extracts the first actor from a list."""
     mock_task = _MockCeleryTask()
-    monkeypatch.setattr("songhive.api.routes.federation.process_incoming", mock_task)
+    monkeypatch.setattr("songhive.api.routes.federation_social.process_incoming", mock_task)
 
     activity = {"type": "Follow", "actor": ["https://good.example/users/bob"]}
     response = fed_client.post("/users/regular/inbox", json=activity)
@@ -1541,7 +1541,7 @@ async def test_inbox_accepts_actor_as_list(fed_client, regular_user, monkeypatch
 async def test_inbox_accepts_actor_as_dict(fed_client, regular_user, monkeypatch):
     """POST /users/{username}/inbox extracts the actor id from a dict."""
     mock_task = _MockCeleryTask()
-    monkeypatch.setattr("songhive.api.routes.federation.process_incoming", mock_task)
+    monkeypatch.setattr("songhive.api.routes.federation_social.process_incoming", mock_task)
 
     activity = {"type": "Follow", "actor": {"id": "https://good.example/users/bob"}}
     response = fed_client.post("/users/regular/inbox", json=activity)

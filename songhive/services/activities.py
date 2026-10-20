@@ -3973,7 +3973,7 @@ async def record_track_publication(
     transaction.
     """
     from ..federation._common import get_track_url
-    from ..federation.activities import create_audio_activity, create_note_activity
+    from ..federation.activities import AudioActivityOptions, create_audio_activity, create_note_activity
     from ..federation.serializers import normalize_post_content, stored_file_to_attachment
 
     if object_type not in ("audio", "note"):
@@ -4046,7 +4046,20 @@ async def record_track_publication(
         payload = create_note_activity(**args, audio_object_id=audio_object_id)
     else:
         library_url = await _track_library_url(session, track, owner.actor_url, config.federation.instance_domain)
-        payload = create_audio_activity(**args, library_url=library_url)
+        payload = create_audio_activity(
+            args["actor_url"],
+            args["track"],
+            args["artist"],
+            args["domain"],
+            options=AudioActivityOptions(
+                description=args["description"],
+                ap_object_id=args["ap_object_id"],
+                library_url=library_url,
+                sale=args["sale"],
+            ),
+            visibility=args["visibility"],
+            mention_actor_urls=args["mention_actor_urls"],
+        )
 
     if not payload:
         return None

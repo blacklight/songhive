@@ -1256,50 +1256,54 @@ def _iter_embedded_music_docs(obj: dict):
     obj_id = obj.get("id") if isinstance(obj.get("id"), str) else None
     obj_type = _doc_type(obj)
 
-    def _yield_doc(value, container):
-        if isinstance(value, dict):
-            yield value, container
-        elif isinstance(value, list):
-            for item in value:
-                if isinstance(item, dict):
-                    yield item, container
-
     if obj_type == "Audio":
-        track = obj.get("track")
-        if isinstance(track, dict):
-            yield track, obj_id
-            album = track.get("album")
-            if isinstance(album, dict):
-                yield album, _as_url(track.get("album"))
-                for artist_doc in _embedded_artist_docs(album):
-                    yield artist_doc, None
-            for artist_doc in _embedded_artist_docs(track):
-                yield artist_doc, None
-        for artist_doc in _embedded_artist_docs(obj):
-            yield artist_doc, None
-        library = obj.get("library")
-        if isinstance(library, dict):
-            yield library, None
+        yield from _iter_embedded_audio_docs(obj, obj_id)
     elif obj_type == "Track":
-        album = obj.get("album")
-        if isinstance(album, dict):
-            yield album, obj_id
-            for artist_doc in _embedded_artist_docs(album):
-                yield artist_doc, None
-        for artist_doc in _embedded_artist_docs(obj):
-            yield artist_doc, None
+        yield from _iter_embedded_track_docs(obj, obj_id)
     elif obj_type == "Album":
         for artist_doc in _embedded_artist_docs(obj):
             yield artist_doc, None
     elif obj_type in _COLLECTION_PAGE_TYPES or obj_type in ("OrderedCollection", "Collection"):
-        items = obj.get("items") or obj.get("orderedItems")
-        container = _as_url(obj.get("partOf")) or obj_id
-        if isinstance(items, list):
-            for item in items:
-                if isinstance(item, dict) and _doc_type(item) in _MUSIC_OBJECT_TYPES:
-                    yield item, container
-                    for nested, nested_container in _iter_embedded_music_docs(item):
-                        yield nested, nested_container
+        yield from _iter_collection_music_docs(obj, obj_id)
+
+
+def _iter_embedded_audio_docs(obj: dict, obj_id):
+    track = obj.get("track")
+    if isinstance(track, dict):
+        yield track, obj_id
+        album = track.get("album")
+        if isinstance(album, dict):
+            yield album, _as_url(track.get("album"))
+            for artist_doc in _embedded_artist_docs(album):
+                yield artist_doc, None
+        for artist_doc in _embedded_artist_docs(track):
+            yield artist_doc, None
+    for artist_doc in _embedded_artist_docs(obj):
+        yield artist_doc, None
+    library = obj.get("library")
+    if isinstance(library, dict):
+        yield library, None
+
+
+def _iter_embedded_track_docs(obj: dict, obj_id):
+    album = obj.get("album")
+    if isinstance(album, dict):
+        yield album, obj_id
+        for artist_doc in _embedded_artist_docs(album):
+            yield artist_doc, None
+    for artist_doc in _embedded_artist_docs(obj):
+        yield artist_doc, None
+
+
+def _iter_collection_music_docs(obj: dict, obj_id):
+    items = obj.get("items") or obj.get("orderedItems")
+    container = _as_url(obj.get("partOf")) or obj_id
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict) and _doc_type(item) in _MUSIC_OBJECT_TYPES:
+                yield item, container
+                for nested, nested_container in _iter_embedded_music_docs(item):
+                    yield nested, nested_container
 
 
 async def _cache_embedded_music_docs(
@@ -1620,40 +1624,51 @@ async def _scan_funkwhale_rest_tracks(
 
     found = False
     for entry in tracks[:_REST_TRACK_SEED_LIMIT]:
-        if not isinstance(entry, dict):
-            continue
-        fid = entry.get("fid")
-        if (
-            not isinstance(fid, str)
-            or not fid.startswith(("http://", "https://"))
-            or not remote_domain_allowed(fid, config)
-        ):
-            continue
-        try:
-            track_doc = (await fetch_remote_document(fid, config)).json()
-        except (FetchError, FetchNotFound):
-            continue
-        if not isinstance(track_doc, dict) or _doc_type(track_doc) not in _MUSIC_OBJECT_TYPES:
-            continue
-        track_actor = _attributed_to(track_doc) or actor_url
-        row = await _upsert_remote_object_row(
-            session,
-            canonical_url=fid,
-            activity=track_doc,
-            obj=track_doc,
-            actor_url=track_actor,
-        )
-        # The Track catalog doc has no media link — the REST
-        # ``listen_url`` is the streamable rendition URL.
-        listen = entry.get("listen_url")
-        if row.audio_url is None and isinstance(listen, str):
-            if listen.startswith("/"):
-                row.audio_url = f"{parsed.scheme}://{parsed.netloc}{listen}"
-            elif listen.startswith(("http://", "https://")):
-                row.audio_url = listen
-        await _cache_embedded_music_docs(session, track_doc, track_actor, config)
-        found = True
+        if await _seed_funkwhale_track(session, entry, actor_url, parsed, config):
+            found = True
     return found
+
+
+async def _seed_funkwhale_track(
+    session: AsyncSession,
+    entry,
+    actor_url: str,
+    parsed,
+    config: SonghiveConfig,
+) -> bool:
+    if not isinstance(entry, dict):
+        return False
+    fid = entry.get("fid")
+    if (
+        not isinstance(fid, str)
+        or not fid.startswith(("http://", "https://"))
+        or not remote_domain_allowed(fid, config)
+    ):
+        return False
+    try:
+        track_doc = (await fetch_remote_document(fid, config)).json()
+    except (FetchError, FetchNotFound):
+        return False
+    if not isinstance(track_doc, dict) or _doc_type(track_doc) not in _MUSIC_OBJECT_TYPES:
+        return False
+    track_actor = _attributed_to(track_doc) or actor_url
+    row = await _upsert_remote_object_row(
+        session,
+        canonical_url=fid,
+        activity=track_doc,
+        obj=track_doc,
+        actor_url=track_actor,
+    )
+    # The Track catalog doc has no media link — the REST
+    # ``listen_url`` is the streamable rendition URL.
+    listen = entry.get("listen_url")
+    if row.audio_url is None and isinstance(listen, str):
+        if listen.startswith("/"):
+            row.audio_url = f"{parsed.scheme}://{parsed.netloc}{listen}"
+        elif listen.startswith(("http://", "https://")):
+            row.audio_url = listen
+    await _cache_embedded_music_docs(session, track_doc, track_actor, config)
+    return True
 
 
 async def _fold_renditions(session: AsyncSession, rows: List[RemoteObject]) -> List[RemoteObject]:
@@ -1798,6 +1813,133 @@ async def _mark_remote_gone(
     return RemoteObjectResult(remote_object=cached, activity=activity, status="gone")
 
 
+async def _fetch_remote_doc(session: AsyncSession, cached, url: str, config: SonghiveConfig):
+    """Fetch ``url`` and unwrap the document.
+
+    Returns ``(result, wrapper, obj, kind, page_doc)``, or a
+    ``RemoteObjectResult`` when the remote is gone but cached.
+    """
+    try:
+        result = await fetch_remote_document(url, config)
+    except FetchNotFound:
+        gone = await _mark_remote_gone(session, cached, url)
+        if gone is not None:
+            return gone
+        raise
+
+    doc = result.json()
+    if not isinstance(doc, dict):
+        raise HTTPException(status_code=422, detail="Remote document is not an object")
+
+    wrapper, obj, kind = await _unwrap_document(doc, config)
+    if kind == "delete" or obj is None:
+        gone = await _mark_remote_gone(session, cached, url)
+        if gone is not None:
+            return gone
+        raise FetchNotFound("Remote object no longer exists", url=url)
+
+    # A collection page (``{library}?page=N`` pasted into the lookup box)
+    # is not itself a browsable resource — cache its items under the
+    # parent collection, then keep resolving the parent as the object.
+    page_doc: Optional[dict] = None
+    if wrapper is None and _doc_type(obj) in _COLLECTION_PAGE_TYPES:
+        part_of = _as_url(obj.get("partOf"))
+        if part_of is not None and remote_domain_allowed(part_of, config):
+            page_doc = obj
+            parent_doc = await _fetch_collection_parent(part_of, config)
+            if parent_doc is not None:
+                obj = parent_doc
+                kind = "Object"
+
+    return result, wrapper, obj, kind, page_doc
+
+
+async def _cached_remote_result(session: AsyncSession, cached, config: SonghiveConfig) -> RemoteObjectResult:
+    # Rows cached before linked-collection support (or a failed scan)
+    # look like childless containers — lazily rescan when the stored
+    # payload still links one. Bounded by the same guards as the fresh
+    # path; a permanently empty collection costs one fetch per lookup.
+    await ensure_children_scanned(session, cached, config)
+    activity = await session.scalar(
+        select(Activity).where(
+            Activity.source_type == "remote",
+            Activity.source_id == cached.canonical_url,
+        )
+    )
+    return RemoteObjectResult(
+        remote_object=cached,
+        activity=activity,
+        status="gone" if cached.unavailable_at is not None else "ok",
+        fetched=False,
+    )
+
+
+async def _fetch_collection_parent(part_of: str, config: SonghiveConfig) -> Optional[dict]:
+    try:
+        page_result = await fetch_remote_document(part_of, config)
+        parent_doc = page_result.json()
+    except (FetchError, FetchNotFound):
+        return None
+    return parent_doc if isinstance(parent_doc, dict) else None
+
+
+async def _resolve_doc_author(
+    session: AsyncSession,
+    config: SonghiveConfig,
+    actor_url: str,
+    obj: dict,
+) -> str:
+    # Resolve (and cache) the publishing actor through the actor path so
+    # profile rendering and audience checks share one cache. Music docs
+    # whose actor document is not fetchable (e.g. a Funkwhale library
+    # actor with no WebFinger entry) still cache — the actor URL alone is
+    # enough to render attribution.
+    try:
+        actor = await lookup_remote_actor(session, config, actor_url)
+        return actor.actor_url
+    except FetchError as exc:
+        if _doc_type(obj) not in _MUSIC_OBJECT_TYPES:
+            raise FetchError(f"Could not resolve remote object author: {exc}", status_code=exc.status_code) from exc
+        return actor_url
+
+
+async def _cache_music_subtree(
+    session: AsyncSession,
+    obj: dict,
+    url: str,
+    resolved_actor_url: str,
+    config: SonghiveConfig,
+) -> None:
+    await _cache_embedded_music_docs(session, obj, resolved_actor_url, config)
+    if _doc_type(obj) == "Library":
+        await _scan_library_first_page(session, obj, resolved_actor_url, config)
+        return
+    # Catalog docs may link a children collection (``tracks`` on
+    # Bandwagon ``Album``s) instead of embedding their items.
+    # When the AP doc links nothing at all, a Funkwhale
+    # ``/library/albums/<id>`` page URL is seeded via the remote's
+    # REST API — AP offers no album children collection there.
+    if not await _scan_linked_collection(session, obj, resolved_actor_url, config):
+        await _scan_funkwhale_rest_tracks(session, obj, url, resolved_actor_url, config)
+
+
+def _doc_authority(wrapper: Optional[dict], obj: dict, url: str) -> str:
+    """Resolve and validate the publishing actor of a fetched document.
+
+    ``attributedTo`` must match the publishing actor and the object id
+    must share its authority — pubby's rules for inbound delivery apply
+    to explicit fetches too. Music entities carry no ``attributedTo``
+    requirement of their own; their owning actor is ``actor``.
+    """
+    actor_url = _doc_actor(wrapper) if wrapper is not None else None
+    actor_url = actor_url or _attributed_to(obj) or _doc_actor(obj)
+    if actor_url is None:
+        raise HTTPException(status_code=422, detail="Remote object has no resolvable author")
+    if _doc_type(obj) not in _MUSIC_OBJECT_TYPES or _attributed_to(obj) is not None:
+        validate_attribution(actor_url, obj)
+    return actor_url
+
+
 async def dereference_remote_object(
     session: AsyncSession,
     config: SonghiveConfig,
@@ -1828,90 +1970,21 @@ async def dereference_remote_object(
 
     cached = await _cached_remote_object(session, url)
     if cached is not None and not refresh:
-        # Rows cached before linked-collection support (or a failed scan)
-        # look like childless containers — lazily rescan when the stored
-        # payload still links one. Bounded by the same guards as the fresh
-        # path; a permanently empty collection costs one fetch per lookup.
-        await ensure_children_scanned(session, cached, config)
-        activity = await session.scalar(
-            select(Activity).where(
-                Activity.source_type == "remote",
-                Activity.source_id == cached.canonical_url,
-            )
-        )
-        return RemoteObjectResult(
-            remote_object=cached,
-            activity=activity,
-            status="gone" if cached.unavailable_at is not None else "ok",
-            fetched=False,
-        )
+        return await _cached_remote_result(session, cached, config)
 
-    try:
-        result = await fetch_remote_document(url, config)
-    except FetchNotFound:
-        gone = await _mark_remote_gone(session, cached, url)
-        if gone is not None:
-            return gone
-        raise
-
-    doc = result.json()
-    if not isinstance(doc, dict):
-        raise HTTPException(status_code=422, detail="Remote document is not an object")
-
-    wrapper, obj, kind = await _unwrap_document(doc, config)
-    if kind == "delete" or obj is None:
-        gone = await _mark_remote_gone(session, cached, url)
-        if gone is not None:
-            return gone
-        raise FetchNotFound("Remote object no longer exists", url=url)
-
-    # A collection page (``{library}?page=N`` pasted into the lookup box)
-    # is not itself a browsable resource — cache its items under the
-    # parent collection, then keep resolving the parent as the object.
-    page_doc: Optional[dict] = None
-    if wrapper is None and _doc_type(obj) in _COLLECTION_PAGE_TYPES:
-        part_of = _as_url(obj.get("partOf"))
-        if part_of is not None and remote_domain_allowed(part_of, config):
-            page_doc = obj
-            try:
-                page_result = await fetch_remote_document(part_of, config)
-                parent_doc = page_result.json()
-            except (FetchError, FetchNotFound):
-                parent_doc = None
-            if isinstance(parent_doc, dict):
-                obj = parent_doc
-                kind = "Object"
+    fetched = await _fetch_remote_doc(session, cached, url, config)
+    if isinstance(fetched, RemoteObjectResult):
+        return fetched
+    result, wrapper, obj, kind, page_doc = fetched
 
     object_id = obj.get("id")
     if not isinstance(object_id, str) or not object_id.startswith(("http://", "https://")):
         raise FetchError("Remote object has no id", status_code=422, url=result.url)
     require_remote_domain(object_id, config)
 
-    actor_url = _doc_actor(wrapper) if wrapper is not None else None
-    actor_url = actor_url or _attributed_to(obj) or _doc_actor(obj)
-    if actor_url is None:
-        raise HTTPException(status_code=422, detail="Remote object has no resolvable author")
-    require_remote_domain(actor_url, config)
+    actor_url = _doc_authority(wrapper, obj, result.url)
 
-    # ``attributedTo`` must match the publishing actor and the object id
-    # must share its authority — pubby's rules for inbound delivery apply
-    # to explicit fetches too. Music entities carry no ``attributedTo``
-    # requirement of their own; their owning actor is ``actor``.
-    if _doc_type(obj) not in _MUSIC_OBJECT_TYPES or _attributed_to(obj) is not None:
-        validate_attribution(actor_url, obj)
-
-    # Resolve (and cache) the publishing actor through the actor path so
-    # profile rendering and audience checks share one cache. Music docs
-    # whose actor document is not fetchable (e.g. a Funkwhale library
-    # actor with no WebFinger entry) still cache — the actor URL alone is
-    # enough to render attribution.
-    try:
-        actor = await lookup_remote_actor(session, config, actor_url)
-        resolved_actor_url = actor.actor_url
-    except FetchError as exc:
-        if _doc_type(obj) not in _MUSIC_OBJECT_TYPES:
-            raise FetchError(f"Could not resolve remote object author: {exc}", status_code=exc.status_code) from exc
-        resolved_actor_url = actor_url
+    resolved_actor_url = await _resolve_doc_author(session, config, actor_url, obj)
 
     if kind not in ("Create", "Announce", "Update", "Object") or _doc_type(obj) in _TOMBSTONE_TYPES:
         raise HTTPException(status_code=422, detail=f"Unsupported remote activity type: {kind}")
@@ -1936,47 +2009,58 @@ async def dereference_remote_object(
     # carry no items — scan their first collection page instead. Both
     # paths are bounded and re-use the same domain guards.
     if _doc_type(obj) in _MUSIC_OBJECT_TYPES:
-        await _cache_embedded_music_docs(session, obj, resolved_actor_url, config)
-        if _doc_type(obj) == "Library":
-            await _scan_library_first_page(session, obj, resolved_actor_url, config)
-        else:
-            # Catalog docs may link a children collection (``tracks`` on
-            # Bandwagon ``Album``s) instead of embedding their items.
-            # When the AP doc links nothing at all, a Funkwhale
-            # ``/library/albums/<id>`` page URL is seeded via the remote's
-            # REST API — AP offers no album children collection there.
-            if not await _scan_linked_collection(session, obj, resolved_actor_url, config):
-                await _scan_funkwhale_rest_tracks(session, obj, url, resolved_actor_url, config)
+        await _cache_music_subtree(session, obj, url, resolved_actor_url, config)
     if page_doc is not None:
-        page_actor = _attributed_to(page_doc) or _doc_actor(page_doc) or resolved_actor_url
-        page_id = page_doc.get("id")
-        if isinstance(page_id, str) and remote_domain_allowed(page_id, config):
-            await _upsert_remote_object_row(
-                session,
-                canonical_url=page_id,
-                activity=page_doc,
-                obj=page_doc,
-                actor_url=page_actor,
-            )
-        await _cache_embedded_music_docs(session, page_doc, page_actor, config)
+        await _cache_collection_page(session, page_doc, resolved_actor_url, config)
 
+    return RemoteObjectResult(
+        remote_object=row,
+        activity=await _materialize_if_needed(session, row, wrapper, obj, resolved_actor_url, kind),
+        status="ok",
+    )
+
+
+async def _cache_collection_page(
+    session: AsyncSession,
+    page_doc: dict,
+    resolved_actor_url: str,
+    config: SonghiveConfig,
+) -> None:
+    page_actor = _attributed_to(page_doc) or _doc_actor(page_doc) or resolved_actor_url
+    page_id = page_doc.get("id")
+    if isinstance(page_id, str) and remote_domain_allowed(page_id, config):
+        await _upsert_remote_object_row(
+            session,
+            canonical_url=page_id,
+            activity=page_doc,
+            obj=page_doc,
+            actor_url=page_actor,
+        )
+    await _cache_embedded_music_docs(session, page_doc, page_actor, config)
+
+
+async def _materialize_if_needed(
+    session: AsyncSession,
+    row,
+    wrapper: Optional[dict],
+    obj: dict,
+    resolved_actor_url: str,
+    kind: str,
+):
     # Wrapped objects (Create/Announce/…) and bare content objects become
     # feed activities; a bare resource (e.g. a dereferenced ``Audio`` track)
     # is cached, not materialized.
     should_materialize = wrapper is not None or (_doc_type(obj) in _CONTENT_OBJECT_TYPES and row.resource_type is None)
-    activity = (
-        await _materialize_remote_activity(
-            session,
-            remote_object=row,
-            wrapper=wrapper,
-            obj=obj,
-            actor_url=resolved_actor_url,
-            kind=kind,
-        )
-        if should_materialize
-        else None
+    if not should_materialize:
+        return None
+    return await _materialize_remote_activity(
+        session,
+        remote_object=row,
+        wrapper=wrapper,
+        obj=obj,
+        actor_url=resolved_actor_url,
+        kind=kind,
     )
-    return RemoteObjectResult(remote_object=row, activity=activity, status="ok")
 
 
 def actor_handle_from_url(actor_url: str) -> str:
@@ -2299,95 +2383,107 @@ async def remote_collection_object_ids(session: AsyncSession, user: User) -> set
         )
     ).all()
 
-    # Fold rendition seeds onto their cached targets — collecting a
-    # Funkwhale upload surfaces the ``Track`` it renders instead.
-    rendition_targets = {row.media_of_url for row in seeds if row.media_of_url}
-    target_by_url = {}
-    if rendition_targets:
-        target_rows = (
-            await session.execute(
-                select(RemoteObject.id, RemoteObject.canonical_url, RemoteObject.parent_url).where(
-                    RemoteObject.canonical_url.in_(rendition_targets),
-                    RemoteObject.unavailable_at.is_(None),
-                )
-            )
-        ).all()
-        target_by_url = {row.canonical_url: row for row in target_rows}
-    known = {}
-    for row in seeds:
-        target = target_by_url.get(row.media_of_url) if row.media_of_url else None
-        if target is not None:
-            known[str(target.id)] = (str(target.canonical_url), target.parent_url)
-        else:
-            known[str(row.id)] = (str(row.canonical_url), row.parent_url)
+    known = await _folded_seed_members(session, seeds)
 
     # Descend from collected containers into their cached children.
     frontier_urls = {url for url, _ in known.values()}
     for _ in range(_REMOTE_CLOSURE_DEPTH):
         if not frontier_urls or len(known) >= _REMOTE_CLOSURE_LIMIT:
             break
-        children = (
-            await session.execute(
-                select(
-                    RemoteObject.id,
-                    RemoteObject.canonical_url,
-                    RemoteObject.parent_url,
-                    RemoteObject.media_of_url,
-                )
-                .where(
-                    RemoteObject.parent_url.in_(frontier_urls),
-                    RemoteObject.unavailable_at.is_(None),
-                )
-                .limit(_REMOTE_CLOSURE_LIMIT)
-            )
-        ).all()
-        # Fold rendition children onto their cached targets — a collected
-        # library surfaces the tracks its uploads render.
-        child_targets = {row.media_of_url for row in children if row.media_of_url}
-        child_target_by_url = {}
-        if child_targets:
-            target_rows = (
-                await session.execute(
-                    select(RemoteObject.id, RemoteObject.canonical_url, RemoteObject.parent_url).where(
-                        RemoteObject.canonical_url.in_(child_targets),
-                        RemoteObject.unavailable_at.is_(None),
-                    )
-                )
-            ).all()
-            child_target_by_url = {row.canonical_url: row for row in target_rows}
-        frontier_urls = set()
-        for child in children:
-            folded = child_target_by_url.get(child.media_of_url) if child.media_of_url else None
-            member = folded if folded is not None else child
-            key = str(member.id)
-            if key not in known:
-                known[key] = (str(member.canonical_url), member.parent_url)
-                frontier_urls.add(str(member.canonical_url))
+        frontier_urls = await _descend_remote_children(session, frontier_urls, known)
 
     # Ascend from every collected row (and its children) to cached parents.
     frontier_parents = {str(parent) for _, parent in known.values() if parent}
     for _ in range(_REMOTE_CLOSURE_DEPTH):
         if not frontier_parents or len(known) >= _REMOTE_CLOSURE_LIMIT:
             break
-        parents = (
-            await session.execute(
-                select(RemoteObject.id, RemoteObject.canonical_url, RemoteObject.parent_url)
-                .where(
-                    RemoteObject.canonical_url.in_(frontier_parents),
-                    RemoteObject.unavailable_at.is_(None),
-                )
-                .limit(_REMOTE_CLOSURE_LIMIT)
-            )
-        ).all()
-        frontier_parents = set()
-        for parent_row in parents:
-            key = str(parent_row.id)
-            if key not in known:
-                known[key] = (str(parent_row.canonical_url), parent_row.parent_url)
-                if parent_row.parent_url:
-                    frontier_parents.add(str(parent_row.parent_url))
+        frontier_parents = await _ascend_remote_parents(session, frontier_parents, known)
 
     return set(known)
+
+
+_REMOTE_MEMBER_COLS = (
+    RemoteObject.id,
+    RemoteObject.canonical_url,
+    RemoteObject.parent_url,
+    RemoteObject.media_of_url,
+)
+
+
+async def _rendition_targets(session: AsyncSession, rows) -> dict:
+    """Map rendition ``canonical_url`` to its cached media-target row."""
+    target_urls = {row.media_of_url for row in rows if row.media_of_url}
+    if not target_urls:
+        return {}
+    target_rows = (
+        await session.execute(
+            select(RemoteObject.id, RemoteObject.canonical_url, RemoteObject.parent_url).where(
+                RemoteObject.canonical_url.in_(target_urls),
+                RemoteObject.unavailable_at.is_(None),
+            )
+        )
+    ).all()
+    return {row.canonical_url: row for row in target_rows}
+
+
+async def _folded_seed_members(session: AsyncSession, seeds) -> dict:
+    """Fold rendition seeds onto their cached targets — collecting a
+    Funkwhale upload surfaces the ``Track`` it renders instead."""
+    target_by_url = await _rendition_targets(session, seeds)
+    known = {}
+    for row in seeds:
+        target = target_by_url.get(row.media_of_url) if row.media_of_url else None
+        member = target if target is not None else row
+        known[str(member.id)] = (str(member.canonical_url), member.parent_url)
+    return known
+
+
+async def _descend_remote_children(session: AsyncSession, frontier_urls: set, known: dict) -> set:
+    """Add one depth level of cached children to ``known``; return next frontier."""
+    children = (
+        await session.execute(
+            select(*_REMOTE_MEMBER_COLS)
+            .where(
+                RemoteObject.parent_url.in_(frontier_urls),
+                RemoteObject.unavailable_at.is_(None),
+            )
+            .limit(_REMOTE_CLOSURE_LIMIT)
+        )
+    ).all()
+    # Fold rendition children onto their cached targets — a collected
+    # library surfaces the tracks its uploads render.
+    child_target_by_url = await _rendition_targets(session, children)
+    next_frontier: set = set()
+    for child in children:
+        folded = child_target_by_url.get(child.media_of_url) if child.media_of_url else None
+        member = folded if folded is not None else child
+        key = str(member.id)
+        if key not in known:
+            known[key] = (str(member.canonical_url), member.parent_url)
+            next_frontier.add(str(member.canonical_url))
+    return next_frontier
+
+
+async def _ascend_remote_parents(session: AsyncSession, frontier_parents: set, known: dict) -> set:
+    """Add one depth level of cached parents to ``known``; return next frontier."""
+    parents = (
+        await session.execute(
+            select(RemoteObject.id, RemoteObject.canonical_url, RemoteObject.parent_url)
+            .where(
+                RemoteObject.canonical_url.in_(frontier_parents),
+                RemoteObject.unavailable_at.is_(None),
+            )
+            .limit(_REMOTE_CLOSURE_LIMIT)
+        )
+    ).all()
+    next_frontier: set = set()
+    for parent_row in parents:
+        key = str(parent_row.id)
+        if key not in known:
+            known[key] = (str(parent_row.canonical_url), parent_row.parent_url)
+            if parent_row.parent_url:
+                next_frontier.add(str(parent_row.parent_url))
+    return next_frontier
 
 
 async def get_favorited_remote_object_ids(
@@ -2745,8 +2841,6 @@ async def prune_stale_remote_activities(
     Returns counters describing what was (or, for ``dry_run``, would be)
     pruned. The caller owns the transaction.
     """
-    from collections import defaultdict
-
     cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
 
     stale_rows = (
@@ -2770,6 +2864,27 @@ async def prune_stale_remote_activities(
     if not stale:
         return result
 
+    deletion = await _stale_deletion_set(session, stale)
+    result["candidates"] = len(deletion)
+    if dry_run or not deletion:
+        return result
+
+    source_ids = (await session.execute(select(Activity.source_id).where(Activity.id.in_(deletion)))).scalars().all()
+    deleted_objects = await session.execute(
+        delete(RemoteObject).where(RemoteObject.canonical_url.in_([sid for sid in source_ids if sid]))
+    )
+    await session.execute(delete(Activity).where(Activity.id.in_(deletion)))
+    await session.flush()
+
+    result["pruned_activities"] = len(deletion)
+    result["pruned_remote_objects"] = int(getattr(deleted_objects, "rowcount", 0) or 0)
+    return result
+
+
+async def _stale_deletion_set(session: AsyncSession, stale: dict) -> set:
+    """Fixpoint of stale activities whose live children are all also prunable."""
+    from collections import defaultdict
+
     live_child_rows = (
         await session.execute(
             select(Activity.id, Activity.in_reply_to_activity_id).where(
@@ -2792,18 +2907,4 @@ async def prune_stale_remote_activities(
             if all(child in deletion for child in children.get(activity_id, [])):
                 deletion.add(activity_id)
                 progressed = True
-
-    result["candidates"] = len(deletion)
-    if dry_run or not deletion:
-        return result
-
-    source_ids = (await session.execute(select(Activity.source_id).where(Activity.id.in_(deletion)))).scalars().all()
-    deleted_objects = await session.execute(
-        delete(RemoteObject).where(RemoteObject.canonical_url.in_([sid for sid in source_ids if sid]))
-    )
-    await session.execute(delete(Activity).where(Activity.id.in_(deletion)))
-    await session.flush()
-
-    result["pruned_activities"] = len(deletion)
-    result["pruned_remote_objects"] = int(getattr(deleted_objects, "rowcount", 0) or 0)
-    return result
+    return deletion

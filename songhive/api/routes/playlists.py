@@ -282,6 +282,27 @@ async def _user_grant(
     return grants.get(str(item_id))
 
 
+async def _playlist_track_summaries(
+    playlist: Playlist,
+    storage: StorageService,
+    include: IncludeQuery,
+    user: Optional[User],
+    db: Optional[AsyncSession],
+) -> Optional[List[TrackSummary]]:
+    if "tracks" not in include:
+        return None
+    playlist_tracks = getattr(playlist, "tracks", None)
+    if playlist_tracks is None:
+        return None
+    track_list: List[TrackSummary] = []
+    policy_cache: dict = {}
+    for pt in sorted(playlist_tracks, key=lambda pt: pt.position):
+        summary = await build_track_summary(pt.track, storage, user=user, session=db, policy_cache=policy_cache)
+        if summary is not None:
+            track_list.append(summary)
+    return track_list
+
+
 async def _build_playlist_response(
     playlist: Playlist,
     user: Optional[User],
@@ -305,17 +326,7 @@ async def _build_playlist_response(
     owner_id = playlist.owner_id
     if "owner" in include and owner_id is not None and playlist.owner:
         owner = await build_user_summary(playlist.owner)
-    tracks = None
-    if "tracks" in include:
-        playlist_tracks = getattr(playlist, "tracks", None)
-        if playlist_tracks is not None:
-            track_list: List[TrackSummary] = []
-            policy_cache: dict = {}
-            for pt in sorted(playlist_tracks, key=lambda pt: pt.position):
-                summary = await build_track_summary(pt.track, storage, user=user, session=db, policy_cache=policy_cache)
-                if summary is not None:
-                    track_list.append(summary)
-            tracks = track_list
+    tracks = await _playlist_track_summaries(playlist, storage, include, user, db)
 
     is_collaborator = grant is not None and grant.collaborator
     can_manage = user is not None and (user.is_admin or playlist.owner_id == user.id)

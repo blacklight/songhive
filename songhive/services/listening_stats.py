@@ -16,7 +16,7 @@ remote metadata source.
 
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta, timezone
-from typing import Iterable, Literal, Optional
+from typing import Iterable, Literal, Optional, Sequence, Tuple
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -320,23 +320,8 @@ async def _track_image_url(track: Track, storage: StorageService) -> Optional[st
     return None
 
 
-async def top_listens(
-    session: AsyncSession,
-    user_id: str,
-    from_dt: datetime,
-    to_dt: datetime,
-    storage: StorageService,
-    limit: int = 10,
-) -> dict:
-    """Top played artists, albums, tracks and genres over the period.
-
-    Entries carry a ``url`` for the entity page plus artwork (``image_url``)
-    when the entities live locally; remote-only names render without links.
-    ``storage`` resolves stored-file artwork URLs.
-    """
-    conditions = _range_conditions(user_id, from_dt, to_dt)
-
-    play_rows = (
+async def _top_play_rows(session: AsyncSession, conditions) -> Sequence:
+    return (
         await session.execute(
             select(
                 ListeningHistory.track_id,
@@ -347,33 +332,23 @@ async def top_listens(
             .group_by(ListeningHistory.track_id, ListeningHistory.remote_object_id)
         )
     ).all()
-    artist_rows = (
+
+
+async def _top_entity_rows(session: AsyncSession, conditions, column, *, not_none: bool = False) -> Sequence:
+    extra = [column.is_not(None)] if not_none else []
+    return (
         await session.execute(
-            select(Track.artist_id, func.count().label("plays"))
+            select(column, func.count().label("plays"))
             .select_from(ListeningHistory)
             .join(Track, Track.id == ListeningHistory.track_id)
-            .where(*conditions)
-            .group_by(Track.artist_id)
-        )
-    ).all()
-    album_rows = (
-        await session.execute(
-            select(Track.album_id, func.count().label("plays"))
-            .select_from(ListeningHistory)
-            .join(Track, Track.id == ListeningHistory.track_id)
-            .where(*conditions, Track.album_id.is_not(None))
-            .group_by(Track.album_id)
-        )
-    ).all()
-    remote_rows = (
-        await session.execute(
-            select(ListeningHistory.remote_object_id, func.count().label("plays"))
-            .where(*conditions, ListeningHistory.remote_object_id.is_not(None))
-            .group_by(ListeningHistory.remote_object_id)
+            .where(*conditions, *extra)
+            .group_by(column)
         )
     ).all()
 
-    genre_rows = (
+
+async def _top_genre_rows(session: AsyncSession, conditions) -> Sequence:
+    return (
         await session.execute(
             select(Genre.name, func.count().label("plays"))
             .select_from(ListeningHistory)
@@ -384,7 +359,10 @@ async def top_listens(
             .group_by(Genre.name)
         )
     ).all()
-    free_genre_rows = (
+
+
+async def _top_free_genre_rows(session: AsyncSession, conditions) -> Sequence:
+    return (
         await session.execute(
             select(Track.genre, func.count().label("plays"))
             .select_from(ListeningHistory)
@@ -394,6 +372,8 @@ async def top_listens(
         )
     ).all()
 
+
+async def _top_entity_maps(session: AsyncSession, play_rows, artist_rows, album_rows, remote_rows) -> tuple:
     track_ids = [row.track_id for row in play_rows if row.track_id is not None]
     tracks_by_id = (
         {t.id: t for t in (await session.execute(select(Track).where(Track.id.in_(track_ids)))).scalars()}
@@ -421,37 +401,63 @@ async def top_listens(
         {row.remote_object_id for row in play_rows if row.remote_object_id is not None}
         | {row[0] for row in remote_rows},
     )
+    return tracks_by_id, albums_by_id, artists_by_id, remote_map
 
+
+async def _top_track_entries(
+    session: AsyncSession,
+    play_rows,
+    tracks_by_id: dict,
+    artists_by_id: dict,
+    remote_map: dict,
+    storage: StorageService,
+) -> Tuple[Counter, dict]:
     tracks: Counter = Counter()
     track_details: dict[str, dict] = {}
     for row in play_rows:
-        name: Optional[str] = None
-        if row.track_id is not None:
-            track = tracks_by_id.get(row.track_id)
-            if track is not None:
-                name = track.title
-                if name not in track_details:
-                    artist = artists_by_id.get(track.artist_id)
-                    track_details[name] = {
-                        "url": f"/tracks/{track.id}",
-                        "image_url": await _track_image_url(track, storage),
-                        "artist_name": artist.name if artist else None,
-                        "artist_url": f"/artists/{artist.id}" if artist else None,
-                    }
-        else:
-            remote = remote_map.get(str(row.remote_object_id))
-            if remote is not None:
-                name = remote_content.remote_object_display_name(remote)
-                if name and name not in track_details:
-                    fields = remote_content.remote_object_music_fields(remote)
-                    track_details[name] = {
-                        "url": f"/remote/{remote.resource_type}/{remote.id}" if remote.resource_type else None,
-                        "image_url": remote.image_url,
-                        "artist_name": fields["artist_name"],
-                    }
+        name = await _top_track_name(row, tracks_by_id, artists_by_id, remote_map, track_details, storage)
         if name:
             tracks[name] += row.plays
+    return tracks, track_details
 
+
+async def _top_track_name(
+    row,
+    tracks_by_id: dict,
+    artists_by_id: dict,
+    remote_map: dict,
+    track_details: dict,
+    storage: StorageService,
+) -> Optional[str]:
+    if row.track_id is not None:
+        track = tracks_by_id.get(row.track_id)
+        if track is None:
+            return None
+        if track.title not in track_details:
+            artist = artists_by_id.get(track.artist_id)
+            track_details[track.title] = {
+                "url": f"/tracks/{track.id}",
+                "image_url": await _track_image_url(track, storage),
+                "artist_name": artist.name if artist else None,
+                "artist_url": f"/artists/{artist.id}" if artist else None,
+            }
+        return track.title
+
+    remote = remote_map.get(str(row.remote_object_id))
+    if remote is None:
+        return None
+    name = remote_content.remote_object_display_name(remote)
+    if name and name not in track_details:
+        fields = remote_content.remote_object_music_fields(remote)
+        track_details[name] = {
+            "url": f"/remote/{remote.resource_type}/{remote.id}" if remote.resource_type else None,
+            "image_url": remote.image_url,
+            "artist_name": fields["artist_name"],
+        }
+    return name
+
+
+async def _top_artist_entries(artist_rows, artists_by_id: dict, storage: StorageService) -> Tuple[Counter, dict]:
     artists: Counter = Counter()
     artist_details: dict[str, dict] = {}
     for artist_id, plays in artist_rows:
@@ -463,7 +469,15 @@ async def top_listens(
             artist.name,
             {"url": f"/artists/{artist.id}", "image_url": await _artist_image_url(artist, storage)},
         )
+    return artists, artist_details
 
+
+async def _top_album_entries(
+    album_rows,
+    albums_by_id: dict,
+    artists_by_id: dict,
+    storage: StorageService,
+) -> Tuple[Counter, dict]:
     albums: Counter = Counter()
     album_details: dict[str, dict] = {}
     for album_id, plays in album_rows:
@@ -479,7 +493,12 @@ async def top_listens(
                 "artist_name": artist.name if artist else None,
                 "artist_url": f"/artists/{artist.id}" if artist else None,
             }
+    return albums, album_details
 
+
+def _fold_remote_top_entries(
+    remote_rows, remote_map: dict, artists: Counter, albums: Counter, album_details: dict
+) -> None:
     for remote_id, plays in remote_rows:
         remote = remote_map.get(str(remote_id))
         if remote is None:
@@ -491,6 +510,13 @@ async def top_listens(
             albums[fields["album_name"]] += plays
             album_details.setdefault(fields["album_name"], {"image_url": remote.image_url})
 
+
+async def _top_genre_entries(
+    session: AsyncSession,
+    genre_rows,
+    free_genre_rows,
+    limit: int,
+) -> Tuple[Counter, dict]:
     genres: Counter = Counter()
     for name, plays in genre_rows:
         if name:
@@ -509,6 +535,50 @@ async def top_listens(
             ).all()
         }
         genre_urls = {name: {"url": f"/genres/{quote(name, safe='')}"} for name in top_genre_names if name in existing}
+    return genres, genre_urls
+
+
+async def top_listens(
+    session: AsyncSession,
+    user_id: str,
+    from_dt: datetime,
+    to_dt: datetime,
+    storage: StorageService,
+    limit: int = 10,
+) -> dict:
+    """Top played artists, albums, tracks and genres over the period.
+
+    Entries carry a ``url`` for the entity page plus artwork (``image_url``)
+    when the entities live locally; remote-only names render without links.
+    ``storage`` resolves stored-file artwork URLs.
+    """
+    conditions = _range_conditions(user_id, from_dt, to_dt)
+
+    play_rows = await _top_play_rows(session, conditions)
+    artist_rows = await _top_entity_rows(session, conditions, Track.artist_id)
+    album_rows = await _top_entity_rows(session, conditions, Track.album_id, not_none=True)
+    remote_rows = (
+        await session.execute(
+            select(ListeningHistory.remote_object_id, func.count().label("plays"))
+            .where(*conditions, ListeningHistory.remote_object_id.is_not(None))
+            .group_by(ListeningHistory.remote_object_id)
+        )
+    ).all()
+    genre_rows = await _top_genre_rows(session, conditions)
+    free_genre_rows = await _top_free_genre_rows(session, conditions)
+
+    tracks_by_id, albums_by_id, artists_by_id, remote_map = await _top_entity_maps(
+        session, play_rows, artist_rows, album_rows, remote_rows
+    )
+
+    tracks, track_details = await _top_track_entries(
+        session, play_rows, tracks_by_id, artists_by_id, remote_map, storage
+    )
+    artists, artist_details = await _top_artist_entries(artist_rows, artists_by_id, storage)
+    albums, album_details = await _top_album_entries(album_rows, albums_by_id, artists_by_id, storage)
+    _fold_remote_top_entries(remote_rows, remote_map, artists, albums, album_details)
+
+    genres, genre_urls = await _top_genre_entries(session, genre_rows, free_genre_rows, limit)
 
     return {
         "artists": _top_entries(artists, limit, artist_details),

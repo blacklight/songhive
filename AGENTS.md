@@ -76,11 +76,12 @@
 - The backend uses FastAPI (ASGI) mounted inside Tornado via `a2wsgi`
   (ASGI-to-WSGI bridge). Falls back to uvicorn if `a2wsgi` is not available.
   The `WSGIContainer` is constructed with an explicit `ThreadPoolExecutor` —
-  never drop it: without an executor (Tornado < 7 default) the WSGI app runs
-  on the Tornado event-loop thread, serializing all requests and deadlocking
-  any outbound signed federation fetch whose remote resolves our `keyId`
-  back to this instance (the fetch-back can never be served while the loop
-  is busy inside the triggering request).
+  keep it unless an equivalent executor takes its place: without an executor
+  (Tornado < 7 default) the WSGI app runs on the Tornado event-loop thread,
+  serializing all requests and deadlocking any outbound signed federation
+  fetch whose remote resolves our `keyId` back to this instance (the
+  fetch-back cannot be served while the loop is busy inside the triggering
+  request).
 - Tornado handles WebSocket connections (`/ws/events`), audio streaming
   (`/api/v1/stream/{track_id}`), and native HTTP stream mountpoints
   (`/streams/{mount}`) natively; all other routes fall through to
@@ -93,8 +94,8 @@
   via an `add_parser(subparsers)` function. `app.main()` parses argv with the
   root parser (so `--help` lists the subcommands at every level) and then
   dispatches `sys.argv[2:]` to the matching `*_main` entry point — a
-  subcommand must be the first argument, since server options are not
-  forwarded to it.
+  subcommand must be the first argument (unless its `*_main` function is
+  invoked directly), since server options are not forwarded to it.
 - The README table of contents (between `<!-- toc -->`/`<!-- tocstop -->`) is
   maintained by the `markdown-toc` pre-commit hook, a local hook running
   `scripts/update_toc.py` (stdlib only). It emits Forgejo-style slugs
@@ -110,9 +111,9 @@
   `models/base.py` creates a bounded pooled engine **per running loop**
   lazily, honoring `database.pool_size`/`max_overflow`/`pool_timeout`/
   `pool_recycle`/`pool_pre_ping` (`database_engine_kwargs(config.database)`
-  from `songhive.config` — always pass it to `init_db`; it tolerates
-  duck-typed config objects by falling back to the `DatabaseConfig`
-  defaults). Short-lived `asyncio.run` loops (Celery tasks, CLI commands)
+  from `songhive.config` — pass it to `init_db` unless the `DatabaseConfig`
+  defaults are what you want anyway; it tolerates duck-typed config objects
+  by falling back to those defaults). Short-lived `asyncio.run` loops (Celery tasks, CLI commands)
   instead use `database_task_engine_kwargs(config.database)`, which caps
   the pool at 1+2 connections to bound the workers-wide budget.
   `dispose_engine()` empties the current loop's pool
@@ -146,12 +147,13 @@
   the streamed body at `webmentions.discovery_max_bytes`. This requires a
   `webmentions` release ≥ 0.1.26 — the param is silently swallowed on
   older versions, leaving fetches unguarded. In `tasks/webmentions.py`,
-  `requests.RequestException` must keep propagating out of
-  `process_incoming_webmention` — swallowing it disables `autoretry_for`
-  and permanently drops mentions the sender believes were accepted.
+  `requests.RequestException` should keep propagating out of
+  `process_incoming_webmention` — unless the task reschedules the work
+  itself — because swallowing it disables `autoretry_for` and permanently
+  drops mentions the sender believes were accepted.
 - `create_webmentions_handler` also sets `exclude_local_targets=True` —
   the library then drops outgoing targets whose netloc matches the
-  instance's `base_urls`, so self-delivered Webmentions never leave the
+  instance's `base_urls`, so self-delivered Webmentions stay inside the
   mention pipeline that already handles them.
 - Tests use `pytest-asyncio` for async tests and `TestClient` for API tests.
 - Freeze the clock in tests with `time_machine.travel` (see `_frozen_now` in
@@ -161,9 +163,9 @@
   signatures containing `Optional[datetime]` params — every request then
   fails with `FastAPIError: Invalid args for response field`.
 - The autouse `_no_real_celery_broker` fixture in `tests/conftest.py` stubs
-  `celery_app.send_task` so test `.delay()`/`.apply_async()` calls never reach
+  `celery_app.send_task` so test `.delay()`/`.apply_async()` calls do not reach
   the configured broker. Without it, tests publish real messages that a running
-  dev worker consumes against the real DB — where the test-only rows never
+  dev worker consumes against the real DB — where the test-only rows do not
   exist — producing endless "not found"/"not committed yet" retry storms
   (`enrich_track`, `process_outgoing`, `fetch_preview_card`, `sync_track_tags`).
   Do NOT switch to `task_always_eager`: eager tasks call `load_config([])` and
@@ -180,7 +182,7 @@
   resolved from `localStorage["songhive.locale"]` (set from the profile
   Interface tab) or, when unset, from `navigator.languages` with `en` as
   fallback. When adding or changing an i18n key, update EVERY locale file —
-  not just `en.json` — so translations never fall back to the key name.
+  not just `en.json` — so translations do not fall back to the key name.
   `applyLocale` also sets `<html lang>` and flips `dir` to `rtl` for locales
   listed in `RTL_LOCALES` (e.g. `ar`). RTL layout is handled by
   `postcss-rtlcss` in `vite.config.ts`, which auto-mirrors directional CSS
@@ -253,15 +255,15 @@
   `[scrobbling]`; a service is only offered when both key and secret are
   set. Users authenticate via `auth.getMobileSession` — the password is
   exchanged for a session key which is Fernet-encrypted on the
-  `scrobble_configs` row (`models/scrobble.py`) and never returned by
+  `scrobble_configs` row (`models/scrobble.py`) and is not returned by
   the API. `track.updateNowPlaying` is enqueued only on explicit play
   reports — `POST /api/v1/scrobbling/now-playing/{track}` (the web player
   calls it on the first `play` event after `load`) and
-  `scrobble.view?submission=false`. Stream/download requests never
+  `scrobble.view?submission=false`. Stream/download requests do not
   trigger it: clients prefetch upcoming tracks (Substreamer caches the
   whole album ahead), so bytes served are not a play signal —
   `SubsonicStreamHandler` also disables the streamed-byte listen
-  recording (`_record_listen_if_needed` is a no-op) and never writes the
+  recording (`_record_listen_if_needed` is a no-op) and does not write the
   `getNowPlaying` registry from `stream.view`.
   `track.scrobble` is enqueued inside `services.streaming.record_listen`,
   the funnel every listen path (web player history report, streamed-byte
@@ -279,7 +281,8 @@
   (`_StreamState.started_at`/`_elapsed_seconds`) is capped by wall-clock
   elapsed since the stream started — bytes only approximate playback
   position while delivery is consumption-limited, so a client that
-  buffers the whole file in seconds must not trip the threshold early.
+  buffers the whole file in seconds cannot trip the threshold before
+  enough wall-clock time has elapsed.
   Remote (federated) tracks scrobble through the same machinery: the web
   player reports `POST /api/v1/remote/objects/{id}/now-playing` on play
   and `POST /api/v1/remote/objects/{id}/listen` at the threshold —
@@ -299,15 +302,16 @@
   `tz` param. Remote listens count everywhere except genre/release-year
   charts (no remote metadata); rendition rows fold onto their
   `media_of_url` entity for artist/album attribution. All queries ride
-  the `ix_listening_history_user_created_at` composite index — never
-  drop it when touching `models/history.py`.
+  the `ix_listening_history_user_created_at` composite index — do not
+  drop it when touching `models/history.py` unless a replacement index
+  covers the same queries in the same change.
 - RSS/Atom feeds live under `/feeds` (outside `/api/v1`):
   `api/routes/feeds.py` + `services/feeds.py` render the XML, and
   `api/semantic_meta.py` / `api/routes/profile_pages.py` inject the
   `<link rel="alternate">` discovery tags into served pages;
   `frontend/src/composables/useFeedLinks.ts` keeps them in sync after
-  client-side navigation. Feed queries must keep honouring the requester
-  ACL — anonymous readers only see `public` content. Artists have no
+  client-side navigation. Feed queries honour the requester ACL —
+  anonymous readers only see `public` content. Artists have no
   `visibility`/`owner_id` columns and are treated as public containers
   everywhere, including `acl.can_access`.
 - User notifications live in `models/notification.py` (`Notification`,
@@ -329,10 +333,11 @@
   materializers (`_materialize_remote_object`,
   `materialize_remote_announce`, `materialize_remote_post` via the
   `notify_subscribers` flag on `_materialize_remote_activity`).
-- Frontend specs that mount `NotificationActivityCard` must reset the
+- Frontend specs that mount `NotificationActivityCard` should reset the
   module-level `fetchActivityCached` map with `clearActivityCache()`
-  (`utils/activityFetch.ts`) in `beforeEach`, or cached fetches leak
-  across tests and leave `getActivity` once-mocks unconsumed.
+  (`utils/activityFetch.ts`) in `beforeEach` — unless the spec fully stubs
+  the fetch path itself — or cached fetches leak across tests and leave
+  `getActivity` once-mocks unconsumed.
 - Audio file storage uses audio-only SHA-256 hashing (via ffmpeg `streamhash`)
   so that tags and cover art can be rewritten without changing the stored path
   or invalidating the content hash. Run `songhive admin rehash-audio` once to
@@ -359,9 +364,10 @@
 - Celery worker tasks run their async work inside ``asyncio.run(...)``. Each
   ``asyncio.run`` creates and closes a new event loop, and ``asyncpg``
   connections are bound to the loop that opened them. Every task that uses
-  ``get_session()`` must therefore call ``await dispose_and_reset()`` in the
-  same ``finally`` block that closes the session, so the next task starts with
-  a fresh engine instead of reusing connections tied to a closed loop.
+  ``get_session()`` should therefore call ``await dispose_and_reset()`` in the
+  same ``finally`` block that closes the session (or dispose the loop's
+  engine another way before returning), so the next task starts with a
+  fresh engine instead of reusing connections tied to a closed loop.
 - Async Redis clients have the same loop-binding constraint: a pooled
   ``redis.asyncio`` connection awaited on a different loop raises
   ``RuntimeError: ... Future attached to a different loop`` (this produced
@@ -398,7 +404,7 @@
   `frontend/public/embed.js` is served verbatim as `/embed.js`, turns
   `data-songhive-embed` placeholders into iframes, and resizes them from
   the `songhive-embed` `postMessage` protocol the view emits. Collection
-  `<audio>`-list embeds are only offered below 250 elements and always
+  `<audio>`-list embeds are only offered below 250 elements, and they
   filter to public tracks with a playable `audio_url`.
 - Browser sessions use server-managed cookies, not JS-readable tokens:
   login/refresh set `HttpOnly` `access_token` + `refresh_token` cookies
@@ -414,8 +420,8 @@
 - Users pick a `profile_visibility` (`public`/`local`/`private`, default
   `public`) from `/settings`. `GET /api/v1/users` and the users section of
   `GET /api/v1/search/` share `services.auth.list_public_users`, which shows
-  `local` profiles only to authenticated callers and never lists `private`
-  profiles (not even to their owner). Individual profile pages stay reachable
+  `local` profiles only to authenticated callers and excludes `private`
+  profiles for everyone (not even listing them to their owner). Individual profile pages stay reachable
   regardless.
 - External libraries (`songhive/external/`) support `s3`
   (`external/_s3.py`, aioboto3), `sftp` (`external/_sftp.py`, asyncssh),
@@ -430,8 +436,9 @@
   `_merge_config_preserving_redacted` or credentials get overwritten with the
   sentinel; (2) sync relies on the adapter's `detect_changes` capability —
   items whose stored `provider_etag` (or mtime+size) still matches the listing
-  skip hashing/metadata reads entirely, so adapters must only advertise
-  `detect_changes` when listing metadata is a reliable change token (S3
+  skip hashing/metadata reads entirely, so adapters should only advertise
+  `detect_changes` when listing metadata is a reliable change token —
+  otherwise leave the capability off so items are re-hashed (S3
   uses the object ETag; WebDAV uses ETag/mtime/size; Dropbox uses `rev`; the
   fake adapter's etag covers payload+metadata). The filesystem watchdog
   (`external/watchdog.py`) only applies to `local` libraries; remote-provider
@@ -507,7 +514,9 @@
   request's async session may still hold an open transaction. On SQLite this
   deadlocks into "database is locked": any code path that writes through
   pubby storage mid-request (e.g. `_follow_local`, follow-request accept)
-  must run before the session accumulates uncommitted writes. Provision
+  should run before the session accumulates uncommitted writes, unless the
+  pubby write is deferred until after the request transaction commits.
+  Provision
   actor keys up front (`ensure_user_actor` is a no-op for users created
   with federation enabled) rather than lazily inside such paths.
 - Users pick a `followers_approval` policy (`accept`/`manual`/`reject`,
@@ -693,7 +702,7 @@ record an audit log entry with `songhive.services.audit.log_action`.
   - `library_track.add`, `library_track.remove`
   - `user.promote`, `user.demote`, `user.activate`, `user.deactivate`
   - `report.resolve`, `invite.create`, `invite.revoke`
-- Always include a `target_type` and `target_id` when one exists, and put
+- Include a `target_type` and `target_id` when one exists, and put
   relevant before/after values in `details`.
 - `target_type` values come from the `AuditTargetType` enum in
   `songhive/models/audit_log.py` — pass a member, not a raw string.

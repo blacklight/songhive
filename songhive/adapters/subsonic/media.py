@@ -86,7 +86,7 @@ def _requested_transcode(ctx: _Ctx, stored_file: StoredFile) -> Optional[Tuple[s
         return None
     if fmt == source_format and bitrate is None:
         return None
-    return fmt, bitrate
+    return str(fmt), bitrate
 
 
 async def _stream(ctx: _Ctx, *, download: bool = False) -> Response:
@@ -111,56 +111,11 @@ async def _stream(ctx: _Ctx, *, download: bool = False) -> Response:
         raise SubsonicError(NOT_AUTHORIZED, "Access denied")
 
     if track_access.level == payment_access.ACCESS_SAMPLE:
-        # Serve the configured sample — never original bytes.
-        from ...services.payments import samples as samples_service
-
-        assert track_access.sale is not None
-        sample_file = await samples_service.sample_stored_file(
-            ctx.db,
-            track,
-            track_access.sale,
-            config,
-            storage=ctx.storage,
-            redis=ctx.redis,
-        )
-        if sample_file is None:
-            raise SubsonicError(NOT_FOUND, "Sample not ready")
-        try:
-            sample_path = await backend.retrieve(sample_file.storage_path)
-        except ValueError:
-            sample_path = None
-        if sample_path is None:
-            raise SubsonicError(NOT_FOUND, "Media file not found")
-        return FileResponse(
-            sample_path,
-            media_type=sample_file.content_type or "audio/mpeg",
-        )
+        return await _serve_sample(ctx, track, track_access, backend)
 
     stored_file = await resolve_track_file(ctx.db, str(track.id))
     if stored_file is not None:
-        # Prefer a cached transcode when format/bitrate was requested.
-        transcode = _requested_transcode(ctx, stored_file)
-        if transcode is not None:
-            fmt, bitrate = transcode
-            cached = await get_cached_transcode(ctx.db, str(track.id), fmt, bitrate or "")
-            if cached is not None:
-                stored_file = cached
-
-        try:
-            local_path = await backend.retrieve(stored_file.storage_path)
-        except ValueError:
-            local_path = None
-        if local_path is None:
-            raise SubsonicError(NOT_FOUND, "Media file not found")
-
-        headers = {}
-        if download:
-            headers["Content-Disposition"] = f'attachment; filename="{track.title}"'
-        return FileResponse(
-            local_path,
-            media_type=stored_file.content_type or "application/octet-stream",
-            headers=headers,
-        )
+        return await _serve_stored_file(ctx, track, stored_file, backend, download=download)
 
     # Serving bytes is not a play signal — clients prefetch upcoming tracks
     # through this endpoint — so neither the now-playing registry nor the
@@ -170,6 +125,59 @@ async def _stream(ctx: _Ctx, *, download: bool = False) -> Response:
         raise SubsonicError(NOT_FOUND, "Media file not found")
 
     return await _serve_external_stream(ctx, stream, download=download)
+
+
+async def _serve_sample(ctx: _Ctx, track, track_access, backend) -> Response:
+    """Serve the configured sample — never original bytes."""
+    from ...services.payments import samples as samples_service
+
+    assert track_access.sale is not None
+    sample_file = await samples_service.sample_stored_file(
+        ctx.db,
+        track,
+        track_access.sale,
+        ctx.config,
+        storage=ctx.storage,
+        redis=ctx.redis,
+    )
+    if sample_file is None:
+        raise SubsonicError(NOT_FOUND, "Sample not ready")
+    try:
+        sample_path = await backend.retrieve(sample_file.storage_path)
+    except ValueError:
+        sample_path = None
+    if sample_path is None:
+        raise SubsonicError(NOT_FOUND, "Media file not found")
+    return FileResponse(
+        sample_path,
+        media_type=sample_file.content_type or "audio/mpeg",
+    )
+
+
+async def _serve_stored_file(ctx: _Ctx, track, stored_file, backend, *, download: bool = False) -> Response:
+    """Serve a locally stored file, preferring a cached transcode when requested."""
+    transcode = _requested_transcode(ctx, stored_file)
+    if transcode is not None:
+        fmt, bitrate = transcode
+        cached = await get_cached_transcode(ctx.db, str(track.id), fmt, bitrate or "")
+        if cached is not None:
+            stored_file = cached
+
+    try:
+        local_path = await backend.retrieve(stored_file.storage_path)
+    except ValueError:
+        local_path = None
+    if local_path is None:
+        raise SubsonicError(NOT_FOUND, "Media file not found")
+
+    headers = {}
+    if download:
+        headers["Content-Disposition"] = f'attachment; filename="{track.title}"'
+    return FileResponse(
+        local_path,
+        media_type=stored_file.content_type or "application/octet-stream",
+        headers=headers,
+    )
 
 
 async def _resolve_external(ctx: _Ctx, track_id: str, range_header: Optional[str]) -> Optional[ExternalStream]:
@@ -252,55 +260,70 @@ async def _entity_cover(ctx: _Ctx) -> Tuple[Optional[StoredFile], Optional[str]]
     raise SubsonicError(NOT_FOUND, "Cover art not found")
 
 
-async def _cover_for_kind(ctx: _Ctx, kind: str, entity_id: str) -> Tuple[Optional[StoredFile], Optional[str]]:
-    """Resolve the cover for one entity kind; ``(None, None)`` when absent."""
-    if kind == "track":
-        track = await music.get_track(ctx.db, entity_id, include={"artist", "album"})
-        if track is None or not await acl.can_access(ctx.db, ctx.user, "track", entity_id):
-            return None, None
-        if track.image_file is not None:
-            return track.image_file, None
-        album = track.album
-        if album is not None:
-            if album.cover_file is not None:
-                return album.cover_file, None
-            if album.cover_url:
-                return None, album.cover_url
+async def _track_cover(ctx: _Ctx, entity_id: str) -> Tuple[Optional[StoredFile], Optional[str]]:
+    track = await music.get_track(ctx.db, entity_id, include={"artist", "album"})
+    if track is None or not await acl.can_access(ctx.db, ctx.user, "track", entity_id):
         return None, None
-
-    if kind == "album":
-        album = await music.get_album(ctx.db, entity_id, include={"artist"})
-        if album is None or not await acl.can_access(ctx.db, ctx.user, "album", entity_id):
-            return None, None
+    if track.image_file is not None:
+        return track.image_file, None
+    album = track.album
+    if album is not None:
         if album.cover_file is not None:
             return album.cover_file, None
         if album.cover_url:
             return None, album.cover_url
-        return None, None
-
-    if kind == "artist":
-        artist = await ctx.db.get(Artist, entity_id)
-        if artist is None:
-            return None, None
-        if artist.image_file is not None:
-            return artist.image_file, None
-        if artist.cover_file is not None:
-            return artist.cover_file, None
-        if artist.image_url:
-            return None, artist.image_url
-        return None, None
-
-    if kind == "playlist":
-        playlist = await music.get_playlist(ctx.db, entity_id)
-        if playlist is None or not await acl.can_access(ctx.db, ctx.user, "playlist", entity_id):
-            return None, None
-        if playlist.cover_file is not None:
-            return playlist.cover_file, None
-        if playlist.image_file is not None:
-            return playlist.image_file, None
-        return None, None
-
     return None, None
+
+
+async def _album_cover(ctx: _Ctx, entity_id: str) -> Tuple[Optional[StoredFile], Optional[str]]:
+    album = await music.get_album(ctx.db, entity_id, include={"artist"})
+    if album is None or not await acl.can_access(ctx.db, ctx.user, "album", entity_id):
+        return None, None
+    if album.cover_file is not None:
+        return album.cover_file, None
+    if album.cover_url:
+        return None, album.cover_url
+    return None, None
+
+
+async def _artist_cover(ctx: _Ctx, entity_id: str) -> Tuple[Optional[StoredFile], Optional[str]]:
+    artist = await ctx.db.get(Artist, entity_id)
+    if artist is None:
+        return None, None
+    if artist.image_file is not None:
+        return artist.image_file, None
+    if artist.cover_file is not None:
+        return artist.cover_file, None
+    if artist.image_url:
+        return None, artist.image_url
+    return None, None
+
+
+async def _playlist_cover(ctx: _Ctx, entity_id: str) -> Tuple[Optional[StoredFile], Optional[str]]:
+    playlist = await music.get_playlist(ctx.db, entity_id)
+    if playlist is None or not await acl.can_access(ctx.db, ctx.user, "playlist", entity_id):
+        return None, None
+    if playlist.cover_file is not None:
+        return playlist.cover_file, None
+    if playlist.image_file is not None:
+        return playlist.image_file, None
+    return None, None
+
+
+_COVER_RESOLVERS = {
+    "track": _track_cover,
+    "album": _album_cover,
+    "artist": _artist_cover,
+    "playlist": _playlist_cover,
+}
+
+
+async def _cover_for_kind(ctx: _Ctx, kind: str, entity_id: str) -> Tuple[Optional[StoredFile], Optional[str]]:
+    """Resolve the cover for one entity kind; ``(None, None)`` when absent."""
+    resolver = _COVER_RESOLVERS.get(kind)
+    if resolver is None:
+        return None, None
+    return await resolver(ctx, entity_id)
 
 
 @router.api_route("/rest/getCoverArt.view", methods=["GET", "POST"], include_in_schema=False)

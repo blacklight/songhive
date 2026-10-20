@@ -6,7 +6,7 @@ activities. The audio stream URL must point to the public download endpoint.
 """
 
 from songhive.federation._common import get_stream_url
-from songhive.federation.activities import create_audio_activity
+from songhive.federation.activities import AudioActivityOptions, create_audio_activity
 from songhive.federation.serializers import track_to_attachment, track_to_audio_object, track_to_note_object
 from songhive.models import Visibility
 from songhive.models.artist import Artist
@@ -125,7 +125,7 @@ def test_create_audio_activity_includes_public_download_url():
         track,
         artist,
         "music.example.com",
-        description="A great track",
+        options=AudioActivityOptions(description="A great track"),
     )
 
     assert activity is not None
@@ -149,7 +149,7 @@ def test_create_audio_activity_duration_override():
         track,
         artist,
         "music.example.com",
-        duration=195.5,
+        options=AudioActivityOptions(duration=195.5),
     )
 
     assert activity is not None

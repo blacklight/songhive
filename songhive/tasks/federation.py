@@ -217,38 +217,18 @@ def process_incoming(
     domain = config.federation.instance_domain
 
     init_db(config.database.url, **database_task_engine_kwargs(config.database))
-    db_policies, actor_suspended, recipient_suspended = _load_incoming_moderation(actor, username)
-    if actor_suspended:
-        logger.info("Dropping incoming %s from suspended actor %s", activity.get("type"), actor)
-        return None
-    if recipient_suspended:
-        logger.info("Dropping incoming %s for suspended user %s", activity.get("type"), username)
+    db_policies = _incoming_moderation_gate(actor, username, activity.get("type"))
+    if db_policies is None:
         return None
 
     # ``_load_incoming_moderation`` disposes the shared engine on exit, so
     # (re-)init unconditionally before the next session user.
     init_db(config.database.url, **database_task_engine_kwargs(config.database))
 
-    actor_id: Optional[str]
-    private_key_pem: Optional[str]
-    # A shared-inbox ``Follow`` of a local music object (a federated
-    # library) must be answered by the object's owning actor — Funkwhale
-    # matches ``Accept.actor`` against ``library.actor`` — so the owner's
-    # actor context is resolved before falling back to the instance actor.
-    object_owner = _object_follow_owner_username(config, activity) if username is None else None
-    if username is None and object_owner is None:
-        actor_id = f"https://{domain}/ap/actor"
-        private_key_path = get_or_create_private_key(config.federation.private_key_path)
-        private_key_pem = private_key_path.read_text(encoding="utf-8")
-    else:
-        resolved_username = username or object_owner
-        assert resolved_username is not None  # guaranteed by the branch guard
-        user = _load_user_actor(resolved_username)
-        if user is None:
-            logger.warning("Local user %r not found; dropping incoming activity", username or object_owner)
-            return None
-        actor_id = user.actor_url
-        private_key_pem = user.private_key_pem
+    resolved = _incoming_actor_context(config, activity, username, domain)
+    if resolved is None:
+        return None
+    actor_id, private_key_pem = resolved
 
     # The follow-policy callback resolves Follow targets through the
     # database even for shared-inbox deliveries (``username=None``).
@@ -260,13 +240,73 @@ def process_incoming(
         logger.warning("No actor context available for incoming activity; dropping")
         return None
 
+    processor = _incoming_processor(config, storage, actor_id, private_key_pem, db_policies, domain)
+
+    body: Optional[bytes] = None
+    if body_b64:
+        try:
+            body = base64.b64decode(body_b64)
+        except Exception:
+            logger.warning("Failed to decode base64 request body for incoming activity")
+
+    result = _process_activity(processor, activity, actor, actor_id, method, path, headers, body)
+    if result is _DROPPED:
+        return None
+
+    _sync_incoming_side_effects(config, storage, activity, actor, username, actor_id)
+
+    logger.info(
+        "Processed incoming %s from %s for actor %s",
+        activity.get("type", "activity"),
+        actor,
+        actor_id,
+    )
+    return result
+
+
+def _incoming_moderation_gate(actor: str, username: Optional[str], activity_type):
+    """Drop activities from suspended actors/users; returns policies or None."""
+    db_policies, actor_suspended, recipient_suspended = _load_incoming_moderation(actor, username)
+    if actor_suspended:
+        logger.info("Dropping incoming %s from suspended actor %s", activity_type, actor)
+        return None
+    if recipient_suspended:
+        logger.info("Dropping incoming %s for suspended user %s", activity_type, username)
+        return None
+    return db_policies
+
+
+def _incoming_actor_context(config, activity: dict, username: Optional[str], domain: str):
+    """Resolve ``(actor_id, private_key_pem)`` for the addressed actor.
+
+    A shared-inbox ``Follow`` of a local music object (a federated
+    library) must be answered by the object's owning actor — Funkwhale
+    matches ``Accept.actor`` against ``library.actor`` — so the owner's
+    actor context is resolved before falling back to the instance actor.
+    """
+    object_owner = _object_follow_owner_username(config, activity) if username is None else None
+    if username is None and object_owner is None:
+        private_key_path = get_or_create_private_key(config.federation.private_key_path)
+        return f"https://{domain}/ap/actor", private_key_path.read_text(encoding="utf-8")
+
+    resolved_username = username or object_owner
+    assert resolved_username is not None  # guaranteed by the branch guard
+    user = _load_user_actor(resolved_username)
+    if user is None:
+        logger.warning("Local user %r not found; dropping incoming activity", username or object_owner)
+        return None
+    return user.actor_url, user.private_key_pem
+
+
+def _incoming_processor(config, storage, actor_id: str, private_key_pem: str, db_policies: dict, domain: str):
+    """Build the ``InboxProcessor`` for an incoming delivery."""
     key_id = f"{actor_id}#main-key"
     private_key = load_private_key(private_key_pem)
     # Database defederation layers over the configured block list.
     blocked_instances = list(config.federation.blocked_instances) + [
-        domain for domain, action in db_policies.items() if action == "defederate"
+        d for d, action in db_policies.items() if action == "defederate"
     ]
-    processor = InboxProcessor(
+    return InboxProcessor(
         storage=storage,
         actor_id=actor_id,
         private_key=private_key,
@@ -286,15 +326,17 @@ def process_incoming(
         follow_policy=_follow_policy_for_target,
     )
 
-    body: Optional[bytes] = None
-    if body_b64:
-        try:
-            body = base64.b64decode(body_b64)
-        except Exception:
-            logger.warning("Failed to decode base64 request body for incoming activity")
 
+_DROPPED = object()
+
+
+def _process_activity(processor, activity, actor, actor_id, method, path, headers, body):
+    """Run ``InboxProcessor.process``; ``_DROPPED`` on signature/AP errors.
+
+    A ``None`` return is a valid outcome (e.g. a held Follow), not a drop —
+    side effects must still run, so dropped deliveries use a sentinel."""
     try:
-        result = processor.process(
+        return processor.process(
             activity,
             method=method,
             path=path,
@@ -308,7 +350,7 @@ def process_incoming(
             actor,
             actor_id,
         )
-        return None
+        return _DROPPED
     except ActivityPubError as exc:
         logger.warning(
             "ActivityPub error processing incoming %s from %s for actor %s: %s",
@@ -317,8 +359,17 @@ def process_incoming(
             actor_id,
             exc,
         )
-        return None
+        return _DROPPED
 
+
+def _sync_incoming_side_effects(
+    config,
+    storage,
+    activity: dict,
+    actor: str,
+    username: Optional[str],
+    actor_id: str,
+) -> None:
     try:
         _retract_shared_inbox_follows(config, storage, activity, actor, username)
     except Exception as exc:
@@ -347,14 +398,6 @@ def process_incoming(
             actor,
             exc,
         )
-
-    logger.info(
-        "Processed incoming %s from %s for actor %s",
-        activity.get("type", "activity"),
-        actor,
-        actor_id,
-    )
-    return result
 
 
 def _retract_shared_inbox_follows(

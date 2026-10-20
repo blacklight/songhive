@@ -391,29 +391,22 @@ async def _uncontrolled_alias_exists(
     return None
 
 
-async def assert_sale_publishable(
-    session: AsyncSession,
-    sale: Sale,
-    config: SonghiveConfig,
-) -> None:
-    """
-    Raise :class:`PaymentError` unless ``sale`` may be published.
-
-    Validates the target entity (exists, owned by the seller, public, local —
-    external/provider tracks cannot be sold), price/currency bounds, sample
-    window bounds, and the shared-content-alias rule.
-    """
+async def _sale_entity_tracks(session: AsyncSession, sale: Sale) -> list:
+    """Resolve the sale's tracks, validating entity invariants."""
     if sale.entity_type == "track":
         result = await session.execute(select(Track).where(Track.id == sale.track_id))
         track = result.scalar_one_or_none()
         if track is None:
             raise PaymentError("Track not found", status_code=404)
-        tracks = [track]
         if track.visibility != Visibility.PUBLIC.value:
             raise PaymentError("Only public tracks can be sold", code="visibility")
         if track_is_external(track):
             raise PaymentError("Externally hosted tracks cannot be sold", code="external")
-    elif sale.entity_type == "album":
+        if track.owner_id != sale.owner_id:
+            raise PaymentError("Sale owner does not match track owner", code="owner")
+        return [track]
+
+    if sale.entity_type == "album":
         result = await session.execute(select(Album).where(Album.id == sale.album_id))
         album = result.scalar_one_or_none()
         if album is None:
@@ -430,14 +423,12 @@ async def assert_sale_publishable(
                 raise PaymentError("Album contains tracks owned by other users", code="owner")
             if track_is_external(track):
                 raise PaymentError("Album contains externally hosted tracks", code="external")
-    else:
-        raise PaymentError(f"Unknown sale entity type: {sale.entity_type!r}")
+        return tracks
 
-    if sale.entity_type == "track":
-        track = tracks[0]
-        if track.owner_id != sale.owner_id:
-            raise PaymentError("Sale owner does not match track owner", code="owner")
+    raise PaymentError(f"Unknown sale entity type: {sale.entity_type!r}")
 
+
+def _assert_sale_price_bounds(sale: Sale, config: SonghiveConfig) -> None:
     if sale.price_minor < config.payments.min_price_minor:
         raise PaymentError(
             f"Price below minimum ({config.payments.min_price_minor} minor units)",
@@ -451,19 +442,39 @@ async def assert_sale_publishable(
     if sale.currency.lower() not in config.payments.supported_currencies:
         raise PaymentError(f"Unsupported currency: {sale.currency!r}", code="currency")
 
-    if sale.unpaid_policy == "sample":
-        if sale.sample_start_seconds < 0:
-            raise PaymentError("Sample start cannot be negative", code="sample")
-        length = sale.sample_length_seconds
-        if length is None:
-            length = config.payments.default_sample_seconds
-        if length <= 0:
-            raise PaymentError("Sample length must be positive", code="sample")
-        if length > config.payments.sample_max_seconds:
-            raise PaymentError(
-                f"Sample length exceeds the instance maximum " f"({config.payments.sample_max_seconds}s)",
-                code="sample",
-            )
+
+def _assert_sale_sample_bounds(sale: Sale, config: SonghiveConfig) -> None:
+    if sale.unpaid_policy != "sample":
+        return
+    if sale.sample_start_seconds < 0:
+        raise PaymentError("Sample start cannot be negative", code="sample")
+    length = sale.sample_length_seconds
+    if length is None:
+        length = config.payments.default_sample_seconds
+    if length <= 0:
+        raise PaymentError("Sample length must be positive", code="sample")
+    if length > config.payments.sample_max_seconds:
+        raise PaymentError(
+            f"Sample length exceeds the instance maximum " f"({config.payments.sample_max_seconds}s)",
+            code="sample",
+        )
+
+
+async def assert_sale_publishable(
+    session: AsyncSession,
+    sale: Sale,
+    config: SonghiveConfig,
+) -> None:
+    """
+    Raise :class:`PaymentError` unless ``sale`` may be published.
+
+    Validates the target entity (exists, owned by the seller, public, local —
+    external/provider tracks cannot be sold), price/currency bounds, sample
+    window bounds, and the shared-content-alias rule.
+    """
+    tracks = await _sale_entity_tracks(session, sale)
+    _assert_sale_price_bounds(sale, config)
+    _assert_sale_sample_bounds(sale, config)
 
     track_ids = [str(t.id) for t in tracks]
     alias = await _uncontrolled_alias_exists(session, track_ids)

@@ -208,6 +208,44 @@ def _same_host(url: str, domain: str) -> bool:
     return (urlparse(url).hostname or "").lower() == domain.lower()
 
 
+async def _active_user(session: AsyncSession, username: str) -> Optional[User]:
+    user = (await session.execute(select(User).where(User.username == username))).scalar_one_or_none()
+    if user is None or not user.is_active:
+        return None
+    return user
+
+
+async def _federation_object_target(session: AsyncSession, match) -> Optional[ResolvedWebmentionTarget]:
+    """Resolve a ``/users/{username}/objects/{id}`` federation object URL."""
+    user = await _active_user(session, match.group("username"))
+    if user is None:
+        return None
+    object_id = match.group("object_id")
+    track = (
+        await session.execute(
+            select(Track).where(
+                Track.federation_object_id == object_id,
+                Track.owner_id == str(user.id),
+                Track.visibility == Visibility.PUBLIC.value,
+            )
+        )
+    ).scalar_one_or_none()
+    if track is not None:
+        return ResolvedWebmentionTarget("track", str(track.id), track)
+    activity = (
+        await session.execute(
+            select(Activity).where(
+                or_(
+                    Activity.local_object_id == object_id,
+                    Activity.source_id == object_id,
+                ),
+                Activity.owner_user_id == str(user.id),
+            )
+        )
+    ).scalar_one_or_none()
+    return _activity_target(activity)
+
+
 async def resolve_webmention_target(
     session: AsyncSession,
     target_url: str,
@@ -232,44 +270,14 @@ async def resolve_webmention_target(
 
     match = _USER_PATH_RE.match(path) or _USER_AT_PATH_RE.match(path)
     if match:
-        user = (
-            await session.execute(select(User).where(User.username == match.group("username")))
-        ).scalar_one_or_none()
-        if user is None or not user.is_active:
+        user = await _active_user(session, match.group("username"))
+        if user is None:
             return None
         return ResolvedWebmentionTarget("user", str(user.id), user)
 
     match = _OBJECT_PATH_RE.match(path)
     if match:
-        user = (
-            await session.execute(select(User).where(User.username == match.group("username")))
-        ).scalar_one_or_none()
-        if user is None or not user.is_active:
-            return None
-        object_id = match.group("object_id")
-        track = (
-            await session.execute(
-                select(Track).where(
-                    Track.federation_object_id == object_id,
-                    Track.owner_id == str(user.id),
-                    Track.visibility == Visibility.PUBLIC.value,
-                )
-            )
-        ).scalar_one_or_none()
-        if track is not None:
-            return ResolvedWebmentionTarget("track", str(track.id), track)
-        activity = (
-            await session.execute(
-                select(Activity).where(
-                    or_(
-                        Activity.local_object_id == object_id,
-                        Activity.source_id == object_id,
-                    ),
-                    Activity.owner_user_id == str(user.id),
-                )
-            )
-        ).scalar_one_or_none()
-        return _activity_target(activity)
+        return await _federation_object_target(session, match)
 
     match = _ACTIVITY_PATH_RE.match(path)
     if match:

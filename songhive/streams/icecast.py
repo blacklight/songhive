@@ -304,39 +304,14 @@ class IcecastDriver(OutputDriver):
                 proc.kill()
                 return
 
-            while True:
-                chunk = await stdout.read(8192)
-                if not chunk:
-                    break
-
-                encoder = self._encoder
-                if self._task_count != task_id or encoder is None:
-                    break
-                stdin = encoder.stdin
-                if stdin is None:
-                    break
-                try:
-                    stdin.write(chunk)
-                    await stdin.drain()
-                except (BrokenPipeError, ConnectionResetError, AttributeError):
-                    break
+            await self._copy_decoder_output(stdout, task_id)
 
             try:
                 await proc.wait()
             except ProcessLookupError:
                 pass
 
-            stderr = b""
-            if proc.stderr is not None:
-                try:
-                    stderr = await asyncio.wait_for(proc.stderr.read(), timeout=2.0)
-                except Exception:
-                    pass
-            stderr_text = stderr.decode("utf-8", "replace").strip()
-            if stderr_text:
-                logger.error("Decoder stderr task=%s rc=%s: %s", task_id, proc.returncode, stderr_text)
-            else:
-                logger.info("Decoder task=%s rc=%s finished (no stderr)", task_id, proc.returncode)
+            await self._report_decoder_stderr(proc, task_id)
 
             if (
                 self._task_count == task_id
@@ -359,6 +334,38 @@ class IcecastDriver(OutputDriver):
                     await feeder
                 except (asyncio.CancelledError, Exception):
                     pass
+
+    async def _copy_decoder_output(self, stdout, task_id: int) -> None:
+        """Copy decoder stdout into the encoder's stdin."""
+        while True:
+            chunk = await stdout.read(8192)
+            if not chunk:
+                break
+
+            encoder = self._encoder
+            if self._task_count != task_id or encoder is None:
+                break
+            stdin = encoder.stdin
+            if stdin is None:
+                break
+            try:
+                stdin.write(chunk)
+                await stdin.drain()
+            except (BrokenPipeError, ConnectionResetError, AttributeError):
+                break
+
+    async def _report_decoder_stderr(self, proc: asyncio.subprocess.Process, task_id: int) -> None:
+        stderr = b""
+        if proc.stderr is not None:
+            try:
+                stderr = await asyncio.wait_for(proc.stderr.read(), timeout=2.0)
+            except Exception:
+                pass
+        stderr_text = stderr.decode("utf-8", "replace").strip()
+        if stderr_text:
+            logger.error("Decoder stderr task=%s rc=%s: %s", task_id, proc.returncode, stderr_text)
+        else:
+            logger.info("Decoder task=%s rc=%s finished (no stderr)", task_id, proc.returncode)
 
     async def _feed_live_stdin(self, proc: asyncio.subprocess.Process, source: AudioSource, task_id: int) -> None:
         """

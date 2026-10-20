@@ -10,6 +10,7 @@ The cache is never exposed through the API; it only feeds materialization of
 local rows the Songhive ACL already governs.
 """
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -79,6 +80,50 @@ async def get_catalog_entries(
     return found
 
 
+@dataclass
+class _CatalogWriteOpts:
+    key_field: str
+    write_once: bool
+    now: Any
+    expires_at: Any
+
+
+async def _insert_catalog_entries(
+    session: AsyncSession,
+    provider_type: str,
+    kind: str,
+    payloads: list[dict[str, Any]],
+    opts: _CatalogWriteOpts,
+    existing: set,
+) -> int:
+    """Insert new catalog rows and refresh stale ones; returns insert count."""
+    inserted = 0
+    key_field, write_once, now, expires_at = opts.key_field, opts.write_once, opts.now, opts.expires_at
+    for payload in payloads:
+        key = payload.get(key_field)
+        if key is None:
+            continue
+        provider_key = str(key)
+        # Queue bookkeeping keys must not persist into the stored payload.
+        stored = {k: v for k, v in payload.items() if k not in ("_kind", "_key")}
+        if provider_key in existing:
+            if not write_once:
+                await _refresh_catalog_entry(session, provider_type, kind, provider_key, stored, now, expires_at)
+            continue
+        entry = ProviderCatalogEntry(
+            provider_type=provider_type,
+            kind=kind,
+            provider_key=provider_key,
+            payload=stored,
+            fetched_at=now,
+            expires_at=expires_at,
+        )
+        session.add(entry)
+        existing.add(provider_key)
+        inserted += 1
+    return inserted
+
+
 async def upsert_catalog_entries(
     session: AsyncSession,
     provider_type: str,
@@ -117,42 +162,14 @@ async def upsert_catalog_entries(
     )
     existing = set(existing_result.scalars().all())
 
-    inserted = 0
-    for payload in payloads:
-        key = payload.get(key_field)
-        if key is None:
-            continue
-        provider_key = str(key)
-        # Queue bookkeeping keys must not persist into the stored payload.
-        stored = {k: v for k, v in payload.items() if k not in ("_kind", "_key")}
-        if provider_key in existing:
-            if not write_once:
-                entry = (
-                    await session.execute(
-                        select(ProviderCatalogEntry).where(
-                            ProviderCatalogEntry.provider_type == provider_type,
-                            ProviderCatalogEntry.kind == kind,
-                            ProviderCatalogEntry.provider_key == provider_key,
-                        )
-                    )
-                ).scalar_one()
-                entry.payload = stored
-                entry.fetched_at = now
-                entry.expires_at = expires_at
-                # A fresh listing sighting resurrects a previously-unavailable id.
-                entry.unavailable_at = None
-            continue
-        entry = ProviderCatalogEntry(
-            provider_type=provider_type,
-            kind=kind,
-            provider_key=provider_key,
-            payload=stored,
-            fetched_at=now,
-            expires_at=expires_at,
-        )
-        session.add(entry)
-        existing.add(provider_key)
-        inserted += 1
+    inserted = await _insert_catalog_entries(
+        session,
+        provider_type,
+        kind,
+        payloads,
+        _CatalogWriteOpts(key_field=key_field, write_once=write_once, now=now, expires_at=expires_at),
+        existing,
+    )
     try:
         await session.flush()
     except IntegrityError:
@@ -161,6 +178,31 @@ async def upsert_catalog_entries(
         # caller's savepoint to resolve instead of failing the whole sync.
         raise
     return inserted
+
+
+async def _refresh_catalog_entry(
+    session: AsyncSession,
+    provider_type: str,
+    kind: str,
+    provider_key: str,
+    stored: dict,
+    now,
+    expires_at,
+) -> None:
+    entry = (
+        await session.execute(
+            select(ProviderCatalogEntry).where(
+                ProviderCatalogEntry.provider_type == provider_type,
+                ProviderCatalogEntry.kind == kind,
+                ProviderCatalogEntry.provider_key == provider_key,
+            )
+        )
+    ).scalar_one()
+    entry.payload = stored
+    entry.fetched_at = now
+    entry.expires_at = expires_at
+    # A fresh listing sighting resurrects a previously-unavailable id.
+    entry.unavailable_at = None
 
 
 async def upsert_catalog_contents(

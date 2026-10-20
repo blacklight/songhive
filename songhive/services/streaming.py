@@ -450,28 +450,13 @@ async def _load_external_stream_request(
     ``variant`` selects the rendition for multi-rendition providers
     (``audio`` default; ``video`` asks for video+audio).
     """
-    result = await session.execute(
-        select(Track)
-        .where(Track.id == track_id)
-        .options(
-            raiseload("*"),
-            selectinload(Track.external_track)
-            .selectinload(ExternalTrack.external_library)
-            .selectinload(ExternalLibrary.library),
-            selectinload(Track.external_item)
-            .selectinload(ExternalItem.external_library)
-            .selectinload(ExternalLibrary.library),
-        )
-    )
-    track = cast(Optional[Track], result.scalar_one_or_none())
+    track = await _load_track_with_external(session, track_id)
     if track is None:
         return None
 
     # File-backed providers reference the track via ``ExternalTrack``;
     # entity-backed providers via ``ExternalItem(kind="track")``.
-    external_ref: Union[ExternalTrack, ExternalItem, None] = track.external_track
-    if external_ref is None:
-        external_ref = track.external_item
+    external_ref: Union[ExternalTrack, ExternalItem, None] = track.external_track or track.external_item
     if external_ref is None:
         return None
 
@@ -488,25 +473,57 @@ async def _load_external_stream_request(
             provider_key=external_ref.provider_key,
         )
 
-    raw_config = external_library.config
-    if isinstance(raw_config, str):
-        try:
-            config = decrypt_json(raw_config)
-        except Exception as exc:
-            raise ExternalItemNotFound(
-                f"Could not decrypt external library config for track {track_id}",
-                provider_key=external_ref.provider_key,
-            ) from exc
-    else:
-        config = dict(raw_config or {})
-
-    adapter_cls = get_external_adapter(external_library.provider_type)
-    adapter = adapter_cls()
+    config = _external_library_config(track_id, external_ref, external_library)
+    adapter = get_external_adapter(external_library.provider_type)()
 
     # Per-provider stream policy (e.g. TIDAL): may swap ``config`` for the
     # listener's own account or raise ``ExternalPermissionDenied``.
     config = await _enforce_stream_policy(session, external_library, config, user)
 
+    item = _external_item_ref(track, external_ref, variant)
+
+    capabilities = external_library.capabilities or {}
+    range_tuple: Optional[tuple[int, int]] = None
+    if capabilities.get("range_read") is not False and range_header:
+        try:
+            range_tuple = _parse_external_range_header(range_header, item.size)
+        except ValueError:
+            range_tuple = None
+
+    return track, external_ref, config, adapter, item, range_tuple
+
+
+async def _load_track_with_external(session: AsyncSession, track_id: str) -> Optional[Track]:
+    result = await session.execute(
+        select(Track)
+        .where(Track.id == track_id)
+        .options(
+            raiseload("*"),
+            selectinload(Track.external_track)
+            .selectinload(ExternalTrack.external_library)
+            .selectinload(ExternalLibrary.library),
+            selectinload(Track.external_item)
+            .selectinload(ExternalItem.external_library)
+            .selectinload(ExternalLibrary.library),
+        )
+    )
+    return cast(Optional[Track], result.scalar_one_or_none())
+
+
+def _external_library_config(track_id: str, external_ref, external_library) -> dict:
+    raw_config = external_library.config
+    if isinstance(raw_config, str):
+        try:
+            return decrypt_json(raw_config)
+        except Exception as exc:
+            raise ExternalItemNotFound(
+                f"Could not decrypt external library config for track {track_id}",
+                provider_key=external_ref.provider_key,
+            ) from exc
+    return dict(raw_config or {})
+
+
+def _external_item_ref(track: Track, external_ref, variant: str) -> ExternalItemRef:
     provider_size: Optional[int] = None
     provider_mime_type: Optional[str] = None
     checksum: Optional[str] = None
@@ -527,7 +544,7 @@ async def _load_external_stream_request(
         except (TypeError, ValueError):
             provider_size = None
 
-    item = ExternalItemRef(
+    return ExternalItemRef(
         provider_key=external_ref.provider_key,
         display_path=display_path,
         etag=external_ref.provider_etag,
@@ -538,16 +555,6 @@ async def _load_external_stream_request(
         sha256=sha256,
         variant=variant,
     )
-
-    capabilities = external_library.capabilities or {}
-    range_tuple: Optional[tuple[int, int]] = None
-    if capabilities.get("range_read") is not False and range_header:
-        try:
-            range_tuple = _parse_external_range_header(range_header, provider_size)
-        except ValueError:
-            range_tuple = None
-
-    return track, external_ref, config, adapter, item, range_tuple
 
 
 async def resolve_external_stream(

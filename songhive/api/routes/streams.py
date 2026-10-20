@@ -13,7 +13,7 @@ player can connect.
 import json
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Tuple
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -181,67 +181,89 @@ async def list_streams(
 
     items: list[StreamResponse] = []
     for output, owner, cfg in rows:
-        is_owner = user is not None and output.user_id == str(user.id)
-        can_manage = is_owner or (user is not None and user.is_admin)
-        token = str(cfg.get("listen_token") or "") or None
-        if (token or not output.enabled) and not can_manage:
-            continue
-
-        mount = normalize_mount(cfg.get("mount"))
-        meta: dict = {}
-        online = False
-        listeners = 0
-        if redis is not None and mount:
-            meta_raw = await redis.get(stream_meta_key(mount))
-            online = meta_raw is not None
-            if online:
-                try:
-                    meta = json.loads(meta_raw)
-                except (TypeError, ValueError):
-                    meta = {}
-            listeners = await _listener_count(redis, mount)
-
-        now_playing = None
-        if meta.get("song") or meta.get("title"):
-            now_playing = StreamNowPlayingResponse(
-                track_id=str(meta.get("track_id") or "") or None,
-                title=meta.get("title") or None,
-                artist=meta.get("artist") or None,
-                album=meta.get("album") or None,
-            )
-
-        items.append(
-            StreamResponse(
-                id=str(output.id),
-                name=output.name,
-                mount=mount,
-                stream_url=_stream_url(mount, token if can_manage else None),
-                visibility="private" if token else "public",
-                is_owner=is_owner,
-                can_manage=can_manage,
-                owner=StreamOwnerResponse(
-                    username=owner.username,
-                    display_name=owner.display_name,
-                    avatar_url=owner.avatar_url,
-                ),
-                enabled=output.enabled,
-                online=online,
-                live=bool(meta.get("live")) if online else False,
-                can_broadcast=is_owner and output.enabled and live_feature_on,
-                playback_state=playback_states.get(str(output.id)),
-                description=meta.get("description") or cfg.get("description") or None,
-                genre=meta.get("genre") or cfg.get("genre") or None,
-                format=str(cfg.get("format") or "") or None,
-                bitrate=str(meta.get("bitrate") or cfg.get("bitrate") or "") or None,
-                content_type=meta.get("content_type") or None,
-                now_playing=now_playing,
-                listener_count=listeners,
-                created_at=output.created_at,
-            )
-        )
+        item = await _stream_response_item(redis, live_feature_on, output, owner, cfg, user, playback_states)
+        if item is not None:
+            items.append(item)
 
     items.sort(key=lambda item: (not item.online, item.name.lower()))
     return items
+
+
+async def _stream_live_meta(redis, mount: Optional[str]) -> Tuple[dict, bool, int]:
+    """Return ``(metadata, online, listener_count)`` for a mount."""
+    meta: dict = {}
+    online = False
+    listeners = 0
+    if redis is not None and mount:
+        meta_raw = await redis.get(stream_meta_key(mount))
+        online = meta_raw is not None
+        if online:
+            try:
+                meta = json.loads(meta_raw)
+            except (TypeError, ValueError):
+                meta = {}
+        listeners = await _listener_count(redis, mount)
+    return meta, online, listeners
+
+
+def _now_playing_response(meta: dict) -> Optional[StreamNowPlayingResponse]:
+    if not (meta.get("song") or meta.get("title")):
+        return None
+    return StreamNowPlayingResponse(
+        track_id=str(meta.get("track_id") or "") or None,
+        title=meta.get("title") or None,
+        artist=meta.get("artist") or None,
+        album=meta.get("album") or None,
+    )
+
+
+async def _stream_response_item(
+    redis,
+    live_feature_on: bool,
+    output,
+    owner,
+    cfg: dict,
+    user: Optional[User],
+    playback_states: dict,
+) -> Optional[StreamResponse]:
+    """Build one stream row; ``None`` when the requester may not see it."""
+    is_owner = user is not None and output.user_id == str(user.id)
+    can_manage = is_owner or (user is not None and user.is_admin)
+    token = str(cfg.get("listen_token") or "") or None
+    if (token or not output.enabled) and not can_manage:
+        return None
+
+    mount = normalize_mount(cfg.get("mount"))
+    meta, online, listeners = await _stream_live_meta(redis, mount)
+    now_playing = _now_playing_response(meta)
+
+    return StreamResponse(
+        id=str(output.id),
+        name=output.name,
+        mount=mount,
+        stream_url=_stream_url(mount, token if can_manage else None),
+        visibility="private" if token else "public",
+        is_owner=is_owner,
+        can_manage=can_manage,
+        owner=StreamOwnerResponse(
+            username=owner.username,
+            display_name=owner.display_name,
+            avatar_url=owner.avatar_url,
+        ),
+        enabled=output.enabled,
+        online=online,
+        live=bool(meta.get("live")) if online else False,
+        can_broadcast=is_owner and output.enabled and live_feature_on,
+        playback_state=playback_states.get(str(output.id)),
+        description=meta.get("description") or cfg.get("description") or None,
+        genre=meta.get("genre") or cfg.get("genre") or None,
+        format=str(cfg.get("format") or "") or None,
+        bitrate=str(meta.get("bitrate") or cfg.get("bitrate") or "") or None,
+        content_type=meta.get("content_type") or None,
+        now_playing=now_playing,
+        listener_count=listeners,
+        created_at=output.created_at,
+    )
 
 
 @router.patch("/{output_id}", response_model=StreamUpdateResponse)

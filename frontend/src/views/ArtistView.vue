@@ -309,59 +309,44 @@ const actions = computed(() => [
   },
 ]);
 
+const actionHandlers: Record<string, () => void | Promise<unknown>> = {
+  play: () => player.playAll(queueTracks.value),
+  shuffle: () => shufflePlay(),
+  enqueue: () => {
+    for (const track of queueTracks.value) player.enqueue(track);
+    toastStore.push({
+      type: "success",
+      message: t("activities.audio.addedToQueue"),
+    });
+  },
+  collection: () => toggleCollection(),
+  "feed-rss": () => window.open(feedUrls.value.rss, "_blank", "noopener"),
+  "feed-atom": () => window.open(feedUrls.value.atom, "_blank", "noopener"),
+  share: () =>
+    artist.value &&
+    openShare("artist", artist.value.id, artist.value.name, null, null),
+  activities: () =>
+    artist.value &&
+    router.push({
+      name: "artistActivities",
+      params: { id: artist.value.id },
+    }),
+  download: () =>
+    artist.value && requestArchive({ artist_id: artist.value.id }),
+  edit: () =>
+    artist.value &&
+    router.push({
+      name: "artistEdit",
+      params: { id: artist.value.id },
+    }),
+  "add-to-library": () => openAddDialog("library"),
+  "add-to-playlist": () => openAddDialog("playlist"),
+  delete: () => artist.value && deleteArtist.open(artist.value.id),
+};
+
 async function onAction(key: string) {
   if (!artist.value) return;
-  switch (key) {
-    case "play":
-      player.playAll(queueTracks.value);
-      break;
-    case "shuffle":
-      await shufflePlay();
-      break;
-    case "enqueue":
-      for (const track of queueTracks.value) player.enqueue(track);
-      toastStore.push({
-        type: "success",
-        message: t("activities.audio.addedToQueue"),
-      });
-      break;
-    case "collection":
-      await toggleCollection();
-      break;
-    case "feed-rss":
-      window.open(feedUrls.value.rss, "_blank", "noopener");
-      break;
-    case "feed-atom":
-      window.open(feedUrls.value.atom, "_blank", "noopener");
-      break;
-    case "share":
-      openShare("artist", artist.value.id, artist.value.name, null, null);
-      break;
-    case "activities":
-      await router.push({
-        name: "artistActivities",
-        params: { id: artist.value.id },
-      });
-      break;
-    case "download":
-      await requestArchive({ artist_id: artist.value.id });
-      break;
-    case "edit":
-      await router.push({
-        name: "artistEdit",
-        params: { id: artist.value.id },
-      });
-      break;
-    case "add-to-library":
-      openAddDialog("library");
-      break;
-    case "add-to-playlist":
-      openAddDialog("playlist");
-      break;
-    case "delete":
-      deleteArtist.open(artist.value.id);
-      break;
-  }
+  await actionHandlers[key]?.();
 }
 
 async function loadArtist() {

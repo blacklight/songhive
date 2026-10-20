@@ -34,8 +34,9 @@ interact with.
 import asyncio
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
 from fastapi import HTTPException
@@ -183,16 +184,9 @@ async def _tag_mentions(
         href = tag.get("href")
         if not isinstance(href, str) or not href or href in seen:
             continue
-        handle = tag.get("name")
-        if not isinstance(handle, str) or not _MENTION_HANDLE_RE.match(handle):
-            local = local_users.get(href)
-            if local is not None:
-                handle = f"@{local[1]}"
-            else:
-                cached = cached_handles.get(href)
-                handle = f"@{cached}" if cached else _remote_actor_handle(href)
-            if not _MENTION_HANDLE_RE.match(handle):
-                continue
+        handle = _mention_tag_handle(tag, href, local_users, cached_handles)
+        if handle is None:
+            continue
         seen.add(href)
         local = local_users.get(href)
         mentions.append(
@@ -203,6 +197,20 @@ async def _tag_mentions(
             }
         )
     return mentions
+
+
+def _mention_tag_handle(tag: dict, href: str, local_users: dict, cached_handles: Dict[str, str]) -> Optional[str]:
+    """Resolve a Mention tag's ``@name`` — tag, local username, cached or derived."""
+    handle = tag.get("name")
+    if isinstance(handle, str) and _MENTION_HANDLE_RE.match(handle):
+        return handle
+    local = local_users.get(href)
+    if local is not None:
+        handle = f"@{local[1]}"
+    else:
+        cached = cached_handles.get(href)
+        handle = f"@{cached}" if cached else _remote_actor_handle(href)
+    return handle if _MENTION_HANDLE_RE.match(handle) else None
 
 
 async def _resolve_object_activity(session: AsyncSession, object_uri: str) -> Optional[Activity]:
@@ -264,28 +272,9 @@ def _materialized_visibility(obj: dict, entity: Any) -> Visibility:
     return Visibility.MENTIONED
 
 
-async def _relay_thread_activity(
-    session: AsyncSession,
-    *,
-    activity: dict,
-    obj: dict,
-    target: Activity,
-    config: Optional[SonghiveConfig],
-) -> None:
-    """
-    Relay a public remote reply/quote to followers of its thread objects.
-
-    Remote actors may ``Follow`` a local object rather than an actor —
-    e.g. Friendica sends ``Follow`` on a thread's root item for
-    conversation subscriptions — and expect the object's server to
-    forward new thread items to them. The received activity is forwarded
-    verbatim, signed by the nearest local ancestor's owner (or the
-    instance actor), to every inbox following an object in the reply
-    chain. Non-public objects are never relayed.
-    """
-    if config is None or not config.federation.enabled or not config.federation.instance_domain or not is_public(obj):
-        return
-
+async def _thread_ancestor_object_ids(session: AsyncSession, target: Activity) -> Tuple[Set[str], Optional[str]]:
+    """Walk the reply chain, collecting remote object ids and the first
+    local owner seen (the relay's signing actor)."""
     object_ids: Set[str] = set()
     if target.source_id:
         object_ids.add(target.source_id)
@@ -312,6 +301,32 @@ async def _relay_thread_activity(
         if owner_id is None and row.source_type == "local" and row.owner_user_id:
             owner_id = row.owner_user_id
         parent_id = row.in_reply_to_activity_id
+    return object_ids, owner_id
+
+
+async def _relay_thread_activity(
+    session: AsyncSession,
+    *,
+    activity: dict,
+    obj: dict,
+    target: Activity,
+    config: Optional[SonghiveConfig],
+) -> None:
+    """
+    Relay a public remote reply/quote to followers of its thread objects.
+
+    Remote actors may ``Follow`` a local object rather than an actor —
+    e.g. Friendica sends ``Follow`` on a thread's root item for
+    conversation subscriptions — and expect the object's server to
+    forward new thread items to them. The received activity is forwarded
+    verbatim, signed by the nearest local ancestor's owner (or the
+    instance actor), to every inbox following an object in the reply
+    chain. Non-public objects are never relayed.
+    """
+    if config is None or not config.federation.enabled or not config.federation.instance_domain or not is_public(obj):
+        return
+
+    object_ids, owner_id = await _thread_ancestor_object_ids(session, target)
 
     signer = await session.get(User, owner_id) if owner_id else None
     inboxes = await asyncio.to_thread(
@@ -398,42 +413,73 @@ async def _materialize_remote_object(
     # clients is stripped — the quoted activity renders through the
     # ``in_reply_to_activity_id`` embed instead.
     content = strip_quote_fallback(obj.get("content"), extract_quote_target(obj))
-    row = Activity(
-        entity_type=target.entity_type,
-        entity_id=target.entity_id,
+    job = _MaterializeJob(
+        activity=activity,
+        obj=obj,
+        actor=actor,
+        object_id=object_id,
+        target=target,
         activity_type=activity_type,
-        source_type="remote",
-        source_actor=actor,
-        source_id=object_id,
-        owner_user_id=None,
-        visibility=_materialized_visibility(obj, entity).value,
-        in_reply_to_activity_id=str(target.id),
+        entity=entity,
+        mentions=mentions,
         content=content if isinstance(content, str) and content else None,
-        content_type="text/html" if isinstance(content, str) and content else None,
-        language=_object_language(obj),
-        payload=activity,
-        published_at=_parse_published(obj.get("published")) or datetime.now(timezone.utc),
+        config=config,
+    )
+    return await _insert_materialized_row(session, job)
+
+
+@dataclass
+class _MaterializeJob:
+    activity: dict
+    obj: dict
+    actor: str
+    object_id: str
+    target: Activity
+    activity_type: str
+    entity: Any
+    mentions: list
+    content: Optional[str]
+    config: Optional[SonghiveConfig]
+
+
+async def _insert_materialized_row(session: AsyncSession, job: _MaterializeJob) -> Activity:
+    """Insert the materialized row plus its mentions, tags, and notifications."""
+    row = Activity(
+        entity_type=job.target.entity_type,
+        entity_id=job.target.entity_id,
+        activity_type=job.activity_type,
+        source_type="remote",
+        source_actor=job.actor,
+        source_id=job.object_id,
+        owner_user_id=None,
+        visibility=_materialized_visibility(job.obj, job.entity).value,
+        in_reply_to_activity_id=str(job.target.id),
+        content=job.content,
+        content_type="text/html" if job.content else None,
+        language=_object_language(job.obj),
+        payload=job.activity,
+        published_at=_parse_published(job.obj.get("published")) or datetime.now(timezone.utc),
     )
     session.add(row)
     await session.flush()
 
-    for mention in mentions:
+    for mention in job.mentions:
         session.add(ActivityMention(activity_id=row.id, **mention))
     await session.flush()
-    await _sync_activity_tags(session, row, _remote_hashtags(obj))
+    await _sync_activity_tags(session, row, _remote_hashtags(job.obj))
     schedule_preview_card_fetch(row)
     logger.info(
         "Materialized remote %s %s from %s on %s",
-        activity_type,
-        object_id,
-        actor,
-        target.source_id,
+        job.activity_type,
+        job.object_id,
+        job.actor,
+        job.target.source_id,
     )
-    await notify_remote_activity_subscribers(session, activity=row, config=config)
+    await notify_remote_activity_subscribers(session, activity=row, config=job.config)
     try:
-        await _relay_thread_activity(session, activity=activity, obj=obj, target=target, config=config)
+        await _relay_thread_activity(session, activity=job.activity, obj=job.obj, target=job.target, config=job.config)
     except Exception as exc:
-        logger.warning("Failed to relay remote %s to object followers: %s", object_id, exc)
+        logger.warning("Failed to relay remote %s to object followers: %s", job.object_id, exc)
     return row
 
 
@@ -559,6 +605,74 @@ async def materialize_remote_quote(
     )
 
 
+def _announce_fields(activity: dict) -> Optional[Tuple[str, str, str]]:
+    """Validate an inbound ``Announce``; returns ``(actor, object_uri, announce_id)``."""
+    if activity.get("type") != "Announce":
+        return None
+    actor = activity.get("actor")
+    if not isinstance(actor, str) or not actor.startswith(("http://", "https://")):
+        return None
+    obj = activity.get("object")
+    object_uri = obj if isinstance(obj, str) else obj.get("id") if isinstance(obj, dict) else None
+    if not isinstance(object_uri, str) or not object_uri.startswith(("http://", "https://")):
+        return None
+    announce_id = activity.get("id")
+    if not isinstance(announce_id, str) or not announce_id:
+        return None
+    return actor, object_uri, announce_id
+
+
+async def _insert_announce_row(
+    session: AsyncSession,
+    target: Activity,
+    actor: str,
+    announce_id: str,
+    public: bool,
+    activity: dict,
+    mentions: List[dict],
+) -> Activity:
+    row = Activity(
+        entity_type=target.entity_type,
+        entity_id=target.entity_id,
+        activity_type="announce",
+        source_type="remote",
+        source_actor=actor,
+        source_id=announce_id,
+        owner_user_id=None,
+        visibility=target.visibility if public else Visibility.MENTIONED.value,
+        in_reply_to_activity_id=str(target.id),
+        payload=activity,
+        published_at=_parse_published(activity.get("published")) or datetime.now(timezone.utc),
+    )
+    session.add(row)
+    await session.flush()
+
+    for mention in mentions:
+        session.add(ActivityMention(activity_id=row.id, **mention))
+    await session.flush()
+    return row
+
+
+async def _resolve_announce_target(
+    session: AsyncSession,
+    object_uri: str,
+    config: Optional[SonghiveConfig],
+) -> Optional[Activity]:
+    """Resolve the boosted object locally, dereferencing it when allowed."""
+    target = await _resolve_object_activity(session, object_uri)
+    if target is None and config is not None:
+        try:
+            result = await remote_content_service.dereference_remote_object(session, config, object_uri)
+        except (FetchError, HTTPException, AttributionMismatch) as exc:
+            logger.info("Cannot dereference boosted object %s: %s", object_uri, exc)
+            return None
+        if result.status != "gone":
+            target = result.activity
+    if target is None or target.deleted_at is not None:
+        return None
+    return target
+
+
 async def materialize_remote_announce(
     session: AsyncSession,
     *,
@@ -584,18 +698,10 @@ async def materialize_remote_announce(
     activity is malformed, the object cannot be resolved or fetched, or
     a non-public Announce addresses no local user.
     """
-    if activity.get("type") != "Announce":
+    fields = _announce_fields(activity)
+    if fields is None:
         return None
-    actor = activity.get("actor")
-    if not isinstance(actor, str) or not actor.startswith(("http://", "https://")):
-        return None
-    obj = activity.get("object")
-    object_uri = obj if isinstance(obj, str) else obj.get("id") if isinstance(obj, dict) else None
-    if not isinstance(object_uri, str) or not object_uri.startswith(("http://", "https://")):
-        return None
-    announce_id = activity.get("id")
-    if not isinstance(announce_id, str) or not announce_id:
-        return None
+    actor, object_uri, announce_id = fields
 
     existing = await session.scalar(
         select(Activity).where(
@@ -606,16 +712,8 @@ async def materialize_remote_announce(
     if existing is not None:
         return existing
 
-    target = await _resolve_object_activity(session, object_uri)
-    if target is None and config is not None:
-        try:
-            result = await remote_content_service.dereference_remote_object(session, config, object_uri)
-        except (FetchError, HTTPException, AttributionMismatch) as exc:
-            logger.info("Cannot dereference boosted object %s: %s", object_uri, exc)
-            return None
-        if result.status != "gone":
-            target = result.activity
-    if target is None or target.deleted_at is not None:
+    target = await _resolve_announce_target(session, object_uri, config)
+    if target is None:
         return None
 
     if target.owner_user_id is not None:
@@ -640,28 +738,28 @@ async def materialize_remote_announce(
         # A non-public boost addressing no local user has no audience here.
         return None
 
-    row = Activity(
-        entity_type=target.entity_type,
-        entity_id=target.entity_id,
-        activity_type="announce",
-        source_type="remote",
-        source_actor=actor,
-        source_id=announce_id,
-        owner_user_id=None,
-        visibility=target.visibility if public else Visibility.MENTIONED.value,
-        in_reply_to_activity_id=str(target.id),
-        payload=activity,
-        published_at=_parse_published(activity.get("published")) or datetime.now(timezone.utc),
-    )
-    session.add(row)
-    await session.flush()
-
-    for mention in mentions:
-        session.add(ActivityMention(activity_id=row.id, **mention))
-    await session.flush()
+    row = await _insert_announce_row(session, target, actor, announce_id, public, activity, mentions)
     logger.info("Materialized remote announce %s of %s from %s", announce_id, object_uri, actor)
     await notify_remote_activity_subscribers(session, activity=row, config=config)
     return row
+
+
+async def _replay_missed_create(
+    session: AsyncSession, activity: dict, obj: dict, config: Optional[SonghiveConfig]
+) -> None:
+    """Replay a missed ``Create`` through the matching materializer.
+
+    Quote fields take precedence over ``inReplyTo``, mirroring Pubby's
+    interaction typing; standalone posts (and replies/quotes whose
+    targets are not cached) land on the ``remote_objects`` path."""
+    create = {**activity, "type": "Create"}
+    materialized = None
+    if extract_quote_target(obj):
+        materialized = await materialize_remote_quote(session, activity=create, config=config)
+    elif isinstance(obj.get("inReplyTo"), str) and obj["inReplyTo"]:
+        materialized = await materialize_remote_reply(session, activity=create, config=config)
+    if materialized is None:
+        await remote_content_service.materialize_remote_post(session, activity=create, config=config)
 
 
 async def update_remote_object(
@@ -698,24 +796,7 @@ async def update_remote_object(
 
     row = await _find_remote_object(session, object_id, actor)
     if row is None:
-        # A missed ``Create`` is replayed through the matching
-        # materializer — quote fields take precedence over ``inReplyTo``,
-        # mirroring Pubby's interaction typing; standalone posts (and
-        # replies/quotes whose targets are not cached) land on the
-        # ``remote_objects`` path.
-        materialized = None
-        if extract_quote_target(obj):
-            materialized = await materialize_remote_quote(
-                session, activity={**activity, "type": "Create"}, config=config
-            )
-        elif isinstance(obj.get("inReplyTo"), str) and obj["inReplyTo"]:
-            materialized = await materialize_remote_reply(
-                session, activity={**activity, "type": "Create"}, config=config
-            )
-        if materialized is None:
-            await remote_content_service.materialize_remote_post(
-                session, activity={**activity, "type": "Create"}, config=config
-            )
+        await _replay_missed_create(session, activity, obj, config)
         return
 
     mentions = await _remote_mentions(session, obj, config)
@@ -827,31 +908,14 @@ async def retract_remote_undo(session: AsyncSession, *, activity: dict) -> None:
         logger.info("Retracted remote announce %s from %s", inner_id, actor)
 
 
-async def apply_quote_authorization(
-    session: AsyncSession,
-    *,
-    activity: dict,
-    config: Optional[SonghiveConfig] = None,
-) -> None:
-    """
-    Apply an inbound ``Accept`` of a ``QuoteRequest`` we sent (FEP-044f).
-
-    When a remote server approves our quote it replies with an ``Accept``
-    echoing the ``QuoteRequest`` and carrying the issued
-    ``QuoteAuthorization``'s dereferenceable id in ``result``. The local
-    ``quote`` row's stored ``Create`` payload is stamped with that id so
-    the served object document — and remote copies refreshed through a
-    fanned-out ``Update`` — advertise the verified quote.
-
-    The ``Accept`` applies only when it names the same quoting and quoted
-    objects the row recorded and its actor is the quoted post's author —
-    anyone else cannot legitimately approve the quote.
-    """
+def _parse_quote_accept(activity: dict) -> Optional[Tuple[str, str, str, str, Optional[str]]]:
+    """Extract ``(actor, quoting_id, quoted_id, auth_id, inst_actor)`` from a
+    QuoteRequest ``Accept``; ``None`` when the envelope is malformed."""
     if activity.get("type") != "Accept":
-        return
+        return None
     request = activity.get("object")
     if not isinstance(request, dict) or request.get("type") != "QuoteRequest":
-        return
+        return None
     actor = activity.get("actor")
     instrument = request.get("instrument")
     quoting_id = instrument.get("id") if isinstance(instrument, dict) else instrument
@@ -873,7 +937,34 @@ async def apply_quote_authorization(
         and isinstance(auth_id, str)
         and auth_id
     ):
+        return None
+    return actor, quoting_id, quoted_id, auth_id, inst_actor
+
+
+async def apply_quote_authorization(
+    session: AsyncSession,
+    *,
+    activity: dict,
+    config: Optional[SonghiveConfig] = None,
+) -> None:
+    """
+    Apply an inbound ``Accept`` of a ``QuoteRequest`` we sent (FEP-044f).
+
+    When a remote server approves our quote it replies with an ``Accept``
+    echoing the ``QuoteRequest`` and carrying the issued
+    ``QuoteAuthorization``'s dereferenceable id in ``result``. The local
+    ``quote`` row's stored ``Create`` payload is stamped with that id so
+    the served object document — and remote copies refreshed through a
+    fanned-out ``Update`` — advertise the verified quote.
+
+    The ``Accept`` applies only when it names the same quoting and quoted
+    objects the row recorded and its actor is the quoted post's author —
+    anyone else cannot legitimately approve the quote.
+    """
+    parsed = _parse_quote_accept(activity)
+    if parsed is None:
         return
+    actor, quoting_id, quoted_id, auth_id, inst_actor = parsed
 
     row = await session.scalar(
         select(Activity).where(
@@ -984,6 +1075,76 @@ async def _remote_activity_admitted(session: AsyncSession, activity: dict) -> bo
     return False
 
 
+async def _remote_moderation_blocks(
+    session: AsyncSession,
+    activity: dict,
+    activity_type: Any,
+) -> bool:
+    """Moderation gate for inbound materialization.
+
+    Defederated domains and suspended actors are cut (their retractions —
+    ``Delete``/``Undo`` — still apply).
+    """
+    actor = activity.get("actor")
+    if not isinstance(actor, str) or activity_type in ("Delete", "Undo"):
+        return False
+    from ..services import moderation as moderation_service
+
+    await moderation_service.load_instance_policies(session)
+    if federation_service.db_domain_policy(federation_service.extract_domain(actor)) == "defederate":
+        return True
+    return await moderation_service.actor_is_suspended(session, actor)
+
+
+async def _handle_remote_create(
+    session: AsyncSession,
+    activity: dict,
+    config: Optional[SonghiveConfig],
+) -> None:
+    obj = activity.get("object")
+    actor = activity.get("actor")
+    # Inbound objects are stored for actors some local user follows,
+    # objects belonging to a followed remote resource (e.g.
+    # ``Create(Audio)`` into a followed library), and objects that
+    # address a local user or answer a locally owned activity — the
+    # ones notifications are generated for; objects fetched explicitly
+    # through URL lookup arrive through the dereference path instead.
+    if not isinstance(actor, str) or not await _remote_activity_admitted(session, activity):
+        return
+    # Quote fields take precedence over ``inReplyTo`` — mirroring
+    # Pubby, which records a note carrying both as a QUOTE interaction.
+    if isinstance(obj, dict) and extract_quote_target(obj):
+        materialized = await materialize_remote_quote(session, activity=activity, config=config)
+    else:
+        materialized = await materialize_remote_reply(session, activity=activity, config=config)
+    # Standalone posts — and replies/quotes whose targets are not
+    # cached — still materialize as ``remote_objects`` rows so a
+    # followed actor's outbox shows up on their remote profile.
+    if materialized is None:
+        await remote_content_service.materialize_remote_post(session, activity=activity, config=config)
+
+
+async def _handle_remote_update(
+    session: AsyncSession,
+    activity: dict,
+    config: Optional[SonghiveConfig],
+) -> None:
+    obj = activity.get("object")
+    actor = activity.get("actor")
+    object_id = obj.get("id") if isinstance(obj, dict) else None
+    if not isinstance(object_id, str) or not isinstance(actor, str):
+        return
+    # Revisions to already-stored objects always apply — the row was
+    # admitted by the Create gate or explicit lookup. Replaying a
+    # missed ``Create`` through the update is subject to the same
+    # admission rules as a fresh ``Create``.
+    if await _find_remote_object(session, object_id, actor) is None and not await _remote_activity_admitted(
+        session, activity
+    ):
+        return
+    await update_remote_object(session, activity=activity, config=config)
+
+
 async def sync_remote_activity(
     session: AsyncSession,
     *,
@@ -1008,55 +1169,13 @@ async def sync_remote_activity(
     are ignored — likes stay interaction-only.
     """
     activity_type = activity.get("type")
-    actor = activity.get("actor")
-    if isinstance(actor, str) and activity_type not in ("Delete", "Undo"):
-        # Moderation gates inbound materialization: defederated domains
-        # and suspended actors are cut (their retractions still apply).
-        from ..services import moderation as moderation_service
-
-        await moderation_service.load_instance_policies(session)
-        if federation_service.db_domain_policy(federation_service.extract_domain(actor)) == "defederate":
-            return
-        if await moderation_service.actor_is_suspended(session, actor):
-            return
+    if await _remote_moderation_blocks(session, activity, activity_type):
+        return
 
     if activity_type == "Create":
-        obj = activity.get("object")
-        actor = activity.get("actor")
-        # Inbound objects are stored for actors some local user follows,
-        # objects belonging to a followed remote resource (e.g.
-        # ``Create(Audio)`` into a followed library), and objects that
-        # address a local user or answer a locally owned activity — the
-        # ones notifications are generated for; objects fetched explicitly
-        # through URL lookup arrive through the dereference path instead.
-        if not isinstance(actor, str) or not await _remote_activity_admitted(session, activity):
-            return
-        # Quote fields take precedence over ``inReplyTo`` — mirroring
-        # Pubby, which records a note carrying both as a QUOTE interaction.
-        if isinstance(obj, dict) and extract_quote_target(obj):
-            materialized = await materialize_remote_quote(session, activity=activity, config=config)
-        else:
-            materialized = await materialize_remote_reply(session, activity=activity, config=config)
-        # Standalone posts — and replies/quotes whose targets are not
-        # cached — still materialize as ``remote_objects`` rows so a
-        # followed actor's outbox shows up on their remote profile.
-        if materialized is None:
-            await remote_content_service.materialize_remote_post(session, activity=activity, config=config)
+        await _handle_remote_create(session, activity, config)
     elif activity_type == "Update":
-        obj = activity.get("object")
-        actor = activity.get("actor")
-        object_id = obj.get("id") if isinstance(obj, dict) else None
-        if not isinstance(object_id, str) or not isinstance(actor, str):
-            return
-        # Revisions to already-stored objects always apply — the row was
-        # admitted by the Create gate or explicit lookup. Replaying a
-        # missed ``Create`` through the update is subject to the same
-        # admission rules as a fresh ``Create``.
-        if await _find_remote_object(session, object_id, actor) is None and not await _remote_activity_admitted(
-            session, activity
-        ):
-            return
-        await update_remote_object(session, activity=activity, config=config)
+        await _handle_remote_update(session, activity, config)
     elif activity_type == "Announce":
         actor = activity.get("actor")
         # Boosts are only stored for actors some local user follows, or

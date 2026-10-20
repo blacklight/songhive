@@ -479,6 +479,176 @@ async def _handle_visibility_changes(
             await db.commit()
 
 
+async def _apply_artist_update(db: AsyncSession, track: Track, body: "TrackUpdate"):
+    if body.artist_name is None:
+        return None
+    name = (body.artist_name or "").strip()
+    if not name:
+        return None
+    artist = await music.find_or_create_artist(db, name)
+    track.artist_id = str(artist.id)
+    await music.reconcile_primary_credit(db, track)
+    return artist
+
+
+async def _apply_album_update(db: AsyncSession, track: Track, body: "TrackUpdate"):
+    if body.album_title is None:
+        return None
+    title = (body.album_title or "").strip()
+    if not title:
+        track.album_id = None
+        return None
+    album = await music.find_or_create_album(
+        db,
+        title=title,
+        artist_id=track.artist_id,
+        owner_id=track.owner_id,
+        visibility=track.visibility,
+    )
+    track.album_id = str(album.id)
+    return album
+
+
+async def _apply_genre_update(db: AsyncSession, track: Track, body: "TrackUpdate") -> None:
+    if body.genre is None:
+        return
+    track.genre = body.genre
+    genre_names = split_genre_string(body.genre)
+    await set_genres_for_entity(db, "track", track.id, genre_names)
+    if genre_names:
+        tag_names = genres_to_tags(genre_names)
+        if tag_names:
+            await add_tags_to_entity(db, "track", track.id, tag_names, user_id=None)
+
+
+def _apply_metadata_scalars(track: Track, body: "TrackUpdate") -> None:
+    if body.track_number is not None:
+        track.track_number = body.track_number
+    if body.disc_number is not None:
+        track.disc_number = body.disc_number
+    if body.release_year is not None:
+        track.release_year = body.release_year
+    # ``description`` uses explicit-field semantics so that ``null`` or an
+    # empty string clears the stored value.
+    if "description" in body.model_fields_set:
+        track.description = (body.description or "").strip() or None
+
+
+async def _apply_extra_artists(db: AsyncSession, track: Track, body: "TrackUpdate") -> None:
+    if "extra_artists" not in body.model_fields_set:
+        return
+    names = [name.strip() for name in (body.extra_artists or [])]
+    if len(names) > _MAX_ARTISTS_PER_TRACK or any(not name or len(name) > _MAX_ARTIST_NAME_LENGTH for name in names):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="extra_artists must contain at most 20 non-empty names of at most 256 characters",
+        )
+
+    # ``extra_artists`` is the name-only legacy shape of the credit list:
+    # writing it replaces the extra (non-primary) credits with
+    # name-resolved artists — the primary credit is untouched.
+    if track.artist is not None:
+        await music.set_track_artist(db, track, track.artist, extra_names=names)
+    else:
+        track.extra_artists = names or None
+    track.metadata_updated_at = datetime.now(timezone.utc)
+
+
+def _validate_credit_items(items) -> None:
+    if (
+        not items
+        or len(items) > _MAX_ARTISTS_PER_TRACK
+        or any(
+            (item.credit is not None and (not item.credit.strip() or len(item.credit) > _MAX_ARTIST_NAME_LENGTH))
+            or (item.joinphrase is not None and len(item.joinphrase) > 64)
+            for item in items
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                "artist_credits must contain 1-20 entries with non-empty credits "
+                "and joinphrases of at most 64 characters"
+            ),
+        )
+
+
+async def _resolve_credit_entries(db: AsyncSession, items) -> list:
+    entries = []
+    for item in items:
+        credit_artist = None
+        if item.artist_id:
+            credit_artist = await db.get(Artist, item.artist_id)
+        elif item.artist_name and item.artist_name.strip():
+            credit_artist = await music.find_or_create_artist(db, item.artist_name.strip())
+        if credit_artist is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="each artist_credit entry needs an existing artist_id or a non-empty artist_name",
+            )
+        entries.append(
+            {
+                "artist": credit_artist,
+                "credit": item.credit.strip() if item.credit else None,
+                "joinphrase": item.joinphrase,
+            }
+        )
+    return entries
+
+
+async def _apply_artist_credits(db: AsyncSession, track: Track, body: "TrackUpdate") -> None:
+    if "artist_credits" not in body.model_fields_set:
+        return
+    items = body.artist_credits or []
+    _validate_credit_items(items)
+    entries = await _resolve_credit_entries(db, items)
+    await music.set_artist_credits(db, track=track, credits=entries)
+    track.metadata_updated_at = datetime.now(timezone.utc)
+
+
+def _track_update_details(
+    track: Track,
+    body: "TrackUpdate",
+    artist,
+    album,
+    new_filename: Optional[str],
+) -> Dict[str, Any]:
+    details: Dict[str, Any] = {
+        "title": track.title,
+        "release_year": track.release_year,
+        "visibility": track.visibility,
+    }
+    if body.artist_name is not None:
+        details["artist_name"] = artist.name if artist is not None else None
+    if body.album_title is not None:
+        details["album_title"] = album.title if album is not None else None
+    if new_filename is not None:
+        details["filename"] = new_filename
+    if "description" in body.model_fields_set:
+        details["description"] = track.description
+    return details
+
+
+async def _sync_tags_side_effects(db: AsyncSession, track: Track, body: "TrackUpdate", track_id: str) -> None:
+    if not _should_sync_tags(body):
+        return
+    external_track = track.external_track
+    if external_track is not None:
+        external_library = external_track.external_library
+        if external_library is not None:
+            capabilities = external_library.capabilities or {}
+            if capabilities.get("write_tags"):
+                external_track.write_back_pending = True
+                track.metadata_updated_at = datetime.now(timezone.utc)
+                try:
+                    write_back_metadata_task.delay(str(external_track.id))
+                except Exception as exc:
+                    logger.warning("Could not enqueue write-back for %s: %s", external_track.id, exc)
+    if track.audio_file_id is not None:
+        _enqueue_track_tag_sync(track_id)
+    await db.commit()
+
+
 def _track_tags(track) -> List[str]:
     """Return loaded tag names, avoiding a lazy load."""
     if not _is_loaded(track, "tags"):
@@ -835,19 +1005,8 @@ async def get_track(
     return await _build_track_response(track, user, storage, include, favorited_ids, saved_ids, db=db)
 
 
-@router.patch("/{track_id}", response_model=TrackResponse)
-async def update_track(
-    track_id: str,
-    body: TrackUpdate,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-    storage: StorageService = Depends(get_storage_service),
-    include: IncludeQuery = Depends(get_include({"artist", "album", "owner", "tags", "genres"})),
-):
-    """Partially update a track."""
-    service_include = set(include.values) | {"artist"}
+async def _load_editable_track(db, track_id: str, body: TrackUpdate, current_user: User, service_include: set):
+    """Load the track, enforce manage rights and editable-field locks."""
     track = await music.get_track(db, track_id, include=service_include)
     if track is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
@@ -864,116 +1023,33 @@ async def update_track(
         track_id,
         (_TRACK_UPDATE_FIELD_MAP.get(field, field) for field in body.model_fields_set),
     )
+    return track
 
-    previous_artist_id = track.artist_id
-    previous_album_id = track.album_id
 
-    previous_visibility = track.visibility
-    # The AP object id this track was published under — a visibility
-    # transition drops the cached document for the *old* id.
-    previous_object_id = track.federation_object_id
+async def _audit_track_update(db, current_user, track_id, request, *, details):
+    """Write the ``track.update`` audit row."""
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="track.update",
+        target_type=AuditTargetType.TRACK,
+        target_id=track_id,
+        details=details,
+        ip_address=client_ip(request),
+    )
+
+
+async def _apply_track_fields(db, storage, track, body: TrackUpdate, previous_artist_id, previous_album_id):
+    """Apply the request's fields; returns ``(artist, album, new_filename)``."""
     if body.title is not None:
         track.title = body.title
 
-    artist = None
-    if body.artist_name is not None:
-        name = (body.artist_name or "").strip()
-        if name:
-            artist = await music.find_or_create_artist(db, name)
-            track.artist_id = str(artist.id)
-            await music.reconcile_primary_credit(db, track)
-
-    album = None
-    if body.album_title is not None:
-        title = (body.album_title or "").strip()
-        if title:
-            album = await music.find_or_create_album(
-                db,
-                title=title,
-                artist_id=track.artist_id,
-                owner_id=track.owner_id,
-                visibility=track.visibility,
-            )
-            track.album_id = str(album.id)
-        else:
-            track.album_id = None
-
-    if body.genre is not None:
-        track.genre = body.genre
-        genre_names = split_genre_string(body.genre)
-        await set_genres_for_entity(db, "track", track.id, genre_names)
-        if genre_names:
-            tag_names = genres_to_tags(genre_names)
-            if tag_names:
-                await add_tags_to_entity(db, "track", track.id, tag_names, user_id=None)
-    if body.track_number is not None:
-        track.track_number = body.track_number
-    if body.disc_number is not None:
-        track.disc_number = body.disc_number
-    if body.release_year is not None:
-        track.release_year = body.release_year
-    # ``description`` uses explicit-field semantics so that ``null`` or an
-    # empty string clears the stored value.
-    if "description" in body.model_fields_set:
-        track.description = (body.description or "").strip() or None
-    if "extra_artists" in body.model_fields_set:
-        names = [name.strip() for name in (body.extra_artists or [])]
-        if len(names) > _MAX_ARTISTS_PER_TRACK or any(
-            not name or len(name) > _MAX_ARTIST_NAME_LENGTH for name in names
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail="extra_artists must contain at most 20 non-empty names of at most 256 characters",
-            )
-
-        # ``extra_artists`` is the name-only legacy shape of the credit list:
-        # writing it replaces the extra (non-primary) credits with
-        # name-resolved artists — the primary credit is untouched.
-        if track.artist is not None:
-            await music.set_track_artist(db, track, track.artist, extra_names=names)
-        else:
-            track.extra_artists = names or None
-        track.metadata_updated_at = datetime.now(timezone.utc)
-
-    if "artist_credits" in body.model_fields_set:
-        items = body.artist_credits or []
-        if (
-            not items
-            or len(items) > _MAX_ARTISTS_PER_TRACK
-            or any(
-                (item.credit is not None and (not item.credit.strip() or len(item.credit) > _MAX_ARTIST_NAME_LENGTH))
-                or (item.joinphrase is not None and len(item.joinphrase) > 64)
-                for item in items
-            )
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=(
-                    "artist_credits must contain 1-20 entries with non-empty credits "
-                    "and joinphrases of at most 64 characters"
-                ),
-            )
-        entries = []
-        for item in items:
-            credit_artist = None
-            if item.artist_id:
-                credit_artist = await db.get(Artist, item.artist_id)
-            elif item.artist_name and item.artist_name.strip():
-                credit_artist = await music.find_or_create_artist(db, item.artist_name.strip())
-            if credit_artist is None:
-                raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                    detail="each artist_credit entry needs an existing artist_id or a non-empty artist_name",
-                )
-            entries.append(
-                {
-                    "artist": credit_artist,
-                    "credit": item.credit.strip() if item.credit else None,
-                    "joinphrase": item.joinphrase,
-                }
-            )
-        await music.set_artist_credits(db, track=track, credits=entries)
-        track.metadata_updated_at = datetime.now(timezone.utc)
+    artist = await _apply_artist_update(db, track, body)
+    album = await _apply_album_update(db, track, body)
+    await _apply_genre_update(db, track, body)
+    _apply_metadata_scalars(track, body)
+    await _apply_extra_artists(db, track, body)
+    await _apply_artist_credits(db, track, body)
     if body.visibility is not None:
         track.visibility = body.visibility.value
 
@@ -981,6 +1057,12 @@ async def update_track(
     if body.filename is not None:
         new_filename = await _rename_track_file(db, track, body.filename)
 
+    album = await _cleanup_renamed_entities(db, storage, track, body, previous_artist_id, previous_album_id, album)
+    return artist, album, new_filename
+
+
+async def _cleanup_renamed_entities(db, storage, track, body, previous_artist_id, previous_album_id, album):
+    """Flush renames, drop empty entities, resync album genres."""
     if body.artist_name is not None or body.album_title is not None:
         await db.flush()
         await db.refresh(track, ["artist", "album"])
@@ -995,39 +1077,20 @@ async def update_track(
         album = await db.get(Album, track.album_id)
         if album is not None:
             await sync_album_genres(db, album)
+    return album
 
-    details: Dict[str, Any] = {
-        "title": track.title,
-        "release_year": track.release_year,
-        "visibility": track.visibility,
-    }
-    if body.artist_name is not None:
-        details["artist_name"] = artist.name if artist is not None else None
-    if body.album_title is not None:
-        details["album_title"] = album.title if album is not None else None
-    if new_filename is not None:
-        details["filename"] = new_filename
-    if "description" in body.model_fields_set:
-        details["description"] = track.description
 
-    await audit.log_action(
-        db,
-        actor_id=current_user.id,
-        action="track.update",
-        target_type=AuditTargetType.TRACK,
-        target_id=track_id,
-        details=details,
-        ip_address=client_ip(request),
-    )
-    # Drop the track's cached dereference documents on the mutation itself,
-    # deferred to this route's commit. This must not depend on publication
-    # rows: a public -> private transition with no live ``create``
-    # activities retracts nothing, but its cached public object document
-    # and track page must still drop at once. Metadata edits change the
-    # rendered ``Audio`` object and the library pages listing the track.
-    if body.model_fields_set:
-        doc_cache.invalidate_track(str(track.id), object_id=previous_object_id, session=db)
-    await db.commit()
+async def _post_update_side_effects(
+    track,
+    body: TrackUpdate,
+    *,
+    previous_visibility: str,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: AsyncSession,
+    track_id: str,
+) -> None:
+    """Visibility transition, publication sync, notifications, tag effects."""
     await _handle_visibility_changes(
         track,
         previous_visibility=previous_visibility,
@@ -1053,22 +1116,61 @@ async def update_track(
         )
         await db.commit()
 
-    if _should_sync_tags(body):
-        external_track = track.external_track
-        if external_track is not None:
-            external_library = external_track.external_library
-            if external_library is not None:
-                capabilities = external_library.capabilities or {}
-                if capabilities.get("write_tags"):
-                    external_track.write_back_pending = True
-                    track.metadata_updated_at = datetime.now(timezone.utc)
-                    try:
-                        write_back_metadata_task.delay(str(external_track.id))
-                    except Exception as exc:
-                        logger.warning("Could not enqueue write-back for %s: %s", external_track.id, exc)
-        if track.audio_file_id is not None:
-            _enqueue_track_tag_sync(track_id)
-        await db.commit()
+    await _sync_tags_side_effects(db, track, body, track_id)
+
+
+@router.patch("/{track_id}", response_model=TrackResponse)
+async def update_track(
+    track_id: str,
+    body: TrackUpdate,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    storage: StorageService = Depends(get_storage_service),
+    include: IncludeQuery = Depends(get_include({"artist", "album", "owner", "tags", "genres"})),
+):
+    """Partially update a track."""
+    service_include = set(include.values) | {"artist"}
+    track = await _load_editable_track(db, track_id, body, current_user, service_include)
+
+    previous_artist_id = track.artist_id
+    previous_album_id = track.album_id
+
+    previous_visibility = track.visibility
+    # The AP object id this track was published under — a visibility
+    # transition drops the cached document for the *old* id.
+    previous_object_id = track.federation_object_id
+
+    artist, album, new_filename = await _apply_track_fields(
+        db, storage, track, body, previous_artist_id, previous_album_id
+    )
+
+    await _audit_track_update(
+        db,
+        current_user,
+        track_id,
+        request,
+        details=_track_update_details(track, body, artist, album, new_filename),
+    )
+    # Drop the track's cached dereference documents on the mutation itself,
+    # deferred to this route's commit. This must not depend on publication
+    # rows: a public -> private transition with no live ``create``
+    # activities retracts nothing, but its cached public object document
+    # and track page must still drop at once. Metadata edits change the
+    # rendered ``Audio`` object and the library pages listing the track.
+    if body.model_fields_set:
+        doc_cache.invalidate_track(str(track.id), object_id=previous_object_id, session=db)
+    await db.commit()
+    await _post_update_side_effects(
+        track,
+        body,
+        previous_visibility=previous_visibility,
+        request=request,
+        background_tasks=background_tasks,
+        db=db,
+        track_id=track_id,
+    )
 
     track = await music.get_track(db, track_id, include=set(include.values) | {"artist"})
     assert track  # for mypy
@@ -1570,16 +1672,39 @@ async def set_track_genres(
             detail=str(exc),
         ) from exc
 
+    return await _finalize_genre_change(
+        db,
+        request,
+        track_id,
+        "genre.set",
+        {"genres": [validate_genre_name(g) for g in body.genres]},
+        current_user,
+        storage,
+        include,
+    )
+
+
+async def _finalize_genre_change(
+    db: AsyncSession,
+    request: Request,
+    track_id: str,
+    action: str,
+    details: Dict[str, Any],
+    current_user: User,
+    storage: StorageService,
+    include: IncludeQuery,
+) -> TrackResponse:
+    """Audit, commit, enqueue tag syncs, and render a track after a genre edit."""
     track = await music.get_track(db, track_id, include=set(include.values) | {"artist", "genres"})
     if track is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
     await audit.log_action(
         db,
         actor_id=current_user.id,
-        action="genre.set",
+        action=action,
         target_type=AuditTargetType.TRACK,
         target_id=track_id,
-        details={"genres": [validate_genre_name(g) for g in body.genres]},
+        details=details,
         ip_address=client_ip(request),
     )
     await db.commit()
@@ -1638,26 +1763,13 @@ async def remove_track_genre(
             detail=str(exc),
         ) from exc
 
-    track = await music.get_track(db, track_id, include=set(include.values) | {"artist", "genres"})
-    if track is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Track not found")
-    await audit.log_action(
+    return await _finalize_genre_change(
         db,
-        actor_id=current_user.id,
-        action="genre.remove",
-        target_type=AuditTargetType.TRACK,
-        target_id=track_id,
-        details={"genre": validate_genre_name(genre)},
-        ip_address=client_ip(request),
+        request,
+        track_id,
+        "genre.remove",
+        {"genre": validate_genre_name(genre)},
+        current_user,
+        storage,
+        include,
     )
-    await db.commit()
-
-    if track.album_id:
-        track_ids = await music.get_track_ids_for_album(db, track.album_id, user=current_user)
-        for tid in track_ids:
-            _enqueue_track_tag_sync(tid)
-    else:
-        _enqueue_track_tag_sync(track_id)
-
-    saved_ids = await collection.saved_item_ids(db, current_user, "track", {track_id})
-    return await _build_track_response(track, current_user, storage, include, None, saved_ids, db=db)

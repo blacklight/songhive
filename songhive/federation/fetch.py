@@ -176,59 +176,27 @@ def guarded_fetch(
     current = url
     try:
         for _ in range(max_redirects + 1):
-            validate_fetch_url(current)
-            if check_url is not None:
-                check_url(current)
+            _validate_hop(current, check_url)
             request_headers = dict(base_headers)
             if sign is not None:
                 request_headers.update(sign(current, request_headers) or {})
+            response = _issue_request(session, current, request_headers, timeout)
             try:
-                response = session.get(
-                    current,
-                    timeout=timeout,
-                    allow_redirects=False,
-                    stream=True,
-                    headers=request_headers,
-                )
-            except FetchError:
-                raise
-            except requests.RequestException as exc:
-                raise FetchError(f"Remote fetch failed: {exc}", url=current) from exc
-
-            try:
-                if response.is_redirect or response.is_permanent_redirect:
-                    location = response.headers.get("Location")
-                    if not location:
-                        raise FetchError("Redirect without Location header", url=current)
-                    current = urljoin(current, location)
+                next_url = _redirect_target(response, current)
+                if next_url is not None:
+                    current = next_url
                     continue
-
-                if response.status_code in (404, 410):
-                    raise FetchNotFound(f"Remote object not found ({response.status_code})", url=current)
-                if response.status_code != 200:
-                    raise FetchError(
-                        f"Remote server returned {response.status_code}",
-                        status_code=502,
-                        url=current,
-                    )
+                _check_response_status(response, current)
 
                 content_type = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
                 if content_type and content_type not in ALLOWED_CONTENT_TYPES:
                     raise FetchError(f"Unexpected remote content type: {content_type}", url=current)
 
-                chunks: list[bytes] = []
-                size = 0
-                for chunk in response.iter_content(64 * 1024):
-                    chunks.append(chunk)
-                    size += len(chunk)
-                    if size >= max_bytes:
-                        break
-                body = b"".join(chunks)[:max_bytes]
                 return FetchResult(
                     url=current,
                     status_code=response.status_code,
                     content_type=content_type,
-                    body=body,
+                    body=_read_capped_body(response, max_bytes),
                     headers={
                         "etag": response.headers.get("ETag"),
                         "last_modified": response.headers.get("Last-Modified"),
@@ -240,6 +208,57 @@ def guarded_fetch(
         session.close()
 
     raise FetchError(f"Too many redirects fetching {url}", status_code=502, url=url)
+
+
+def _validate_hop(current: str, check_url: Optional[Callable[[str], None]]) -> None:
+    validate_fetch_url(current)
+    if check_url is not None:
+        check_url(current)
+
+
+def _issue_request(session: requests.Session, current: str, headers: dict, timeout: float):
+    try:
+        return session.get(
+            current,
+            timeout=timeout,
+            allow_redirects=False,
+            stream=True,
+            headers=headers,
+        )
+    except requests.RequestException as exc:
+        raise FetchError(f"Remote fetch failed: {exc}", url=current) from exc
+
+
+def _redirect_target(response, current: str) -> Optional[str]:
+    """Return the next URL for a redirect response, else ``None``."""
+    if not (response.is_redirect or response.is_permanent_redirect):
+        return None
+    location = response.headers.get("Location")
+    if not location:
+        raise FetchError("Redirect without Location header", url=current)
+    return urljoin(current, location)
+
+
+def _check_response_status(response, current: str) -> None:
+    if response.status_code in (404, 410):
+        raise FetchNotFound(f"Remote object not found ({response.status_code})", url=current)
+    if response.status_code != 200:
+        raise FetchError(
+            f"Remote server returned {response.status_code}",
+            status_code=502,
+            url=current,
+        )
+
+
+def _read_capped_body(response, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    size = 0
+    for chunk in response.iter_content(64 * 1024):
+        chunks.append(chunk)
+        size += len(chunk)
+        if size >= max_bytes:
+            break
+    return b"".join(chunks)[:max_bytes]
 
 
 @dataclass
@@ -286,53 +305,17 @@ def guarded_download(
     current = url
     try:
         for _ in range(max_redirects + 1):
-            validate_fetch_url(current)
-            if check_url is not None:
-                check_url(current)
+            _validate_hop(current, check_url)
+            response = _issue_request(session, current, dict(base_headers), timeout)
             try:
-                response = session.get(
-                    current,
-                    timeout=timeout,
-                    allow_redirects=False,
-                    stream=True,
-                    headers=dict(base_headers),
-                )
-            except requests.RequestException as exc:
-                raise FetchError(f"Remote fetch failed: {exc}", url=current) from exc
-
-            try:
-                if response.is_redirect or response.is_permanent_redirect:
-                    location = response.headers.get("Location")
-                    if not location:
-                        raise FetchError("Redirect without Location header", url=current)
-                    current = urljoin(current, location)
+                next_url = _redirect_target(response, current)
+                if next_url is not None:
+                    current = next_url
                     continue
-
-                if response.status_code in (404, 410):
-                    raise FetchNotFound(f"Remote object not found ({response.status_code})", url=current)
-                if response.status_code != 200:
-                    raise FetchError(
-                        f"Remote server returned {response.status_code}",
-                        status_code=502,
-                        url=current,
-                    )
+                _check_response_status(response, current)
 
                 content_type = response.headers.get("Content-Type", "").split(";")[0].strip().lower()
-                size = 0
-                try:
-                    with open(dest_path, "wb") as dest:
-                        for chunk in response.iter_content(64 * 1024):
-                            size += len(chunk)
-                            if max_bytes and size > max_bytes:
-                                raise FetchError(
-                                    f"Remote payload exceeds {max_bytes} bytes",
-                                    status_code=502,
-                                    url=current,
-                                )
-                            dest.write(chunk)
-                except Exception:
-                    dest_path.unlink(missing_ok=True)
-                    raise
+                size = _stream_to_file(response, dest_path, max_bytes, current)
                 return DownloadResult(
                     url=current,
                     status_code=response.status_code,
@@ -345,3 +328,23 @@ def guarded_download(
         session.close()
 
     raise FetchError(f"Too many redirects fetching {url}", status_code=502, url=url)
+
+
+def _stream_to_file(response, dest_path: Path, max_bytes: int, current: str) -> int:
+    """Write the response body to ``dest_path``; returns the byte count."""
+    size = 0
+    try:
+        with open(dest_path, "wb") as dest:
+            for chunk in response.iter_content(64 * 1024):
+                size += len(chunk)
+                if max_bytes and size > max_bytes:
+                    raise FetchError(
+                        f"Remote payload exceeds {max_bytes} bytes",
+                        status_code=502,
+                        url=current,
+                    )
+                dest.write(chunk)
+    except Exception:
+        dest_path.unlink(missing_ok=True)
+        raise
+    return size

@@ -88,27 +88,51 @@ def make_celery(
         # A fresh library sync can enqueue tens of thousands of these;
         # without the split they starve everything else on ``celery``.
         # ``celery``: the default — low-volume and interactive tasks.
-        task_queues=(
-            Queue("celery"),
-            Queue("scrobbles"),
-            Queue("bulk"),
+        task_queues=(Queue("celery"), Queue("scrobbles"), Queue("bulk")),
+        task_routes=_task_routes(),
+        beat_schedule=_beat_schedule(
+            cleanup_orphaned_files_schedule,
+            notification_digest_hour,
+            notification_purge_hour,
         ),
-        task_routes={
-            "songhive.tasks.scrobbling.*": {"queue": "scrobbles"},
-            "songhive.tasks.musicbrainz.*": {"queue": "bulk"},
-            "songhive.tasks.images.*": {"queue": "bulk"},
-            "songhive.tasks.tags.*": {"queue": "bulk"},
-            "songhive.tasks.import_.*": {"queue": "bulk"},
-            "songhive.tasks.transcoding.*": {"queue": "bulk"},
-            "songhive.tasks.external_libraries.sync_external_library": {"queue": "bulk"},
-            "songhive.tasks.external_libraries.write_back_metadata": {"queue": "bulk"},
-            "songhive.tasks.podcasts.refresh_podcast": {"queue": "bulk"},
-            "songhive.tasks.storage.rehash_audio_files": {"queue": "bulk"},
-            # ffmpeg sample renders are heavyweight; keep them off the default
-            # queue with the rest of the bulk media work.
-            "songhive.tasks.payments.materialize_track_sample": {"queue": "bulk"},
-        },
-        beat_schedule={
+    )
+    if remote_activity_prune_schedule:
+        app.conf.beat_schedule["prune-remote-activities"] = {
+            "task": "songhive.tasks.federation.prune_remote_activities",
+            "schedule": _parse_crontab(remote_activity_prune_schedule),
+        }
+    app.autodiscover_tasks(["songhive.tasks"])
+    return app
+
+
+def _task_routes() -> dict:
+    """Queue routing for latency-sensitive and high-volume tasks."""
+    return {
+        "songhive.tasks.scrobbling.*": {"queue": "scrobbles"},
+        "songhive.tasks.musicbrainz.*": {"queue": "bulk"},
+        "songhive.tasks.images.*": {"queue": "bulk"},
+        "songhive.tasks.tags.*": {"queue": "bulk"},
+        "songhive.tasks.import_.*": {"queue": "bulk"},
+        "songhive.tasks.transcoding.*": {"queue": "bulk"},
+        "songhive.tasks.external_libraries.sync_external_library": {"queue": "bulk"},
+        "songhive.tasks.external_libraries.write_back_metadata": {"queue": "bulk"},
+        "songhive.tasks.podcasts.refresh_podcast": {"queue": "bulk"},
+        "songhive.tasks.storage.rehash_audio_files": {"queue": "bulk"},
+        # ffmpeg sample renders are heavyweight; keep them off the default
+        # queue with the rest of the bulk media work.
+        "songhive.tasks.payments.materialize_track_sample": {"queue": "bulk"},
+    }
+
+
+def _beat_schedule(
+    cleanup_orphaned_files_schedule: str,
+    notification_digest_hour: int,
+    notification_purge_hour: int,
+) -> dict:
+    """Periodic task schedule for the Celery app."""
+    schedule = _payments_beat_schedule()
+    schedule.update(
+        {
             "cleanup-orphaned-files": {
                 "task": "songhive.tasks.storage.cleanup_orphaned_files",
                 "schedule": _parse_crontab(cleanup_orphaned_files_schedule),
@@ -143,42 +167,41 @@ def make_celery(
                 "task": "songhive.tasks.downloads.cleanup_completed_downloads",
                 "schedule": crontab(minute=35),
             },
-            # Payments safety nets. Webhooks drive the authoritative state,
-            # but these sweeps bound the damage of a lost delivery: lapsed
-            # memberships deactivate, stale checkouts close, queued guest
-            # deliveries retry, and expired artifacts/samples free storage.
-            "payments-sweep-membership-expirations": {
-                "task": "songhive.tasks.payments.sweep_membership_expirations",
-                "schedule": crontab(minute=7),
-            },
-            "payments-expire-pending-orders": {
-                "task": "songhive.tasks.payments.expire_pending_orders",
-                "schedule": crontab(minute="*/30"),
-            },
-            # Provider-confirmed fulfillment: a missed checkout.session.completed
-            # webhook (e.g. a connect endpoint not subscribed to connected
-            # accounts) leaves paid orders pending; this polls the provider.
-            "payments-reconcile-pending-orders": {
-                "task": "songhive.tasks.payments.reconcile_pending_orders",
-                "schedule": crontab(minute="*/5"),
-            },
-            "payments-process-fulfillment-outbox": {
-                "task": "songhive.tasks.payments.process_fulfillment_outbox",
-                "schedule": crontab(minute="*/5"),
-            },
-            "payments-cleanup": {
-                "task": "songhive.tasks.payments.cleanup_payments",
-                "schedule": crontab(minute=41),
-            },
-        },
-    )
-    if remote_activity_prune_schedule:
-        app.conf.beat_schedule["prune-remote-activities"] = {
-            "task": "songhive.tasks.federation.prune_remote_activities",
-            "schedule": _parse_crontab(remote_activity_prune_schedule),
         }
-    app.autodiscover_tasks(["songhive.tasks"])
-    return app
+    )
+    return schedule
+
+
+def _payments_beat_schedule() -> dict:
+    """Payments safety nets. Webhooks drive the authoritative state, but
+    these sweeps bound the damage of a lost delivery: lapsed memberships
+    deactivate, stale checkouts close, queued guest deliveries retry, and
+    expired artifacts/samples free storage."""
+    return {
+        "payments-sweep-membership-expirations": {
+            "task": "songhive.tasks.payments.sweep_membership_expirations",
+            "schedule": crontab(minute=7),
+        },
+        "payments-expire-pending-orders": {
+            "task": "songhive.tasks.payments.expire_pending_orders",
+            "schedule": crontab(minute="*/30"),
+        },
+        # Provider-confirmed fulfillment: a missed checkout.session.completed
+        # webhook (e.g. a connect endpoint not subscribed to connected
+        # accounts) leaves paid orders pending; this polls the provider.
+        "payments-reconcile-pending-orders": {
+            "task": "songhive.tasks.payments.reconcile_pending_orders",
+            "schedule": crontab(minute="*/5"),
+        },
+        "payments-process-fulfillment-outbox": {
+            "task": "songhive.tasks.payments.process_fulfillment_outbox",
+            "schedule": crontab(minute="*/5"),
+        },
+        "payments-cleanup": {
+            "task": "songhive.tasks.payments.cleanup_payments",
+            "schedule": crontab(minute=41),
+        },
+    }
 
 
 (

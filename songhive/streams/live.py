@@ -238,18 +238,10 @@ async def ingest_iterator(
     """
     key = ingest_key(output_id)
     if start_id is None:
-        raw = await redis.get(ingest_header_key(output_id))
-        payload: dict[str, Any] = {}
-        if raw is not None:
-            try:
-                data = json.loads(raw)
-                if isinstance(data, dict):
-                    payload = data
-            except (TypeError, ValueError):
-                pass
-        if payload.get("ingest_id") != ingest_id or not payload.get("d"):
+        header = await _ingest_header_payload(redis, output_id, ingest_id)
+        if header is None:
             return
-        yield base64.b64decode(payload["d"])
+        yield base64.b64decode(header)
         last_id = "$"
     else:
         last_id = start_id
@@ -265,21 +257,9 @@ async def ingest_iterator(
             # read retry resolves the truth.
             await asyncio.sleep(0.5)
             continue
-        entries: list = []
-        if isinstance(result, dict):
-            entries = result.get(key) or []
-        elif result:
-            entries = [e for name, e in result if name == key]
-            entries = entries[0] if entries else []
+        entries = _xread_entries(result, key)
         if not entries:
-            # Read timeout: the live key is the broadcast's heartbeat — if it
-            # expired or was taken over, this feed is over even without an
-            # explicit ``end`` entry.
-            try:
-                state = await read_live_state(redis, output_id)
-            except Exception:
-                state = LiveState(ingest_id=ingest_id, user_id="", mime="", title="", started_at=0.0)
-            if state is None or state.ingest_id != ingest_id:
+            if not await _ingest_alive(redis, output_id, ingest_id):
                 return
             continue
         for entry_id, fields in entries:
@@ -293,3 +273,41 @@ async def ingest_iterator(
             data = fields.get("d")
             if data:
                 yield base64.b64decode(data)
+
+
+async def _ingest_header_payload(redis, output_id: str, ingest_id: str) -> Optional[str]:
+    """Replay the cached container header for a ``start_id=None`` tail."""
+    raw = await redis.get(ingest_header_key(output_id))
+    payload: dict[str, Any] = {}
+    if raw is not None:
+        try:
+            data = json.loads(raw)
+            if isinstance(data, dict):
+                payload = data
+        except (TypeError, ValueError):
+            pass
+    if payload.get("ingest_id") != ingest_id or not payload.get("d"):
+        return None
+    return payload["d"]
+
+
+def _xread_entries(result, key: str) -> list:
+    # redis-py returns {stream: entries}; fakeredis returns the
+    # raw [(stream, entries)] list — accept both.
+    if isinstance(result, dict):
+        return result.get(key) or []
+    if result:
+        entries = [e for name, e in result if name == key]
+        return entries[0] if entries else []
+    return []
+
+
+async def _ingest_alive(redis, output_id: str, ingest_id: str) -> bool:
+    # Read timeout: the live key is the broadcast's heartbeat — if it
+    # expired or was taken over, this feed is over even without an
+    # explicit ``end`` entry.
+    try:
+        state = await read_live_state(redis, output_id)
+    except Exception:
+        state = LiveState(ingest_id=ingest_id, user_id="", mime="", title="", started_at=0.0)
+    return state is not None and state.ingest_id == ingest_id

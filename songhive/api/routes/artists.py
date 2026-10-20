@@ -2,8 +2,7 @@
 Artist routes.
 """
 
-from datetime import datetime
-from typing import List, Optional, Set
+from typing import List, Optional
 
 from fastapi import (
     APIRouter,
@@ -17,7 +16,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...models.audit_log import AuditTargetType
@@ -36,45 +35,15 @@ from .._include import IncludeQuery, get_include
 from .._sorting import SortParams, get_sort
 from ..deps import get_current_user, get_current_user_optional, get_db, get_storage_service
 from ..middleware.rate_limit import rate_limit_account
-from ..responses import (
-    AlbumSummary,
-    TrackSummary,
-    _is_loaded,
-    build_album_summary,
-    build_track_summary,
-)
 from ._common import InitialsResponse, TagListRequest, enforce_editable_fields
 from ._images import remove_entity_image, upload_entity_image
+from .artist_responses import (
+    ArtistResponse,
+    _build_artist_response,
+)
 from .tracks import _enqueue_track_tag_sync
 
 router = APIRouter(prefix="/artists")
-
-
-class ArtistResponse(BaseModel):
-    """Public artist response."""
-
-    model_config = ConfigDict(from_attributes=True)
-
-    id: str
-    name: str
-    musicbrainz_id: Optional[str] = None
-    bio: Optional[str] = None
-    image_file_id: Optional[str] = None
-    image_url: Optional[str] = None
-    cover_url: Optional[str] = None
-    albums: Optional[List[AlbumSummary]] = None
-    tracks: Optional[List[TrackSummary]] = None
-    in_collection: bool = False
-    tags: List[str] = []
-    # Exposed so list consumers can interleave remote entities under the
-    # ``created_at``/``updated_at`` sort fields.
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    # Provider-declared list of locally-editable fields; ``None`` for local
-    # or unrestricted artists.
-    editable_fields: Optional[List[str]] = None
-    # Provider type backing the artist (e.g. ``"tidal"``); ``None`` when local.
-    external_provider_type: Optional[str] = None
 
 
 class ArtistUpdate(BaseModel):
@@ -89,99 +58,6 @@ class ArtistStatsResponse(BaseModel):
 
     track_count: int
     album_count: int
-
-
-async def _image_url(artist, storage: StorageService) -> Optional[str]:
-    """Resolve an artist image URL from a stored file or remote URL."""
-    if artist.image_file_id and artist.image_file:
-        return await storage.get_url(artist.image_file)
-    return artist.image_url
-
-
-async def _cover_url(artist, storage: StorageService) -> Optional[str]:
-    """Resolve an artist cover art URL from a stored file."""
-    if artist.cover_file_id and artist.cover_file:
-        return await storage.get_url(artist.cover_file)
-    return None
-
-
-def _artist_album_sort_key(album):
-    """Return a sort key for an artist's albums."""
-    return (album.release_year or 0, album.created_at)
-
-
-def _artist_track_sort_key(track):
-    """Return a sort key for an artist's tracks."""
-    return (track.album_id or "", track.disc_number or 0, track.track_number or 0, track.created_at)
-
-
-def _artist_tags(artist) -> List[str]:
-    """Return loaded tag names, avoiding a lazy load."""
-    if not _is_loaded(artist, "tags"):
-        return []
-    return [h.name for h in artist.tags]
-
-
-async def _build_artist_response(
-    artist,
-    storage: StorageService,
-    include: IncludeQuery,
-    saved_ids: Optional[Set[str]] = None,
-    user: Optional[User] = None,
-    db: Optional[AsyncSession] = None,
-) -> ArtistResponse:
-    """Build an ArtistResponse with optional nested summaries."""
-    albums = None
-    if "albums" in include:
-        artist_albums = getattr(artist, "albums", None)
-        if artist_albums is not None:
-            album_list: List[AlbumSummary] = []
-            for a in sorted(artist_albums, key=_artist_album_sort_key):
-                album_summary = await build_album_summary(a, storage)
-                if album_summary is not None:
-                    album_list.append(album_summary)
-            albums = album_list
-    tracks = None
-    if "tracks" in include:
-        artist_tracks = getattr(artist, "tracks", None)
-        if artist_tracks is not None:
-            track_list: List[TrackSummary] = []
-            policy_cache: dict = {}
-            for t in sorted(artist_tracks, key=_artist_track_sort_key):
-                track_summary = await build_track_summary(t, storage, user=user, session=db, policy_cache=policy_cache)
-                if track_summary is not None:
-                    track_list.append(track_summary)
-            tracks = track_list
-
-    editable_fields = None
-    external_provider_type = None
-    if db is not None:
-        from ...services.provider_catalog import (
-            editable_fields_for_entity,
-            provider_type_for_entity,
-        )
-
-        editable_fields = await editable_fields_for_entity(db, "artist", str(artist.id))
-        if editable_fields is not None:
-            external_provider_type = await provider_type_for_entity(db, "artist", str(artist.id))
-
-    return ArtistResponse(
-        id=str(artist.id),
-        name=artist.name,
-        musicbrainz_id=artist.musicbrainz_id,
-        bio=artist.bio,
-        image_file_id=artist.image_file_id,
-        image_url=await _image_url(artist, storage),
-        cover_url=await _cover_url(artist, storage),
-        albums=albums,
-        tracks=tracks,
-        in_collection=saved_ids is not None and str(artist.id) in saved_ids,
-        tags=_artist_tags(artist),
-        created_at=artist.created_at,
-        updated_at=artist.updated_at,
-        editable_fields=editable_fields,
-        external_provider_type=external_provider_type,
-    )
 
 
 @router.get("/", response_model=List[ArtistResponse])
@@ -557,7 +433,12 @@ async def delete_artist(
         raise HTTPException(status_code=exc.status_code, detail=exc.args[0]) from exc
 
     await db.commit()
+    _schedule_artist_unpublishes(background_tasks, request, result)
 
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _schedule_artist_unpublishes(background_tasks: BackgroundTasks, request: Request, result) -> None:
     for info in result.unpublish:
         if info.owner is not None and info.artist is not None:
             background_tasks.add_task(
@@ -568,8 +449,6 @@ async def delete_artist(
                 request.app.state.config,
                 info.federation_object_id,
             )
-
-    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post("/{artist_id}/tags", response_model=ArtistResponse)

@@ -461,6 +461,82 @@ async def export_album_m3u(
     return Response(content=document, media_type=m3u.M3U_MEDIA_TYPE, headers=headers)
 
 
+def _apply_album_scalars(album, body: AlbumUpdate) -> None:
+    if body.title is not None:
+        album.title = body.title
+    if body.release_year is not None:
+        album.release_year = body.release_year
+    if body.description is not None:
+        album.description = body.description
+
+
+async def _apply_album_genre(db: AsyncSession, album, album_id: str, body: AlbumUpdate) -> None:
+    if body.genre is None:
+        return
+    album.genre = body.genre
+    genre_names = split_genre_string(body.genre)
+    await set_genres_for_entity(db, "album", album_id, genre_names)
+    if genre_names:
+        tag_names = genres_to_tags(genre_names)
+        if tag_names:
+            await add_tags_to_entity(db, "album", album_id, tag_names, user_id=None)
+    await propagate_track_genres(db, album)
+
+
+async def _enqueue_album_tag_syncs(
+    db: AsyncSession,
+    album_id: str,
+    body: AlbumUpdate,
+    current_user: User,
+) -> None:
+    if any(field in body.model_dump(exclude_unset=True) for field in ("title", "release_year", "genre")):
+        track_ids = await music.get_track_ids_for_album(db, album_id, user=current_user)
+        for track_id in track_ids:
+            _enqueue_track_tag_sync(track_id)
+
+
+async def _audit_album_update(
+    db: AsyncSession,
+    request: Request,
+    album,
+    album_id: str,
+    visibility_track_changes: List[Tuple[Track, str]],
+    current_user: User,
+) -> None:
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="album.update",
+        target_type=AuditTargetType.ALBUM,
+        target_id=album_id,
+        details={
+            "title": album.title,
+            "release_year": album.release_year,
+            "genre": album.genre,
+            "visibility": album.visibility,
+            "visibility_tracks_updated": len(visibility_track_changes),
+        },
+        ip_address=client_ip(request),
+    )
+
+
+async def _apply_visibility_track_changes(
+    db: AsyncSession,
+    request: Request,
+    background_tasks: BackgroundTasks,
+    visibility_track_changes: List[Tuple[Track, str]],
+) -> None:
+    for track, previous_visibility in visibility_track_changes:
+        await _handle_visibility_changes(
+            track,
+            previous_visibility=previous_visibility,
+            request=request,
+            background_tasks=background_tasks,
+            db=db,
+            publish=True,
+        )
+
+
 @router.patch("/{album_id}", response_model=AlbumResponse)
 async def update_album(
     album_id: str,
@@ -490,41 +566,14 @@ async def update_album(
         (_ALBUM_UPDATE_FIELD_MAP.get(field, field) for field in body.model_fields_set),
     )
 
-    if body.title is not None:
-        album.title = body.title
-    if body.release_year is not None:
-        album.release_year = body.release_year
-    if body.description is not None:
-        album.description = body.description
-    if body.genre is not None:
-        album.genre = body.genre
-        genre_names = split_genre_string(body.genre)
-        await set_genres_for_entity(db, "album", album_id, genre_names)
-        if genre_names:
-            tag_names = genres_to_tags(genre_names)
-            if tag_names:
-                await add_tags_to_entity(db, "album", album_id, tag_names, user_id=None)
-        await propagate_track_genres(db, album)
+    _apply_album_scalars(album, body)
+    await _apply_album_genre(db, album, album_id, body)
     visibility_track_changes: List[Tuple[Track, str]] = []
     if body.visibility is not None:
         album.visibility = body.visibility.value
         visibility_track_changes = await music.propagate_album_visibility(db, album, current_user)
 
-    await audit.log_action(
-        db,
-        actor_id=current_user.id,
-        action="album.update",
-        target_type=AuditTargetType.ALBUM,
-        target_id=album_id,
-        details={
-            "title": album.title,
-            "release_year": album.release_year,
-            "genre": album.genre,
-            "visibility": album.visibility,
-            "visibility_tracks_updated": len(visibility_track_changes),
-        },
-        ip_address=client_ip(request),
-    )
+    await _audit_album_update(db, request, album, album_id, visibility_track_changes, current_user)
     # Drop the cached album document and the visibility-changed tracks'
     # dereference documents, deferred to this route's commit. The album
     # document itself embeds metadata/visibility; the tracks' object
@@ -535,20 +584,8 @@ async def update_album(
             doc_cache.invalidate_track(str(track.id), object_id=track.federation_object_id, session=db)
     await db.commit()
 
-    for track, previous_visibility in visibility_track_changes:
-        await _handle_visibility_changes(
-            track,
-            previous_visibility=previous_visibility,
-            request=request,
-            background_tasks=background_tasks,
-            db=db,
-            publish=True,
-        )
-
-    if any(field in body.model_dump(exclude_unset=True) for field in ("title", "release_year", "genre")):
-        track_ids = await music.get_track_ids_for_album(db, album_id, user=current_user)
-        for track_id in track_ids:
-            _enqueue_track_tag_sync(track_id)
+    await _apply_visibility_track_changes(db, request, background_tasks, visibility_track_changes)
+    await _enqueue_album_tag_syncs(db, album_id, body, current_user)
 
     album = await music.get_album(db, album_id, include=set(include.values) | {"artist"})
     saved_ids = await collection.saved_item_ids(db, current_user, "album", {album_id})

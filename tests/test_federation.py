@@ -17,6 +17,7 @@ from sqlalchemy import select
 from songhive.config.schema import SonghiveConfig
 from songhive.federation._common import get_tag_url
 from songhive.federation.activities import (
+    AudioActivityOptions,
     create_audio_activity,
     create_note_activity,
     create_update_actor_activity,
@@ -91,7 +92,7 @@ def test_create_audio_activity():
         track=track,
         artist=artist,
         domain="music.example.com",
-        description="A great track",
+        options=AudioActivityOptions(description="A great track"),
     )
     assert activity is not None
     assert activity["type"] == "Create"
@@ -801,7 +802,7 @@ def test_federation_app_inbox_rejects_blocked_domain(tmp_path, monkeypatch):
 
     app = create_app(config)
     mock_task = MagicMock()
-    monkeypatch.setattr("songhive.api.routes.federation.process_incoming", mock_task)
+    monkeypatch.setattr("songhive.api.routes.federation_social.process_incoming", mock_task)
 
     with TestClient(app) as client:
         # Blocked actors are rejected before the activity is queued.

@@ -219,7 +219,7 @@ class TestExternalStreamHandler(tornado.testing.AsyncHTTPTestCase):
         client.stream.return_value.__aenter__ = AsyncMock(return_value=resp)
         client.stream.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        return patch("songhive.streaming.handler.httpx.AsyncClient", return_value=client)
+        return patch("songhive.streaming.external_serving.httpx.AsyncClient", return_value=client)
 
     def test_external_iterator_stream(self):
         response = self.fetch(f"/api/v1/stream/{self.track.id}", headers=self._auth_header())

@@ -38,6 +38,7 @@ import json
 import logging
 import secrets
 import time
+from typing import Optional
 
 import tornado.iostream
 import tornado.web
@@ -210,46 +211,10 @@ class StreamMountHandler(tornado.web.RequestHandler):
             return
 
         slug = normalize_mount(mount)
-        async with get_session() as session:
-            resolved = await find_http_stream_output(session, slug)
-        if resolved is None:
-            self.set_status(404)
-            self.write({"error": "unknown mount"})
-            await self.finish()
+        preflight = await self._preflight(slug, send_body)
+        if preflight is None:
             return
-        _, cfg = resolved
-
-        if not self._token_ok(cfg):
-            self.set_status(403)
-            self.write({"error": "access denied"})
-            await self.finish()
-            return
-
-        meta_key = stream_meta_key(slug)
-        meta_raw = await redis.get(meta_key)
-        if meta_raw is None:
-            self.set_status(404)
-            self.write({"error": "stream is offline"})
-            await self.finish()
-            return
-        try:
-            meta = json.loads(meta_raw)
-        except (TypeError, ValueError):
-            meta = {}
-
-        # ICY metadata is opt-in: only interleave StreamTitle blocks for
-        # clients that asked for them — anything else must get pure audio.
-        icy_requested = self.request.headers.get("Icy-MetaData", "").strip() == "1"
-        self._icy_metaint = int(self._config.streams.http_stream_metaint_bytes) if icy_requested else 0
-        self._icy_audio_bytes = 0
-        self._icy_song = str(meta.get("song") or "")
-
-        max_listeners = self._config.streams.http_stream_max_listeners
-        if send_body and max_listeners and await self._listener_count(slug) >= max_listeners:
-            self.set_status(429)
-            self.write({"error": "too many listeners"})
-            await self.finish()
-            return
+        cfg, meta, meta_key = preflight
 
         self._set_stream_headers(meta, cfg)
         if not send_body:
@@ -263,114 +228,10 @@ class StreamMountHandler(tornado.web.RequestHandler):
         max_lag_ms = int(self._config.streams.http_stream_max_lag_seconds * 1000)
 
         try:
-            # Burst the newest buffered entries first so the client can start
-            # decoding immediately. The tail is newest-first; a previous run's
-            # ``end`` sentinel may sit inside it, and only data newer than that
-            # marker belongs to the live stream.
-            burst = self._config.streams.http_stream_burst_entries
-            tail = await redis.xrevrange(stream_key, count=burst) if burst else []
-            last_id: str = tail[0][0] if tail else "0"
-            now_ms = await self._now_ms(redis) if max_lag_ms else 0
-            live_tail: list[tuple[str, str]] = []
-            ended = False
-            meta_seen = False
-            for entry_id, fields in tail:
-                if fields.get("end"):
-                    ended = True
-                    break
-                meta_update = fields.get("m")
-                if meta_update:
-                    # Newest metadata entry in the burst seeds the title;
-                    # older ones are superseded.
-                    if not meta_seen:
-                        self._icy_song = _song_from_meta_entry(meta_update)
-                        meta_seen = True
-                    continue
-                data = fields.get("d")
-                if data and (not max_lag_ms or self._entry_age_ms(entry_id, now_ms) <= max_lag_ms):
-                    live_tail.append((entry_id, data))
-            if ended and not live_tail:
-                # Everything buffered predates the last end marker: the stream
-                # is over even though the meta key has not expired yet.
+            last_id = await self._burst_tail(redis, stream_key, max_lag_ms)
+            if last_id is None:
                 return
-            for _, data in reversed(live_tail):
-                self._write_audio(base64.b64decode(data))
-            await self.flush()
-
-            listener_refreshed_at = time.monotonic()
-            xread_failures = 0
-            while not self._finished:
-                try:
-                    result = await redis.xread(
-                        {stream_key: last_id},
-                        count=self._XREAD_COUNT,
-                        block=self._XREAD_BLOCK_MS,
-                    )
-                    xread_failures = 0
-                except Exception:
-                    # A transient Redis error must not kill an otherwise
-                    # healthy listener; only give up after a few in a row.
-                    xread_failures += 1
-                    if xread_failures >= self._XREAD_MAX_FAILURES:
-                        raise
-                    await asyncio.sleep(0.5)
-                    continue
-                # redis-py returns {stream: entries}; fakeredis returns the
-                # raw [(stream, entries)] list — accept both.
-                entries: list = []
-                if isinstance(result, dict):
-                    entries = result.get(stream_key) or []
-                elif result:
-                    entries = [e for name, e in result if name == stream_key]
-                    entries = entries[0] if entries else []
-                if not entries:
-                    # Read timeout: drop the connection if the mount went
-                    # offline; a failed check counts as "still live" — the
-                    # next read resolves the truth.
-                    try:
-                        offline = not await redis.exists(meta_key)
-                    except Exception:
-                        offline = False
-                    if offline:
-                        return
-                else:
-                    now_ms = await self._now_ms(redis) if max_lag_ms else 0
-                    dropped = 0
-                    for entry_id, fields in entries:
-                        last_id = entry_id
-                        if fields.get("end"):
-                            return
-                        meta_update = fields.get("m")
-                        if meta_update:
-                            self._icy_song = _song_from_meta_entry(meta_update)
-                            continue
-                        data = fields.get("d")
-                        if not data:
-                            continue
-                        if max_lag_ms and self._entry_age_ms(entry_id, now_ms) > max_lag_ms:
-                            # The listener fell behind: skip stale audio so it
-                            # jumps forward instead of accumulating latency.
-                            dropped += 1
-                            continue
-                        self._write_audio(base64.b64decode(data))
-                        await self.flush()
-                    if dropped:
-                        logger.info(
-                            "Dropped %d stale chunks for lagging listener on mount %s",
-                            dropped,
-                            slug,
-                        )
-                # Refresh listener presence on a timer, not only on read
-                # timeouts — while audio flows continuously the key would
-                # otherwise expire mid-listen, making the driver count zero
-                # listeners (idle shutdown) and the directory show an empty
-                # mount.
-                if time.monotonic() - listener_refreshed_at >= self._LISTENER_REFRESH_SECONDS:
-                    try:
-                        await redis.set(listener_key, "1", ex=self._LISTENER_TTL_SECONDS)
-                        listener_refreshed_at = time.monotonic()
-                    except Exception:
-                        pass
+            await self._listen_loop(redis, slug, stream_key, meta_key, listener_key, last_id, max_lag_ms)
         except tornado.iostream.StreamClosedError:
             pass
         except Exception:
@@ -385,3 +246,178 @@ class StreamMountHandler(tornado.web.RequestHandler):
                     await self.finish()
                 except tornado.iostream.StreamClosedError:
                     pass
+
+    async def _preflight(self, slug: str, send_body: bool):
+        """Validate the request; error responses return ``None``."""
+        async with get_session() as session:
+            resolved = await find_http_stream_output(session, slug)
+        if resolved is None:
+            return await self._reject(404, "unknown mount")
+        _, cfg = resolved
+
+        if not self._token_ok(cfg):
+            return await self._reject(403, "access denied")
+
+        meta_raw = await self._redis.get(stream_meta_key(slug))
+        if meta_raw is None:
+            return await self._reject(404, "stream is offline")
+        try:
+            meta = json.loads(meta_raw)
+        except (TypeError, ValueError):
+            meta = {}
+
+        # ICY metadata is opt-in: only interleave StreamTitle blocks for
+        # clients that asked for them — anything else must get pure audio.
+        icy_requested = self.request.headers.get("Icy-MetaData", "").strip() == "1"
+        self._icy_metaint = int(self._config.streams.http_stream_metaint_bytes) if icy_requested else 0
+        self._icy_audio_bytes = 0
+        self._icy_song = str(meta.get("song") or "")
+
+        max_listeners = self._config.streams.http_stream_max_listeners
+        if send_body and max_listeners and await self._listener_count(slug) >= max_listeners:
+            return await self._reject(429, "too many listeners")
+
+        return cfg, meta, stream_meta_key(slug)
+
+    async def _reject(self, status: int, error: str):
+        self.set_status(status)
+        self.write({"error": error})
+        await self.finish()
+        return None
+
+    async def _burst_tail(self, redis, stream_key: str, max_lag_ms: int) -> Optional[str]:
+        """Burst the newest buffered entries; ``None`` when the stream ended.
+
+        The tail is newest-first; a previous run's ``end`` sentinel may sit
+        inside it, and only data newer than that marker belongs to the live
+        stream.
+        """
+        burst = self._config.streams.http_stream_burst_entries
+        tail = await redis.xrevrange(stream_key, count=burst) if burst else []
+        last_id: str = tail[0][0] if tail else "0"
+        now_ms = await self._now_ms(redis) if max_lag_ms else 0
+        live_tail: list[tuple[str, str]] = []
+        ended = False
+        meta_seen = False
+        for entry_id, fields in tail:
+            if fields.get("end"):
+                ended = True
+                break
+            meta_update = fields.get("m")
+            if meta_update:
+                # Newest metadata entry in the burst seeds the title;
+                # older ones are superseded.
+                if not meta_seen:
+                    self._icy_song = _song_from_meta_entry(meta_update)
+                    meta_seen = True
+                continue
+            data = fields.get("d")
+            if data and (not max_lag_ms or self._entry_age_ms(entry_id, now_ms) <= max_lag_ms):
+                live_tail.append((entry_id, data))
+        if ended and not live_tail:
+            # Everything buffered predates the last end marker: the stream
+            # is over even though the meta key has not expired yet.
+            return None
+        for _, data in reversed(live_tail):
+            self._write_audio(base64.b64decode(data))
+        await self.flush()
+        return last_id
+
+    async def _listen_loop(
+        self,
+        redis,
+        slug: str,
+        stream_key: str,
+        meta_key: str,
+        listener_key: str,
+        last_id: str,
+        max_lag_ms: int,
+    ) -> None:
+        listener_refreshed_at = time.monotonic()
+        xread_failures = 0
+        while not self._finished:
+            try:
+                result = await redis.xread(
+                    {stream_key: last_id},
+                    count=self._XREAD_COUNT,
+                    block=self._XREAD_BLOCK_MS,
+                )
+                xread_failures = 0
+            except Exception:
+                # A transient Redis error must not kill an otherwise
+                # healthy listener; only give up after a few in a row.
+                xread_failures += 1
+                if xread_failures >= self._XREAD_MAX_FAILURES:
+                    raise
+                await asyncio.sleep(0.5)
+                continue
+            last_id, drained = await self._drain_entries(result, stream_key, meta_key, last_id, max_lag_ms, slug)
+            if drained is None:
+                return
+            # Refresh listener presence on a timer, not only on read
+            # timeouts — while audio flows continuously the key would
+            # otherwise expire mid-listen, making the driver count zero
+            # listeners (idle shutdown) and the directory show an empty
+            # mount.
+            if time.monotonic() - listener_refreshed_at >= self._LISTENER_REFRESH_SECONDS:
+                try:
+                    await redis.set(listener_key, "1", ex=self._LISTENER_TTL_SECONDS)
+                    listener_refreshed_at = time.monotonic()
+                except Exception:
+                    pass
+
+    async def _drain_entries(
+        self,
+        result,
+        stream_key: str,
+        meta_key: str,
+        last_id: str,
+        max_lag_ms: int,
+        slug: str,
+    ):
+        """Process one xread batch; ``(last_id, True)``, or ``(last_id, None)`` to stop."""
+        # redis-py returns {stream: entries}; fakeredis returns the
+        # raw [(stream, entries)] list — accept both.
+        entries: list = []
+        if isinstance(result, dict):
+            entries = result.get(stream_key) or []
+        elif result:
+            entries = [e for name, e in result if name == stream_key]
+            entries = entries[0] if entries else []
+        if not entries:
+            # Read timeout: drop the connection if the mount went
+            # offline; a failed check counts as "still live" — the
+            # next read resolves the truth.
+            try:
+                offline = not await self._redis.exists(meta_key)
+            except Exception:
+                offline = False
+            return last_id, None if offline else True
+
+        now_ms = await self._now_ms(self._redis) if max_lag_ms else 0
+        dropped = 0
+        for entry_id, fields in entries:
+            last_id = entry_id
+            if fields.get("end"):
+                return last_id, None
+            meta_update = fields.get("m")
+            if meta_update:
+                self._icy_song = _song_from_meta_entry(meta_update)
+                continue
+            data = fields.get("d")
+            if not data:
+                continue
+            if max_lag_ms and self._entry_age_ms(entry_id, now_ms) > max_lag_ms:
+                # The listener fell behind: skip stale audio so it
+                # jumps forward instead of accumulating latency.
+                dropped += 1
+                continue
+            self._write_audio(base64.b64decode(data))
+            await self.flush()
+        if dropped:
+            logger.info(
+                "Dropped %d stale chunks for lagging listener on mount %s",
+                dropped,
+                slug,
+            )
+        return last_id, True

@@ -247,124 +247,150 @@ async def _can_access(  # pylint: disable=too-many-return-statements,too-many-br
     if share_token is not None and await sharing.validate_share_token(session, item_type, item_id, share_token):
         return True
 
-    # Rule 8: tracks inherit access from the album they belong to.
-    if item_type == "track" and depth < _MAX_DERIVED_DEPTH:
-        album_id = getattr(item, "album_id", None)
-        if album_id is not None and await _can_access(
+    # Rules 8/10/11: tracks inherit access from their containers.
+    if (
+        item_type == "track"
+        and depth < _MAX_DERIVED_DEPTH
+        and await _track_derived_access(session, user, item, share_token, depth)
+    ):
+        return True
+
+    # Rule 9: derived file access through owning tracks, albums, artists,
+    # libraries, or playlists.
+    if (
+        item_type == "file"
+        and depth < _MAX_DERIVED_DEPTH
+        and await _file_derived_access(session, user, item_id, share_token, depth)
+    ):
+        return True
+
+    return False
+
+
+async def _check_parents(
+    session: AsyncSession,
+    user: Optional[User],
+    parent_type: str,
+    parent_ids,
+    share_token: Optional[str],
+    depth: int,
+) -> bool:
+    # SIM110 doesn't apply: any() can't lazily consume awaited coroutines,
+    # and eager evaluation would run every access check instead of
+    # short-circuiting on the first match.
+    for parent_id in parent_ids:  # noqa: SIM110
+        if await _can_access(
             session,
             user,
-            "album",
-            str(album_id),
+            parent_type,
+            str(parent_id),
             share_token=share_token,
             depth=depth + 1,
         ):
             return True
-
-    # Rule 10: tracks inherit access from playlists they belong to.
-    if item_type == "track" and depth < _MAX_DERIVED_DEPTH:
-        playlist_ids = (
-            (await session.execute(select(PlaylistTrack.playlist_id).where(PlaylistTrack.track_id == item.id)))
-            .scalars()
-            .all()
-        )
-        for playlist_id in playlist_ids:
-            if await _can_access(
-                session,
-                user,
-                "playlist",
-                str(playlist_id),
-                share_token=share_token,
-                depth=depth + 1,
-            ):
-                return True
-
-    # Rule 11: tracks inherit access from libraries they belong to.
-    if item_type == "track" and depth < _MAX_DERIVED_DEPTH:
-        library_ids = (
-            (await session.execute(select(LibraryTrack.library_id).where(LibraryTrack.track_id == item.id)))
-            .scalars()
-            .all()
-        )
-        for library_id in library_ids:
-            if await _can_access(
-                session,
-                user,
-                "library",
-                str(library_id),
-                share_token=share_token,
-                depth=depth + 1,
-            ):
-                return True
-
-    # Rule 9: derived file access through owning tracks, albums, artists,
-    # libraries, or playlists.
-    if item_type == "file" and depth < _MAX_DERIVED_DEPTH:
-        track_ids = (await session.execute(select(Track.id).where(Track.audio_file_id == item_id))).scalars().all()
-        track_image_ids = (
-            (await session.execute(select(Track.id).where(Track.image_file_id == item_id))).scalars().all()
-        )
-        album_ids = (await session.execute(select(Album.id).where(Album.cover_file_id == item_id))).scalars().all()
-        artist_image_ids = (
-            (await session.execute(select(Artist.id).where(Artist.image_file_id == item_id))).scalars().all()
-        )
-        artist_cover_ids = (
-            (await session.execute(select(Artist.id).where(Artist.cover_file_id == item_id))).scalars().all()
-        )
-        library_image_ids = (
-            (await session.execute(select(Library.id).where(Library.image_file_id == item_id))).scalars().all()
-        )
-        library_cover_ids = (
-            (await session.execute(select(Library.id).where(Library.cover_file_id == item_id))).scalars().all()
-        )
-        playlist_image_ids = (
-            (await session.execute(select(Playlist.id).where(Playlist.image_file_id == item_id))).scalars().all()
-        )
-        playlist_cover_ids = (
-            (await session.execute(select(Playlist.id).where(Playlist.cover_file_id == item_id))).scalars().all()
-        )
-
-        # Images attached to an album or artist are also surfaced through that
-        # entity's content: sharing a track reveals its album cover and artist
-        # image, and sharing an album reveals the album artist's images.
-        album_track_ids: Sequence[str] = ()
-        if album_ids:
-            album_track_ids = (
-                (await session.execute(select(Track.id).where(Track.album_id.in_(album_ids)))).scalars().all()
-            )
-        artist_ids = set(artist_image_ids) | set(artist_cover_ids)
-        artist_track_ids: Sequence[str] = ()
-        artist_album_ids: Sequence[str] = ()
-        if artist_ids:
-            artist_track_ids = (
-                (await session.execute(select(Track.id).where(Track.artist_id.in_(artist_ids)))).scalars().all()
-            )
-            artist_album_ids = (
-                (await session.execute(select(Album.id).where(Album.artist_id.in_(artist_ids)))).scalars().all()
-            )
-
-        derived_item_ids = (
-            [
-                ("track", str(i))
-                for i in set(track_ids) | set(track_image_ids) | set(album_track_ids) | set(artist_track_ids)
-            ]
-            + [("album", str(i)) for i in set(album_ids) | set(artist_album_ids)]
-            + [("artist", str(i)) for i in artist_ids]
-            + [("library", str(i)) for i in set(library_image_ids) | set(library_cover_ids)]
-            + [("playlist", str(i)) for i in set(playlist_image_ids) | set(playlist_cover_ids)]
-        )
-
-        for derived_type, derived_id in derived_item_ids:
-            if await _can_access(
-                session,
-                user,
-                derived_type,
-                derived_id,
-                share_token=share_token,
-                depth=depth + 1,
-            ):
-                return True
-
     return False
+
+
+async def _track_derived_access(
+    session: AsyncSession,
+    user: Optional[User],
+    item,
+    share_token: Optional[str],
+    depth: int,
+) -> bool:
+    """Tracks inherit access from their album, playlists, and libraries."""
+    album_id = getattr(item, "album_id", None)
+    if album_id is not None and await _can_access(
+        session,
+        user,
+        "album",
+        str(album_id),
+        share_token=share_token,
+        depth=depth + 1,
+    ):
+        return True
+
+    playlist_ids = (
+        (await session.execute(select(PlaylistTrack.playlist_id).where(PlaylistTrack.track_id == item.id)))
+        .scalars()
+        .all()
+    )
+    if await _check_parents(session, user, "playlist", playlist_ids, share_token, depth):
+        return True
+
+    library_ids = (
+        (await session.execute(select(LibraryTrack.library_id).where(LibraryTrack.track_id == item.id))).scalars().all()
+    )
+    return await _check_parents(session, user, "library", library_ids, share_token, depth)
+
+
+async def _file_derived_access(
+    session: AsyncSession,
+    user: Optional[User],
+    item_id: str,
+    share_token: Optional[str],
+    depth: int,
+) -> bool:
+    """Files inherit access from the entities that reference them."""
+    track_ids = (await session.execute(select(Track.id).where(Track.audio_file_id == item_id))).scalars().all()
+    track_image_ids = (await session.execute(select(Track.id).where(Track.image_file_id == item_id))).scalars().all()
+    album_ids = (await session.execute(select(Album.id).where(Album.cover_file_id == item_id))).scalars().all()
+    artist_ids = await _file_artist_ids(session, item_id)
+    library_ids = await _file_entity_ids(session, Library, item_id)
+    playlist_ids = await _file_entity_ids(session, Playlist, item_id)
+
+    # Images attached to an album or artist are also surfaced through that
+    # entity's content: sharing a track reveals its album cover and artist
+    # image, and sharing an album reveals the album artist's images.
+    album_track_ids: Sequence[str] = ()
+    if album_ids:
+        album_track_ids = (await session.execute(select(Track.id).where(Track.album_id.in_(album_ids)))).scalars().all()
+    artist_track_ids: Sequence[str] = ()
+    artist_album_ids: Sequence[str] = ()
+    if artist_ids:
+        artist_track_ids = (
+            (await session.execute(select(Track.id).where(Track.artist_id.in_(artist_ids)))).scalars().all()
+        )
+        artist_album_ids = (
+            (await session.execute(select(Album.id).where(Album.artist_id.in_(artist_ids)))).scalars().all()
+        )
+
+    derived_item_ids = (
+        [
+            ("track", str(i))
+            for i in set(track_ids) | set(track_image_ids) | set(album_track_ids) | set(artist_track_ids)
+        ]
+        + [("album", str(i)) for i in set(album_ids) | set(artist_album_ids)]
+        + [("artist", str(i)) for i in artist_ids]
+        + [("library", str(i)) for i in library_ids]
+        + [("playlist", str(i)) for i in playlist_ids]
+    )
+
+    # Same as _check_parents: awaited checks must short-circuit, which
+    # any() over a comprehension cannot express.
+    for derived_type, derived_id in derived_item_ids:  # noqa: SIM110
+        if await _can_access(
+            session,
+            user,
+            derived_type,
+            derived_id,
+            share_token=share_token,
+            depth=depth + 1,
+        ):
+            return True
+    return False
+
+
+async def _file_artist_ids(session: AsyncSession, item_id: str) -> set:
+    image_ids = (await session.execute(select(Artist.id).where(Artist.image_file_id == item_id))).scalars().all()
+    cover_ids = (await session.execute(select(Artist.id).where(Artist.cover_file_id == item_id))).scalars().all()
+    return set(image_ids) | set(cover_ids)
+
+
+async def _file_entity_ids(session: AsyncSession, model, item_id: str) -> set:
+    image_ids = (await session.execute(select(model.id).where(model.image_file_id == item_id))).scalars().all()
+    cover_ids = (await session.execute(select(model.id).where(model.cover_file_id == item_id))).scalars().all()
+    return set(image_ids) | set(cover_ids)
 
 
 async def _can_access_user(session: AsyncSession, user: Optional[User], item_id: str) -> bool:

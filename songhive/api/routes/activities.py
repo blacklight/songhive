@@ -394,6 +394,88 @@ def _is_activity_author(activity: Activity, user: User) -> bool:
     return activity.owner_user_id is not None and str(activity.owner_user_id) == str(user.id)
 
 
+async def _resolve_import_plan(
+    db: AsyncSession,
+    activity: Activity,
+    body: ActivityUpdate,
+    fields: set,
+    current_user: User,
+):
+    """Validate the ``audio_import`` plan for an activity edit.
+
+    ``audio_import`` imports the post's audio file attachments into the
+    editor's library; it applies to the edited ``media_ids`` when given,
+    else the activity's current file attachments. The plan is validated
+    up front so a bad ``library_id`` fails before the activity mutates.
+    """
+    if body.audio_import is None:
+        return None
+    if "media_ids" in fields:
+        import_media_ids = body.media_ids or []
+    else:
+        obj = activity.payload.get("object") if isinstance(activity.payload, dict) else None
+        import_media_ids, _ = activity_service._attachment_source_ids(obj) if isinstance(obj, dict) else ([], [])
+    return await plan_audio_import(db, current_user, import_media_ids, body.audio_import)
+
+
+async def _apply_content_update(
+    db: AsyncSession,
+    activity: Activity,
+    body: ActivityUpdate,
+    fields: set,
+    config: SonghiveConfig,
+    current_user: User,
+) -> None:
+    update_kwargs: dict = {
+        "config": config,
+        "editor": current_user,
+        "audience": body.visibility,
+    }
+    if "content" in fields:
+        update_kwargs["content_source"] = body.content
+    if "content_type" in fields:
+        update_kwargs["content_type"] = body.content_type
+    if "language" in fields:
+        update_kwargs["language"] = body.language
+    if "media_ids" in fields:
+        update_kwargs["media_ids"] = body.media_ids
+    if "track_ids" in fields:
+        update_kwargs["track_ids"] = body.track_ids
+    await activity_service.update_activity(db, activity, **update_kwargs)
+
+
+async def _audit_activity_update(
+    db: AsyncSession,
+    request: Request,
+    activity: Activity,
+    body: ActivityUpdate,
+    fields: set,
+    old_visibility: str,
+    current_user: User,
+) -> None:
+    details: dict = {"entity_type": activity.entity_type, "entity_id": activity.entity_id}
+    if body.visibility is not None:
+        details["visibility"] = {"old": old_visibility, "new": activity.visibility}
+    if "content" in fields:
+        details["content_changed"] = True
+    if "content_type" in fields:
+        details["content_type"] = activity.content_type
+    if "language" in fields:
+        details["language"] = activity.language
+    if fields & {"media_ids", "track_ids"}:
+        details["attachments_changed"] = True
+
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action="activity.update",
+        target_type=AuditTargetType.ACTIVITY,
+        target_id=str(activity.id),
+        details=details,
+        ip_address=client_ip(request),
+    )
+
+
 @router.get("/lookup", response_model=ActivityResponse)
 async def lookup_activity(
     request: Request,
@@ -483,36 +565,9 @@ async def update_activity(
     fields = body.model_fields_set
     content_fields = {"content", "content_type", "language", "media_ids", "track_ids"}
 
-    # ``audio_import`` imports the post's audio file attachments into the
-    # editor's library; it applies to the edited ``media_ids`` when given,
-    # else the activity's current file attachments. The plan is validated
-    # up front so a bad ``library_id`` fails before the activity mutates.
-    import_plan = None
-    if body.audio_import is not None:
-        if "media_ids" in fields:
-            import_media_ids = body.media_ids or []
-        else:
-            obj = activity.payload.get("object") if isinstance(activity.payload, dict) else None
-            import_media_ids, _ = activity_service._attachment_source_ids(obj) if isinstance(obj, dict) else ([], [])
-        import_plan = await plan_audio_import(db, current_user, import_media_ids, body.audio_import)
-
+    import_plan = await _resolve_import_plan(db, activity, body, fields, current_user)
     if fields & content_fields:
-        update_kwargs: dict = {
-            "config": config,
-            "editor": current_user,
-            "audience": body.visibility,
-        }
-        if "content" in fields:
-            update_kwargs["content_source"] = body.content
-        if "content_type" in fields:
-            update_kwargs["content_type"] = body.content_type
-        if "language" in fields:
-            update_kwargs["language"] = body.language
-        if "media_ids" in fields:
-            update_kwargs["media_ids"] = body.media_ids
-        if "track_ids" in fields:
-            update_kwargs["track_ids"] = body.track_ids
-        await activity_service.update_activity(db, activity, **update_kwargs)
+        await _apply_content_update(db, activity, body, fields, config, current_user)
     if body.visibility is not None:
         # cascade_visibility_update resolves the entity and enforces
         # containment internally (404 missing entity, 422 violation).
@@ -528,28 +583,7 @@ async def update_activity(
             logger.exception("Failed to fan out update for activity %s: %s: %s", activity_id, type(e), e)
 
     await apply_audio_import(db, storage, current_user, import_plan)
-
-    details: dict = {"entity_type": activity.entity_type, "entity_id": activity.entity_id}
-    if body.visibility is not None:
-        details["visibility"] = {"old": old_visibility, "new": activity.visibility}
-    if "content" in fields:
-        details["content_changed"] = True
-    if "content_type" in fields:
-        details["content_type"] = activity.content_type
-    if "language" in fields:
-        details["language"] = activity.language
-    if fields & {"media_ids", "track_ids"}:
-        details["attachments_changed"] = True
-
-    await audit.log_action(
-        db,
-        actor_id=current_user.id,
-        action="activity.update",
-        target_type=AuditTargetType.ACTIVITY,
-        target_id=str(activity.id),
-        details=details,
-        ip_address=client_ip(request),
-    )
+    await _audit_activity_update(db, request, activity, body, fields, old_visibility, current_user)
 
     await db.refresh(activity, ["mentions"])
     profile_map = await activity_service.resolve_source_actor_profiles(db, [activity], config)
@@ -804,6 +838,42 @@ async def unboost_activity(
     return await _unreact(activity_id, "announce", "activity.unboost", request, current_user, db)
 
 
+async def _finalize_new_activity(
+    db: AsyncSession,
+    request: Request,
+    activity: Activity,
+    created: Activity,
+    action: str,
+    id_key: str,
+    current_user: User,
+    config: SonghiveConfig,
+) -> ActivityResponse:
+    """Audit, commit, and render a freshly created reply/quote activity."""
+    await audit.log_action(
+        db,
+        actor_id=current_user.id,
+        action=action,
+        target_type=AuditTargetType.ACTIVITY,
+        target_id=str(activity.id),
+        details={
+            "entity_type": activity.entity_type,
+            "entity_id": activity.entity_id,
+            id_key: str(created.id),
+        },
+        ip_address=client_ip(request),
+    )
+    await db.commit()
+    await db.refresh(created, ["mentions"])
+
+    profile_map = await activity_service.resolve_source_actor_profiles(db, [created], config)
+    summary_map = await activity_service.resolve_interaction_summaries(db, [created], current_user, config)
+    return _build_activity_response(
+        created,
+        profile_map.get(str(created.id), activity_service.ActorProfile()),
+        summary_map.get(str(created.id)),
+    )
+
+
 @router.post(
     "/{activity_id}/reply",
     response_model=ActivityResponse,
@@ -852,28 +922,8 @@ async def reply_activity(
         track_ids=body.track_ids,
     )
     await apply_audio_import(db, storage, current_user, import_plan)
-    await audit.log_action(
-        db,
-        actor_id=current_user.id,
-        action="activity.reply",
-        target_type=AuditTargetType.ACTIVITY,
-        target_id=str(activity.id),
-        details={
-            "entity_type": activity.entity_type,
-            "entity_id": activity.entity_id,
-            "reply_id": str(reply.id),
-        },
-        ip_address=client_ip(request),
-    )
-    await db.commit()
-    await db.refresh(reply, ["mentions"])
-
-    profile_map = await activity_service.resolve_source_actor_profiles(db, [reply], config)
-    summary_map = await activity_service.resolve_interaction_summaries(db, [reply], current_user, config)
-    return _build_activity_response(
-        reply,
-        profile_map.get(str(reply.id), activity_service.ActorProfile()),
-        summary_map.get(str(reply.id)),
+    return await _finalize_new_activity(
+        db, request, activity, reply, "activity.reply", "reply_id", current_user, config
     )
 
 
@@ -929,28 +979,8 @@ async def quote_activity(
         track_ids=body.track_ids,
     )
     await apply_audio_import(db, storage, current_user, import_plan)
-    await audit.log_action(
-        db,
-        actor_id=current_user.id,
-        action="activity.quote",
-        target_type=AuditTargetType.ACTIVITY,
-        target_id=str(activity.id),
-        details={
-            "entity_type": activity.entity_type,
-            "entity_id": activity.entity_id,
-            "quote_id": str(quote.id),
-        },
-        ip_address=client_ip(request),
-    )
-    await db.commit()
-    await db.refresh(quote, ["mentions"])
-
-    profile_map = await activity_service.resolve_source_actor_profiles(db, [quote], config)
-    summary_map = await activity_service.resolve_interaction_summaries(db, [quote], current_user, config)
-    return _build_activity_response(
-        quote,
-        profile_map.get(str(quote.id), activity_service.ActorProfile()),
-        summary_map.get(str(quote.id)),
+    return await _finalize_new_activity(
+        db, request, activity, quote, "activity.quote", "quote_id", current_user, config
     )
 
 

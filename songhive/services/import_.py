@@ -421,34 +421,27 @@ async def _maybe_store_cover_art(
 
 async def _create_track_record(
     session: AsyncSession,
-    *,
-    metadata: AudioMetadata,
-    stored_file: StoredFile,
+    params: "_TrackImportParams",
     artist: Artist,
     album: Optional[Album],
-    filename: str,
-    owner_id: Optional[str],
-    visibility: str,
-    source: str,
-    content_type: str,
-    description: Optional[str] = None,
 ) -> Track:
     """Create and persist a Track record from extracted metadata."""
+    metadata = params.metadata
     track = Track(
-        title=metadata.title or Path(filename).stem,
+        title=metadata.title or Path(params.filename).stem,
         artist_id=str(artist.id),
         album_id=album.id if album else None,
         track_number=metadata.track_number,
         disc_number=metadata.disc_number,
         duration=metadata.duration,
         genre=metadata.genre,
-        description=(description or "").strip() or None,
-        audio_file_id=str(stored_file.id),
+        description=(params.description or "").strip() or None,
+        audio_file_id=str(params.stored_file.id),
         raw_metadata=metadata.raw_tags,
-        source=source,
-        owner_id=owner_id,
-        visibility=visibility,
-        audio_mime_type=metadata.mimetype or content_type,
+        source=params.source,
+        owner_id=params.owner_id,
+        visibility=params.visibility,
+        audio_mime_type=metadata.mimetype or params.content_type,
     )
     session.add(track)
     await session.flush()
@@ -474,7 +467,7 @@ async def _register_upload_and_library_track(
     library_id: str,
     owner_id: Optional[str],
     metadata: AudioMetadata,
-    content_type: str,
+    content_type: Optional[str],
 ) -> Tuple[Upload, LibraryTrack]:
     """Create the Upload and LibraryTrack records that link a track to a library."""
     upload = Upload(
@@ -625,38 +618,29 @@ async def import_stored_audio_files(
 
 
 async def _store_duplicate_token(
-    redis: Redis,
-    sha256: str,
+    ctx: "_DuplicateContext",
     external_track_ids: List[str],
     display_infos: List[Dict[str, str]],
-    user_id: Optional[str],
-    stored_file_id: str,
-    library_id: str,
-    visibility: str,
-    filename: Optional[str],
-    content_type: str,
-    stored_file_was_duplicate: bool,
-    description: Optional[str] = None,
-    publish: bool = False,
 ) -> str:
     """Store a short-lived duplicate-resolution token in Redis and return it."""
     token = str(uuid.uuid4())
     key = f"external_duplicate:{token}"
     payload = {
-        "sha256": sha256,
+        "sha256": ctx.stored_file.sha256,
         "external_track_ids": external_track_ids,
         "display_infos": display_infos,
-        "user_id": user_id,
-        "stored_file_id": stored_file_id,
-        "library_id": library_id,
-        "visibility": visibility,
-        "filename": filename,
-        "content_type": content_type,
-        "stored_file_was_duplicate": stored_file_was_duplicate,
-        "description": description,
-        "publish": publish,
+        "user_id": ctx.owner_id,
+        "stored_file_id": str(ctx.stored_file.id),
+        "library_id": ctx.library_id,
+        "visibility": ctx.visibility,
+        "filename": ctx.filename,
+        "content_type": ctx.content_type,
+        "stored_file_was_duplicate": ctx.stored_file_was_duplicate,
+        "description": ctx.description,
+        "publish": ctx.publish,
     }
-    await redis.setex(key, 600, json.dumps(payload))
+    assert ctx.redis is not None
+    await ctx.redis.setex(key, 600, json.dumps(payload))
     return token
 
 
@@ -709,27 +693,19 @@ async def import_audio_file(
     :raises DuplicateTrackError: When a duplicate is detected and ``force`` is
         ``False``.
     """
-    if stored_file is None:
-        if file is None or filename is None:
-            raise ValueError("Provide either a file and filename or a stored_file")
-        if not content_type:
-            content_type = _guess_content_type(filename)
-        stored_file, stored_file_was_duplicate = await _store_uploaded_file(
-            session,
-            storage_service,
-            file,
-            content_type,
-            filename,
-            owner_id,
-            visibility,
+    stored_file, stored_file_was_duplicate, filename, content_type = await _resolve_stored_file(
+        session,
+        storage_service,
+        _FileSource(
+            file=file,
+            stored_file=stored_file,
+            filename=filename,
+            content_type=content_type,
+            owner_id=owner_id,
+            visibility=visibility,
             enforce_quota=enforce_quota,
-        )
-    else:
-        if content_type is None:
-            content_type = stored_file.content_type
-        if filename is None:
-            filename = stored_file.original_filename or "audio"
-        stored_file_was_duplicate = False
+        ),
+    )
 
     if stored_file_was_duplicate and not force:
         existing = await _find_duplicate_by_bytes(session, str(stored_file.id), owner_id)
@@ -739,63 +715,25 @@ async def import_audio_file(
     if not stored_file.sha256:
         raise RuntimeError("Stored file has no audio hash")
 
-    external_duplicates = await find_external_duplicate(session, stored_file.sha256)
-    if external_duplicates:
-        if external_duplicate_action is None:
-            display_infos = _build_external_display_infos(external_duplicates)
-            external_track_ids = [str(et.id) for et in external_duplicates]
-            token: Optional[str] = None
-            if redis is not None:
-                token = await _store_duplicate_token(
-                    redis,
-                    stored_file.sha256,
-                    external_track_ids,
-                    display_infos,
-                    owner_id,
-                    str(stored_file.id),
-                    library_id,
-                    visibility,
-                    filename,
-                    content_type,
-                    stored_file_was_duplicate,
-                    description=description,
-                    publish=publish,
-                )
-            existing_track_id = ""
-            for et in external_duplicates:
-                if et.track_id:
-                    existing_track_id = str(et.track_id)
-                    break
-            raise ExternalDuplicateError(
-                sha256=stored_file.sha256,
-                external_track_ids=external_track_ids,
-                display_infos=display_infos,
-                stored_file_id=str(stored_file.id),
-                token=token,
-                user_id=owner_id,
-                existing_track_id=existing_track_id,
-            )
-
-        if external_duplicate_action == "discard_upload":
-            external_track = None
-            for et in external_duplicates:
-                if et.track_id:
-                    external_track = et
-                    break
-            if external_track is None:
-                raise RuntimeError("No external track with a linked Songhive track")
-            track = await session.get(Track, external_track.track_id)
-            if track is None:
-                raise RuntimeError("Linked track not found")
-
-            await _remove_unreferenced_stored_file(session, storage_service, stored_file)
-            return ImportResult(
-                track=track,
-                upload=None,
-                library_track=None,
-                stored_file=None,
-                was_duplicate=True,
-            )
+    discard_result = await _handle_external_duplicates(
+        session,
+        storage_service,
+        _DuplicateContext(
+            stored_file=stored_file,
+            stored_file_was_duplicate=stored_file_was_duplicate,
+            external_duplicate_action=external_duplicate_action,
+            redis=redis,
+            library_id=library_id,
+            owner_id=owner_id,
+            visibility=visibility,
+            filename=filename,
+            content_type=content_type,
+            description=description,
+            publish=publish,
+        ),
+    )
+    if discard_result is not None:
+        return discard_result
 
     metadata = await _extract_metadata_from_file(storage_service, stored_file)
 
@@ -803,39 +741,79 @@ async def import_audio_file(
     if existing_meta and not force:
         raise DuplicateTrackError(str(existing_meta.id), str(stored_file.id), was_duplicate=stored_file_was_duplicate)
 
-    artist, album = await _resolve_artist_and_album(session, metadata, owner_id, visibility)
-    track = await _create_track_record(
+    track, album, upload, library_track = await _materialize_import_records(
         session,
-        metadata=metadata,
-        stored_file=stored_file,
-        artist=artist,
-        album=album,
-        filename=filename,
-        owner_id=owner_id,
-        visibility=visibility,
-        source=source,
-        content_type=content_type,
-        description=description,
+        storage_service,
+        _TrackImportParams(
+            metadata=metadata,
+            stored_file=stored_file,
+            filename=filename,
+            library_id=library_id,
+            owner_id=owner_id,
+            visibility=visibility,
+            source=source,
+            content_type=content_type,
+            description=description,
+        ),
     )
+
+    _maybe_enqueue_enrichment(track, enrich)
+    return ImportResult(
+        track=track,
+        upload=upload,
+        library_track=library_track,
+        stored_file=stored_file,
+        was_duplicate=stored_file_was_duplicate,
+    )
+
+
+@dataclass
+class _TrackImportParams:
+    metadata: AudioMetadata
+    stored_file: StoredFile
+    filename: str
+    library_id: str
+    owner_id: Optional[str]
+    visibility: str
+    source: str
+    content_type: Optional[str]
+    description: Optional[str]
+
+
+async def _materialize_import_records(
+    session: AsyncSession,
+    storage_service: StorageService,
+    params: _TrackImportParams,
+):
+    """Create track/artist/album records, cover art, upload, and tags."""
+    artist, album = await _resolve_artist_and_album(session, params.metadata, params.owner_id, params.visibility)
+    track = await _create_track_record(session, params, artist, album)
 
     await _maybe_store_cover_art(
         session,
         storage_service=storage_service,
         album=album,
-        metadata=metadata,
-        owner_id=owner_id,
-        visibility=visibility,
+        metadata=params.metadata,
+        owner_id=params.owner_id,
+        visibility=params.visibility,
     )
     upload, library_track = await _register_upload_and_library_track(
         session,
         track=track,
-        stored_file=stored_file,
-        library_id=library_id,
-        owner_id=owner_id,
-        metadata=metadata,
-        content_type=content_type,
+        stored_file=params.stored_file,
+        library_id=params.library_id,
+        owner_id=params.owner_id,
+        metadata=params.metadata,
+        content_type=params.content_type,
     )
+    await _apply_imported_track_tags(session, track, album, params.metadata, params.owner_id)
+    return track, album, upload, library_track
 
+
+async def _apply_imported_track_tags(
+    session: AsyncSession, track, album, metadata: AudioMetadata, owner_id: Optional[str]
+) -> None:
+    """Apply genre and metadata-derived tags to a freshly imported track."""
     genre_names = extract_genres_from_metadata(metadata)
     if genre_names:
         await set_genres_for_entity(
@@ -860,13 +838,121 @@ async def import_audio_file(
             user_id=owner_id,
         )
 
-    _maybe_enqueue_enrichment(track, enrich)
+
+@dataclass
+class _FileSource:
+    """Where the audio bytes come from plus owner/quota context."""
+
+    file: Optional[BinaryIO] = None
+    stored_file: Optional[StoredFile] = None
+    filename: Optional[str] = None
+    content_type: Optional[str] = None
+    owner_id: Optional[str] = None
+    visibility: str = Visibility.PRIVATE.value
+    enforce_quota: bool = False
+
+
+async def _resolve_stored_file(
+    session: AsyncSession,
+    storage_service: StorageService,
+    source: _FileSource,
+) -> Tuple[StoredFile, bool, str, str]:
+    """Store the uploaded bytes or adopt the supplied stored file."""
+    if source.stored_file is None:
+        if source.file is None or source.filename is None:
+            raise ValueError("Provide either a file and filename or a stored_file")
+        content_type = source.content_type or _guess_content_type(source.filename)
+        stored_file, was_duplicate = await _store_uploaded_file(
+            session,
+            storage_service,
+            source.file,
+            content_type,
+            source.filename,
+            source.owner_id,
+            source.visibility,
+            enforce_quota=source.enforce_quota,
+        )
+        return stored_file, was_duplicate, source.filename, content_type
+
+    stored_file = source.stored_file
+    content_type = source.content_type if source.content_type is not None else stored_file.content_type
+    filename = source.filename if source.filename is not None else (stored_file.original_filename or "audio")
+    return stored_file, False, filename, content_type
+
+
+@dataclass
+class _DuplicateContext:
+    stored_file: StoredFile
+    stored_file_was_duplicate: bool
+    external_duplicate_action: Optional[Literal["keep_local", "discard_upload"]]
+    redis: Optional[Redis]
+    library_id: str
+    owner_id: Optional[str]
+    visibility: str
+    filename: str
+    content_type: str
+    description: Optional[str]
+    publish: bool
+
+
+async def _handle_external_duplicates(
+    session: AsyncSession,
+    storage_service: StorageService,
+    ctx: _DuplicateContext,
+) -> Optional[ImportResult]:
+    """Apply the external-duplicate resolution; ``None`` means continue."""
+    external_duplicates = await find_external_duplicate(session, ctx.stored_file.sha256)
+    if not external_duplicates:
+        return None
+
+    if ctx.external_duplicate_action is None:
+        await _raise_external_duplicate(ctx, external_duplicates)
+
+    if ctx.external_duplicate_action == "discard_upload":
+        return await _discard_upload_for_duplicate(session, storage_service, ctx, external_duplicates)
+    return None
+
+
+async def _raise_external_duplicate(ctx: _DuplicateContext, external_duplicates) -> None:
+    """Raise ``ExternalDuplicateError`` carrying the resolution token."""
+    display_infos = _build_external_display_infos(external_duplicates)
+    external_track_ids = [str(et.id) for et in external_duplicates]
+    token: Optional[str] = None
+    if ctx.redis is not None:
+        token = await _store_duplicate_token(ctx, external_track_ids, display_infos)
+    existing_track_id = next((str(et.track_id) for et in external_duplicates if et.track_id), "")
+    raise ExternalDuplicateError(
+        sha256=ctx.stored_file.sha256,
+        external_track_ids=external_track_ids,
+        display_infos=display_infos,
+        stored_file_id=str(ctx.stored_file.id),
+        token=token,
+        user_id=ctx.owner_id,
+        existing_track_id=existing_track_id,
+    )
+
+
+async def _discard_upload_for_duplicate(
+    session: AsyncSession,
+    storage_service: StorageService,
+    ctx: _DuplicateContext,
+    external_duplicates,
+) -> ImportResult:
+    """Drop the uploaded file and return the already-linked track."""
+    external_track = next((et for et in external_duplicates if et.track_id), None)
+    if external_track is None:
+        raise RuntimeError("No external track with a linked Songhive track")
+    track = await session.get(Track, external_track.track_id)
+    if track is None:
+        raise RuntimeError("Linked track not found")
+
+    await _remove_unreferenced_stored_file(session, storage_service, ctx.stored_file)
     return ImportResult(
         track=track,
-        upload=upload,
-        library_track=library_track,
-        stored_file=stored_file,
-        was_duplicate=stored_file_was_duplicate,
+        upload=None,
+        library_track=None,
+        stored_file=None,
+        was_duplicate=True,
     )
 
 

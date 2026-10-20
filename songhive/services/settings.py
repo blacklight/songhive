@@ -201,6 +201,76 @@ async def _get_db_settings(session: AsyncSession) -> dict[str, Any]:
     return settings
 
 
+def _bounded_number(settings: dict, key: str, low: float, high: float) -> Optional[float]:
+    raw = settings.get(key)
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and low <= raw <= high:
+        return float(raw)
+    logger.warning("Ignoring invalid %s setting: %r", key, raw)
+    return None
+
+
+def _enum_value(settings: dict, key: str, allowed) -> Optional[Any]:
+    raw = settings.get(key)
+    if raw in allowed:
+        return raw
+    logger.warning("Ignoring invalid %s setting: %r", key, raw)
+    return None
+
+
+def _federation_overrides(settings: dict) -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
+    direct = {
+        "instance_name": "instance_name",
+        "instance_description": "instance_description",
+        "instance_contact_name": "contact_name",
+        "instance_contact_email": "contact_email",
+        "instance_contact_url": "contact_url",
+        "federation_enabled": "enabled",
+    }
+    for setting_key, override_key in direct.items():
+        if setting_key in settings:
+            overrides[override_key] = settings[setting_key]
+    if "remote_search_access" in settings:
+        value = _enum_value(settings, "remote_search_access", ("disabled", "authenticated", "public"))
+        if value is not None:
+            overrides["remote_search_access"] = value
+    if "fetch_timeout_seconds" in settings:
+        value = _bounded_number(settings, "fetch_timeout_seconds", 1, 300)
+        if value is not None:
+            overrides["fetch_timeout_seconds"] = value
+    return overrides
+
+
+def _auth_overrides(settings: dict) -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
+    if "registration_mode" in settings:
+        raw = settings["registration_mode"]
+        try:
+            overrides["registration_mode"] = RegistrationMode(raw)
+        except ValueError:
+            logger.warning("Ignoring invalid registration_mode setting: %r", raw)
+    return overrides
+
+
+def _payments_overrides(settings: dict) -> dict[str, Any]:
+    overrides: dict[str, Any] = {}
+    if "membership_price_minor" in settings:
+        value = _bounded_number(settings, "membership_price_minor", 0, 10_000_000)
+        if value is not None:
+            overrides["default_membership_amount_minor"] = int(value)
+    if "membership_currency" in settings:
+        raw_currency = settings["membership_currency"]
+        if isinstance(raw_currency, str) and len(raw_currency.strip()) == 3:
+            overrides["membership_currency"] = raw_currency.strip().upper()
+        else:
+            logger.warning("Ignoring invalid membership_currency setting: %r", raw_currency)
+    if "membership_interval" in settings:
+        value = _enum_value(settings, "membership_interval", ("week", "month", "year"))
+        if value is not None:
+            overrides["membership_interval"] = value
+    return overrides
+
+
 async def apply_settings_overrides(
     session: AsyncSession,
     config: SonghiveConfig,
@@ -212,59 +282,9 @@ async def apply_settings_overrides(
         logger.exception("Failed to load settings overrides; using config file/defaults")
         return config
 
-    fed_overrides: dict[str, Any] = {}
-    if "instance_name" in settings:
-        fed_overrides["instance_name"] = settings["instance_name"]
-    if "instance_description" in settings:
-        fed_overrides["instance_description"] = settings["instance_description"]
-    if "instance_contact_name" in settings:
-        fed_overrides["contact_name"] = settings["instance_contact_name"]
-    if "instance_contact_email" in settings:
-        fed_overrides["contact_email"] = settings["instance_contact_email"]
-    if "instance_contact_url" in settings:
-        fed_overrides["contact_url"] = settings["instance_contact_url"]
-    if "federation_enabled" in settings:
-        fed_overrides["enabled"] = settings["federation_enabled"]
-    if "remote_search_access" in settings:
-        raw_access = settings["remote_search_access"]
-        if raw_access in ("disabled", "authenticated", "public"):
-            fed_overrides["remote_search_access"] = raw_access
-        else:
-            logger.warning("Ignoring invalid remote_search_access setting: %r", raw_access)
-    if "fetch_timeout_seconds" in settings:
-        raw_timeout = settings["fetch_timeout_seconds"]
-        if isinstance(raw_timeout, (int, float)) and not isinstance(raw_timeout, bool) and 1 <= raw_timeout <= 300:
-            fed_overrides["fetch_timeout_seconds"] = float(raw_timeout)
-        else:
-            logger.warning("Ignoring invalid fetch_timeout_seconds setting: %r", raw_timeout)
-
-    auth_overrides: dict[str, Any] = {}
-    if "registration_mode" in settings:
-        raw = settings["registration_mode"]
-        try:
-            auth_overrides["registration_mode"] = RegistrationMode(raw)
-        except ValueError:
-            logger.warning("Ignoring invalid registration_mode setting: %r", raw)
-
-    payments_overrides: dict[str, Any] = {}
-    if "membership_price_minor" in settings:
-        raw_amount = settings["membership_price_minor"]
-        if isinstance(raw_amount, (int, float)) and not isinstance(raw_amount, bool) and 0 <= raw_amount <= 10_000_000:
-            payments_overrides["default_membership_amount_minor"] = int(raw_amount)
-        else:
-            logger.warning("Ignoring invalid membership_price_minor setting: %r", raw_amount)
-    if "membership_currency" in settings:
-        raw_currency = settings["membership_currency"]
-        if isinstance(raw_currency, str) and len(raw_currency.strip()) == 3:
-            payments_overrides["membership_currency"] = raw_currency.strip().upper()
-        else:
-            logger.warning("Ignoring invalid membership_currency setting: %r", raw_currency)
-    if "membership_interval" in settings:
-        raw_interval = settings["membership_interval"]
-        if raw_interval in ("week", "month", "year"):
-            payments_overrides["membership_interval"] = raw_interval
-        else:
-            logger.warning("Ignoring invalid membership_interval setting: %r", raw_interval)
+    fed_overrides = _federation_overrides(settings)
+    auth_overrides = _auth_overrides(settings)
+    payments_overrides = _payments_overrides(settings)
 
     if not fed_overrides and not auth_overrides and not payments_overrides:
         return config

@@ -4,15 +4,12 @@ Tornado streaming handler for audio content delivery.
 
 import logging
 import os
-import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
-import aiofiles
-import httpx
 import tornado.iostream
 import tornado.web
 from sqlalchemy import select
@@ -20,12 +17,6 @@ from sqlalchemy.orm import raiseload, selectinload
 
 from ..api.middleware.auth import decode_access_token, get_access_token_jti
 from ..config.schema import SonghiveConfig, effective_bitrate
-from ..external.errors import (
-    ExternalItemNotFound,
-    ExternalLibraryError,
-    ExternalPermissionDenied,
-    UnsupportedExternalOperation,
-)
 from ..external.types import ExternalStream
 from ..models.base import get_session
 from ..models.stored_file import StoredFile
@@ -39,15 +30,33 @@ from ..services.streaming import (
     get_cached_transcode,
     get_upload_for_track,
     record_listen,
-    resolve_external_stream,
 )
 from ..storage import get_storage
 from ..storage.base import StorageBackend
 from ..streaming.transcoder import Transcoder
 from ..users.tokens import is_access_token_revoked
 from ..ws.events import EventWebSocket
+from .external_serving import _ExternalStreamMixin
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _TranscodeJob:
+    fmt: str
+    effective: int
+    tee: Any
+    fmt_mimetype: str
+
+
+@dataclass
+class _ServeTarget:
+    """The resolved audio source for one stream request."""
+
+    stored_file: Optional[StoredFile]
+    track: Track
+    track_id: str
+    external_stream: Optional[ExternalStream]
 
 
 @dataclass
@@ -72,7 +81,7 @@ class _StreamState:
     started_at: float = field(default_factory=time.monotonic)
 
 
-class StreamHandler(tornado.web.RequestHandler):
+class StreamHandler(_ExternalStreamMixin, tornado.web.RequestHandler):
     """
     Tornado request handler for audio streaming.
 
@@ -470,220 +479,6 @@ class StreamHandler(tornado.web.RequestHandler):
         await session.commit()
         return tee
 
-    async def _spill_iterator_to_temp(self, stream: ExternalStream) -> Path:
-        """Write all chunks from an external iterator to a temp file and return its path."""
-        if stream.iterator is None:
-            raise RuntimeError("external iterator stream missing iterator")
-
-        temp_dir = self._config.external_libraries.stream_temp_dir
-        if temp_dir is None:
-            temp_dir = Path(tempfile.gettempdir())
-        Path(temp_dir).mkdir(parents=True, exist_ok=True)
-
-        fd, name = tempfile.mkstemp(dir=temp_dir, prefix="external-stream-")
-        os.close(fd)
-        temp_path = Path(name)
-
-        async with aiofiles.open(temp_path, "wb") as f:
-            async for chunk in stream.iterator:
-                if chunk:
-                    await f.write(chunk)
-
-        return temp_path
-
-    async def _serve_external_path(
-        self,
-        session,
-        track: Track,
-        track_id: str,
-        stream: ExternalStream,
-        user: Optional[User],
-        state: _StreamState,
-        range_header: Optional[str],
-    ) -> int:
-        """Serve an external stream backed by a local file path."""
-        path = stream.path
-        if path is None:
-            self._not_found("external stream missing path")
-            return 0
-
-        mimetype = stream.content_type or "application/octet-stream"
-        effective_range = range_header if (stream.supports_range and range_header) else ""
-        bytes_served = 0
-        try:
-            bytes_served = await self._serve_file(str(path), mimetype, range_header=effective_range)
-        except tornado.iostream.StreamClosedError:
-            pass
-        finally:
-            if stream.temporary:
-                try:
-                    os.unlink(path)
-                except OSError:
-                    pass
-
-        self._update_streamed_threshold(bytes_served, track, stream.size, state)
-        await self._record_listen_if_needed(session, track_id, user, state)
-        return bytes_served
-
-    async def _serve_external_iterator(
-        self,
-        session,
-        track: Track,
-        track_id: str,
-        stream: ExternalStream,
-        user: Optional[User],
-        state: _StreamState,
-        range_header: Optional[str],
-    ) -> int:
-        """Serve an external stream backed by an async byte iterator."""
-        mimetype = stream.content_type or "application/octet-stream"
-        max_bytes = self._config.external_libraries.stream_max_proxy_bytes
-
-        if stream.size is not None and max_bytes is not None and stream.size > max_bytes:
-            temp_path = await self._spill_iterator_to_temp(stream)
-            effective_range = range_header if (stream.supports_range and range_header) else ""
-            bytes_served = 0
-
-            try:
-                bytes_served = await self._serve_file(
-                    str(temp_path), mimetype, range_header=effective_range, file_size=stream.size
-                )
-            except tornado.iostream.StreamClosedError:
-                pass
-            finally:
-                try:
-                    os.unlink(temp_path)
-                except OSError:
-                    pass
-            self._update_streamed_threshold(bytes_served, track, stream.size, state)
-            await self._record_listen_if_needed(session, track_id, user, state)
-            return bytes_served
-
-        if stream.iterator is None:
-            self._not_found("external iterator stream missing iterator")
-            return 0
-
-        self.set_header("Content-Type", mimetype)
-        if stream.size is not None:
-            self.set_header("Content-Length", stream.size)
-        if stream.content_range:
-            self.set_header("Content-Range", stream.content_range)
-        self.set_header("Accept-Ranges", "bytes" if stream.supports_range else "none")
-        self.set_header("Cache-Control", "no-store")
-        self.set_status(206 if stream.content_range else 200)
-
-        bytes_served = 0
-        try:
-            async for chunk in stream.iterator:
-                if not chunk:
-                    continue
-                self.write(chunk)
-                await self.flush()
-                bytes_served += len(chunk)
-                self._update_streamed_threshold(bytes_served, track, stream.size, state)
-                await self._record_listen_if_needed(session, track_id, user, state)
-        except tornado.iostream.StreamClosedError:
-            pass
-
-        self._update_streamed_threshold(bytes_served, track, stream.size, state)
-        await self._record_listen_if_needed(session, track_id, user, state)
-        return bytes_served
-
-    async def _serve_external_url(
-        self,
-        session,
-        track: Track,
-        track_id: str,
-        stream: ExternalStream,
-        user: Optional[User],
-        state: _StreamState,
-        range_header: Optional[str],
-    ) -> int:
-        """Serve an external stream described by a URL, either redirecting or proxying."""
-        if stream.safe_to_redirect and stream.url:
-            self.set_status(302)
-            self.set_header("Location", stream.url)
-            if stream.content_type:
-                self.set_header("Content-Type", stream.content_type)
-            await self.finish()
-            return 0
-
-        if not stream.url:
-            self._not_found("external URL missing")
-            return 0
-
-        request_headers = dict(stream.headers)
-        if range_header and stream.supports_range:
-            request_headers["Range"] = range_header
-
-        timeout = httpx.Timeout(self._config.external_libraries.stream_proxy_timeout_seconds)
-        bytes_served = 0
-        stream_size = stream.size
-
-        try:
-            async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
-                async with client.stream("GET", stream.url, headers=request_headers) as resp:
-                    if resp.status_code == 404:
-                        self._not_found("external URL not found")
-                        return 0
-                    if resp.status_code >= 400:
-                        self._bad_request(f"upstream error {resp.status_code}")
-                        return 0
-
-                    mimetype = stream.content_type or resp.headers.get("content-type") or "application/octet-stream"
-                    self.set_header("Content-Type", mimetype)
-                    if "content-length" in resp.headers:
-                        self.set_header("Content-Length", resp.headers["content-length"])
-                        stream_size = int(resp.headers["content-length"])
-                    if "content-range" in resp.headers:
-                        self.set_header("Content-Range", resp.headers["content-range"])
-                    self.set_header("Accept-Ranges", "bytes" if stream.supports_range else "none")
-                    self.set_header("Cache-Control", "no-store")
-                    self.set_status(resp.status_code)
-
-                    async for chunk in resp.aiter_bytes(chunk_size=self._config.streaming.chunk_size):
-                        if not chunk:
-                            continue
-                        self.write(chunk)
-                        await self.flush()
-                        bytes_served += len(chunk)
-                        self._update_streamed_threshold(bytes_served, track, stream_size, state)
-                        await self._record_listen_if_needed(session, track_id, user, state)
-        except tornado.iostream.StreamClosedError:
-            pass
-        except httpx.HTTPError as exc:
-            logger.exception("External URL proxy failed for track %s", track_id)
-            self._bad_request(str(exc))
-
-        self._update_streamed_threshold(bytes_served, track, stream_size, state)
-        await self._record_listen_if_needed(session, track_id, user, state)
-        return bytes_served
-
-    async def _serve_external_stream(
-        self,
-        session,
-        track: Track,
-        track_id: str,
-        stream: ExternalStream,
-        user: Optional[User],
-        state: _StreamState,
-        range_header: Optional[str],
-    ):
-        """Dispatch an external stream to the appropriate delivery path."""
-        try:
-            if stream.kind == "path":
-                await self._serve_external_path(session, track, track_id, stream, user, state, range_header)
-            elif stream.kind == "iterator":
-                await self._serve_external_iterator(session, track, track_id, stream, user, state, range_header)
-            elif stream.kind == "url":
-                await self._serve_external_url(session, track, track_id, stream, user, state, range_header)
-            else:
-                self._unprocessable(f"unsupported external stream kind: {stream.kind}")
-        except tornado.iostream.StreamClosedError:
-            pass
-
-        await session.commit()
-
     async def get(self, track_id: str):  # pylint: disable=too-many-return-statements
         """Stream audio for the given track ID."""
         config = self._config
@@ -705,45 +500,22 @@ class StreamHandler(tornado.web.RequestHandler):
                 return
             track, stored_file = track_and_file
 
-            if not await self._check_access(session, track_id, user):
-                return
-
-            # Payment layer: ACL decides visibility, this decides bytes.
             from ..services.payments import access as payment_access
 
-            track_access = await payment_access.resolve_track_access(session, track, user)
-            if track_access.level == payment_access.ACCESS_NONE or (
-                self._requires_download_access and not track_access.can_download
-            ):
-                self._forbidden()
+            track_access = await self._authorize_stream(session, track_id, track, user)
+            if track_access is None:
                 return
-
             if track_access.level == payment_access.ACCESS_SAMPLE:
                 await self._serve_payment_sample(session, track, track_access.sale, storage_backend)
                 return
 
             external_stream: Optional[ExternalStream] = None
             if stored_file is None:
-                try:
-                    external_stream = await resolve_external_stream(
-                        session, track_id, range_header, user=user, variant=variant
-                    )
-                except ExternalItemNotFound as exc:
-                    self._not_found(str(exc))
-                    return
-                except ExternalPermissionDenied:
-                    self._forbidden()
-                    return
-                except UnsupportedExternalOperation as exc:
-                    self._unprocessable(str(exc))
-                    return
-                except ExternalLibraryError as exc:
-                    logger.exception("External stream resolution failed for track %s", track_id)
-                    self._bad_request(str(exc))
-                    return
-
+                external_stream = await self._resolve_external_stream(session, track_id, range_header, user, variant)
                 if external_stream is None:
-                    self._not_found()
+                    # Error responses already written by the resolver.
+                    if self._status_code == 200:
+                        self._not_found()
                     return
 
             min_seconds, min_percent = await scrobbler.thresholds_for(session, user)
@@ -759,117 +531,167 @@ class StreamHandler(tornado.web.RequestHandler):
             if self._request_aborted():
                 return
 
-            if stored_file is not None:
-                local_path = await self._require_local_path(storage_backend, stored_file)
-                if local_path is None:
-                    return
+            await self._dispatch_serve(
+                session,
+                storage_backend,
+                _ServeTarget(
+                    stored_file=stored_file,
+                    track=track,
+                    track_id=track_id,
+                    external_stream=external_stream,
+                ),
+                user,
+                state,
+                range_header,
+            )
 
-                fmt, bitrate = self._requested_format()
-                parsed = self._parse_format(stored_file, fmt, bitrate)
-                if parsed is None:
-                    return
-
-                fmt, requested_bitrate, passthrough = parsed
-                if passthrough:
-                    await self._serve_passthrough(
-                        session,
-                        local_path,
-                        stored_file,
-                        track,
-                        track_id,
-                        user,
-                        state,
-                    )
-                    return
-
-                assert fmt is not None
-                effective = effective_bitrate(
-                    config.streaming,
-                    user.role if user is not None else "user",
-                    requested_bitrate,
-                )
-                fmt_mimetype = Transcoder.FORMAT_MAP[fmt]["mimetype"]
-
-                if await self._serve_cached_transcode(
-                    session,
-                    track,
-                    track_id,
-                    fmt,
-                    effective,
-                    storage_backend,
-                    user,
-                    state,
-                ):
-                    return
-
-                storage_service = StorageService(storage_backend, config.storage)
-                tee = await self._serve_live_transcode(
-                    session,
-                    local_path,
-                    track,
-                    fmt,
-                    effective,
-                    fmt_mimetype,
-                    user,
-                    state,
-                    config,
-                )
-
-                if config.streaming.transcode_cache_enabled and tee:
-                    try:
-                        async with session.begin_nested():
-                            await cache_transcode(
-                                session,
-                                storage_service,
-                                track,
-                                fmt,
-                                effective,
-                                bytes(tee),
-                                fmt_mimetype,
-                            )
-                    except Exception as e:
-                        logger.exception("Failed to cache transcode for track %s: %s", track_id, e)
-            else:
-                assert external_stream is not None
-                await self._serve_external_stream(
-                    session,
-                    track,
-                    track_id,
-                    external_stream,
-                    user,
-                    state,
-                    range_header,
-                )
-
-    async def _serve_payment_sample(
+    async def _dispatch_serve(
         self,
         session,
-        track: Track,
-        sale,
-        storage_backend: StorageBackend,
+        storage_backend,
+        target: "_ServeTarget",
+        user,
+        state: "_StreamState",
+        range_header: Optional[str],
     ) -> None:
-        """Serve the configured sample for a ``sample``-gated track — never original bytes."""
-        from ..services.payments import samples as samples_service
+        """Serve the stored file or the resolved external stream."""
+        if target.stored_file is not None:
+            await self._serve_stored_track(
+                session,
+                storage_backend,
+                target.stored_file,
+                target.track,
+                target.track_id,
+                user,
+                state,
+            )
+            return
+        assert target.external_stream is not None
+        await self._serve_external_stream(
+            session,
+            target.track,
+            target.track_id,
+            target.external_stream,
+            user,
+            state,
+            range_header,
+        )
 
-        storage = StorageService(storage_backend, self._config.storage)
-        stored = await samples_service.sample_stored_file(
+    async def _authorize_stream(self, session, track_id: str, track: Track, user):
+        """ACL + payment gate; returns the track access or ``None`` (response written)."""
+        if not await self._check_access(session, track_id, user):
+            return None
+
+        # Payment layer: ACL decides visibility, this decides bytes.
+        from ..services.payments import access as payment_access
+
+        track_access = await payment_access.resolve_track_access(session, track, user)
+        if track_access.level == payment_access.ACCESS_NONE or (
+            self._requires_download_access and not track_access.can_download
+        ):
+            self._forbidden()
+            return None
+        return track_access
+
+    async def _resolve_serve_format(self, storage_backend, stored_file: StoredFile, user):
+        """Resolve local path, target format, effective bitrate and mimetype."""
+        local_path = await self._require_local_path(storage_backend, stored_file)
+        if local_path is None:
+            return None
+
+        fmt, bitrate = self._requested_format()
+        parsed = self._parse_format(stored_file, fmt, bitrate)
+        if parsed is None:
+            return None
+
+        fmt, requested_bitrate, passthrough = parsed
+        fmt_mimetype = Transcoder.FORMAT_MAP[fmt]["mimetype"] if fmt and not passthrough else None
+        effective = effective_bitrate(
+            self._config.streaming,
+            user.role if user is not None else "user",
+            requested_bitrate,
+        )
+        return local_path, fmt, effective, fmt_mimetype, passthrough
+
+    async def _serve_stored_track(
+        self,
+        session,
+        storage_backend,
+        stored_file,
+        track,
+        track_id: str,
+        user,
+        state: "_StreamState",
+    ) -> None:
+        """Serve passthrough, cached, or live-transcoded bytes."""
+        resolved = await self._resolve_serve_format(storage_backend, stored_file, user)
+        if resolved is None:
+            return
+        local_path, fmt, effective, fmt_mimetype, passthrough = resolved
+
+        if passthrough:
+            await self._serve_passthrough(session, local_path, stored_file, track, track_id, user, state)
+            return
+
+        assert fmt is not None
+        config = self._config
+
+        if await self._serve_cached_transcode(
             session,
             track,
-            sale,
-            self._config,
-            storage=storage,
-            redis=self._redis,
+            track_id,
+            fmt,
+            effective,
+            storage_backend,
+            user,
+            state,
+        ):
+            return
+
+        storage_service = StorageService(storage_backend, config.storage)
+        tee = await self._serve_live_transcode(
+            session,
+            local_path,
+            track,
+            fmt,
+            effective,
+            fmt_mimetype,
+            user,
+            state,
+            config,
         )
-        if stored is None:
-            self._not_found("sample not ready")
-            return
-        local_path = await self._require_local_path(storage_backend, stored)
-        if local_path is None:
-            return
+
+        if config.streaming.transcode_cache_enabled and tee:
+            await self._cache_served_transcode(
+                session,
+                storage_service,
+                track,
+                track_id,
+                _TranscodeJob(fmt=fmt, effective=effective, tee=tee, fmt_mimetype=fmt_mimetype),
+            )
+
+    async def _cache_served_transcode(
+        self,
+        session,
+        storage_service: StorageService,
+        track: Track,
+        track_id: str,
+        job: "_TranscodeJob",
+    ) -> None:
+        """Store a freshly rendered transcode; failures are non-fatal."""
         try:
-            await self._serve_file(str(local_path), stored.content_type or "audio/mpeg")
-        except tornado.iostream.StreamClosedError:
-            return
+            async with session.begin_nested():
+                await cache_transcode(
+                    session,
+                    storage_service,
+                    track,
+                    job.fmt,
+                    str(job.effective),
+                    bytes(job.tee),
+                    job.fmt_mimetype,
+                )
+        except Exception as e:
+            logger.exception("Failed to cache transcode for track %s: %s", track_id, e)
 
     async def _serve_file(
         self,

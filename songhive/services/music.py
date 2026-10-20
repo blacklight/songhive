@@ -679,31 +679,16 @@ def _album_sort_field(sort_by: str) -> Any:
 
 async def list_albums(
     session: AsyncSession,
-    query: Optional[str] = None,
-    artist_id: Optional[str] = None,
-    year_from: Optional[int] = None,
-    year_to: Optional[int] = None,
-    genre: Optional[str] = None,
-    owner_id: Optional[str] = None,
-    collection: Optional[bool] = None,
     user: Optional[User] = None,
     limit: int = 20,
     offset: int = 0,
     include: Optional[Set[str]] = None,
     sort_by: str = "title",
     sort_dir: str = "asc",
+    **filters: Any,
 ) -> List[Album]:
     """List albums with optional filters, honouring the requester's ACL."""
-    stmt = _build_albums_stmt(
-        query=query,
-        artist_id=artist_id,
-        year_from=year_from,
-        year_to=year_to,
-        genre=genre,
-        owner_id=owner_id,
-        collection=collection,
-        user=user,
-    ).options(*_album_selectin_options(include))
+    stmt = _build_albums_stmt(user=user, **filters).options(*_album_selectin_options(include))
     stmt = apply_access_filter(stmt, Album, user, "album")
     field = _album_sort_field(sort_by)
 
@@ -890,21 +875,27 @@ def _build_tracks_stmt(
         stmt = stmt.where(Track.artist_id == artist_id)
     if album_id:
         stmt = stmt.where(Track.album_id == album_id)
-    if genre:
-        try:
-            genre_name = validate_genre_name(genre)
-        except InvalidGenreName:
-            genre_name = None
-        if genre_name is None:
-            stmt = stmt.where(false())
-        else:
-            stmt = stmt.where(
-                Track.id.in_(
-                    select(GenreTrack.track_id)
-                    .join(Genre, GenreTrack.genre_id == Genre.id)
-                    .where(Genre.name == genre_name)
-                )
-            )
+    stmt = _tracks_genre_filter(stmt, genre)
+    stmt = _tracks_entity_filters(stmt, tag=tag, file_id=file_id, library_id=library_id, favorited=favorited, user=user)
+    stmt = _tracks_year_filter(stmt, year_from, year_to)
+    stmt = apply_collection_filter(stmt, Track, user, "track", collection)
+
+    if query:
+        stmt = _apply_tracks_query(session, stmt, query=query, year_from=year_from, year_to=year_to)
+
+    return _tracks_active_filter(stmt)
+
+
+def _tracks_entity_filters(
+    stmt: Select[Any],
+    *,
+    tag: Optional[str],
+    file_id: Optional[str],
+    library_id: Optional[str],
+    favorited: Optional[bool],
+    user: Optional[User],
+) -> Select[Any]:
+    """Apply the tag, file, library, and favorited filters."""
     if tag:
         stmt = (
             stmt.join(TagTrack, TagTrack.track_id == Track.id)
@@ -919,31 +910,46 @@ def _build_tracks_stmt(
                 Track.album_id.in_(select(Album.id).where(Album.cover_file_id == file_id)),
             )
         )
-
-    if year_from is not None or year_to is not None:
-        stmt = stmt.outerjoin(Album, Track.album_id == Album.id)
-        range_conditions = []
-        if year_from is not None:
-            range_conditions.append(Album.release_year >= year_from)
-        if year_to is not None:
-            range_conditions.append(Album.release_year <= year_to)
-        stmt = stmt.where(or_(Album.release_year.is_(None), and_(*range_conditions)))
-
     if library_id:
         stmt = stmt.join(LibraryTrack, LibraryTrack.track_id == Track.id).where(LibraryTrack.library_id == library_id)
-
     if favorited:
         if user is None:
             stmt = stmt.where(false())
         else:
             stmt = stmt.join(Favorite, and_(Favorite.track_id == Track.id, Favorite.user_id == user.id))
+    return stmt
 
-    stmt = apply_collection_filter(stmt, Track, user, "track", collection)
 
-    if query:
-        stmt = _apply_tracks_query(session, stmt, query=query, year_from=year_from, year_to=year_to)
+def _tracks_genre_filter(stmt: Select[Any], genre: Optional[str]) -> Select[Any]:
+    if not genre:
+        return stmt
+    try:
+        genre_name = validate_genre_name(genre)
+    except InvalidGenreName:
+        genre_name = None
+    if genre_name is None:
+        return stmt.where(false())
+    return stmt.where(
+        Track.id.in_(
+            select(GenreTrack.track_id).join(Genre, GenreTrack.genre_id == Genre.id).where(Genre.name == genre_name)
+        )
+    )
 
-    stmt = stmt.where(
+
+def _tracks_year_filter(stmt: Select[Any], year_from: Optional[int], year_to: Optional[int]) -> Select[Any]:
+    if year_from is None and year_to is None:
+        return stmt
+    stmt = stmt.outerjoin(Album, Track.album_id == Album.id)
+    range_conditions = []
+    if year_from is not None:
+        range_conditions.append(Album.release_year >= year_from)
+    if year_to is not None:
+        range_conditions.append(Album.release_year <= year_to)
+    return stmt.where(or_(Album.release_year.is_(None), and_(*range_conditions)))
+
+
+def _tracks_active_filter(stmt: Select[Any]) -> Select[Any]:
+    return stmt.where(
         or_(
             ~exists().where(ExternalTrack.track_id == Track.id),
             exists().where(
@@ -963,8 +969,6 @@ def _build_tracks_stmt(
             ),
         ),
     )
-
-    return stmt
 
 
 async def list_tracks(
@@ -1152,21 +1156,18 @@ async def list_library_tracks(
     session: AsyncSession,
     library_id: str,
     user: Optional[User] = None,
-    limit: int = 20,
-    offset: int = 0,
-    include: Optional[Set[str]] = None,
-    sort_by: str = "created_at",
-    sort_dir: str = "desc",
-    query: Optional[str] = None,
+    **options: Any,
 ) -> List[Track]:
     """List tracks that are members of ``library_id``."""
+    limit = options.get("limit", 20)
+    offset = options.get("offset", 0)
     stmt = _library_tracks_stmt(
         library_id,
         user=user,
-        include=include,
-        sort_by=sort_by,
-        sort_dir=sort_dir,
-        query=query,
+        include=options.get("include"),
+        sort_by=options.get("sort_by", "created_at"),
+        sort_dir=options.get("sort_dir", "desc"),
+        query=options.get("query"),
     )
     stmt = stmt.offset(offset).limit(limit)
     result = await session.execute(stmt)
@@ -1716,6 +1717,77 @@ async def remove_library_tracks(
     return removed_tracks, removed_remote
 
 
+async def _existing_playlist_ids(session: AsyncSession, playlist_id: str, column, ids) -> Set[str]:
+    if not ids:
+        return set()
+    result = await session.execute(
+        select(column).where(
+            PlaylistTrack.playlist_id == playlist_id,
+            column.in_(ids),
+        )
+    )
+    return {str(row) for row in result.scalars().all()}
+
+
+def _duplicate_ids(ids, existing: Set[str], seen: Set[str]) -> List[str]:
+    duplicates: List[str] = []
+    for item_id in ids:
+        if item_id in existing and item_id not in seen:
+            seen.add(item_id)
+            duplicates.append(item_id)
+    return duplicates
+
+
+async def _check_playlist_duplicates(
+    session: AsyncSession,
+    playlist_id: str,
+    track_ids,
+    episode_ids,
+    remote_object_ids,
+) -> None:
+    """Raise ``DuplicatePlaylistTrackError`` when any id is already a member."""
+    existing_tracks = await _existing_playlist_ids(session, playlist_id, PlaylistTrack.track_id, track_ids)
+    existing_episodes = await _existing_playlist_ids(
+        session, playlist_id, PlaylistTrack.podcast_episode_id, episode_ids
+    )
+    existing_remote = await _existing_playlist_ids(
+        session, playlist_id, PlaylistTrack.remote_object_id, remote_object_ids
+    )
+    seen: Set[str] = set()
+    duplicate_tracks = _duplicate_ids(track_ids, existing_tracks, seen)
+    duplicate_episodes = _duplicate_ids(episode_ids, existing_episodes, seen)
+    duplicate_remote = _duplicate_ids(remote_object_ids, existing_remote, seen)
+    if duplicate_tracks or duplicate_episodes or duplicate_remote:
+        raise DuplicatePlaylistTrackError(duplicate_tracks, duplicate_episodes, duplicate_remote)
+
+
+def _playlist_track_rows(
+    playlist_id: str,
+    track_ids: Sequence[str],
+    episode_ids: Sequence[str],
+    remote_object_ids: Sequence[str],
+    max_position: int,
+    added_by_id: Optional[str],
+) -> List[PlaylistTrack]:
+    """Build ordered ``PlaylistTrack`` rows: tracks, episodes, remote objects."""
+    rows: List[PlaylistTrack] = []
+    for field, ids in (
+        ("track_id", track_ids),
+        ("podcast_episode_id", episode_ids),
+        ("remote_object_id", remote_object_ids),
+    ):
+        for offset, item_id in enumerate(ids, start=len(rows) + 1):
+            rows.append(
+                PlaylistTrack(
+                    playlist_id=playlist_id,
+                    position=max_position + offset,
+                    added_by_id=added_by_id,
+                    **{field: item_id},
+                )
+            )
+    return rows
+
+
 async def add_playlist_items(
     session: AsyncSession,
     playlist_id: str,
@@ -1742,97 +1814,19 @@ async def add_playlist_items(
         return [], [], []
 
     if not allow_duplicates:
-        existing_tracks: Set[str] = set()
-        existing_episodes: Set[str] = set()
-        existing_remote: Set[str] = set()
-        if track_ids:
-            result = await session.execute(
-                select(PlaylistTrack.track_id).where(
-                    PlaylistTrack.playlist_id == playlist_id,
-                    PlaylistTrack.track_id.in_(track_ids),
-                )
-            )
-            existing_tracks = {str(row) for row in result.scalars().all()}
-        if episode_ids:
-            result = await session.execute(
-                select(PlaylistTrack.podcast_episode_id).where(
-                    PlaylistTrack.playlist_id == playlist_id,
-                    PlaylistTrack.podcast_episode_id.in_(episode_ids),
-                )
-            )
-            existing_episodes = {str(row) for row in result.scalars().all()}
-        if remote_object_ids:
-            result = await session.execute(
-                select(PlaylistTrack.remote_object_id).where(
-                    PlaylistTrack.playlist_id == playlist_id,
-                    PlaylistTrack.remote_object_id.in_(remote_object_ids),
-                )
-            )
-            existing_remote = {str(row) for row in result.scalars().all()}
-        duplicate_tracks: List[str] = []
-        duplicate_episodes: List[str] = []
-        duplicate_remote: List[str] = []
-        seen: Set[str] = set()
-        for track_id in track_ids:
-            if track_id in existing_tracks and track_id not in seen:
-                seen.add(track_id)
-                duplicate_tracks.append(track_id)
-        for episode_id in episode_ids:
-            if episode_id in existing_episodes and episode_id not in seen:
-                seen.add(episode_id)
-                duplicate_episodes.append(episode_id)
-        for object_id in remote_object_ids:
-            if object_id in existing_remote and object_id not in seen:
-                seen.add(object_id)
-                duplicate_remote.append(object_id)
-        if duplicate_tracks or duplicate_episodes or duplicate_remote:
-            raise DuplicatePlaylistTrackError(duplicate_tracks, duplicate_episodes, duplicate_remote)
+        await _check_playlist_duplicates(session, playlist_id, track_ids, episode_ids, remote_object_ids)
 
     result = await session.execute(
         select(func.max(PlaylistTrack.position)).where(PlaylistTrack.playlist_id == playlist_id)
     )
     max_position = cast(int, result.scalar() or 0)
 
-    added_tracks: List[str] = []
-    added_episodes: List[str] = []
-    added_remote: List[str] = []
-    rows: List[PlaylistTrack] = []
-    for offset, track_id in enumerate(track_ids, start=1):
-        rows.append(
-            PlaylistTrack(
-                playlist_id=playlist_id,
-                track_id=track_id,
-                position=max_position + offset,
-                added_by_id=added_by_id,
-            )
-        )
-        added_tracks.append(track_id)
-    for offset, episode_id in enumerate(episode_ids, start=len(rows) + 1):
-        rows.append(
-            PlaylistTrack(
-                playlist_id=playlist_id,
-                podcast_episode_id=episode_id,
-                position=max_position + offset,
-                added_by_id=added_by_id,
-            )
-        )
-        added_episodes.append(episode_id)
-    for offset, object_id in enumerate(remote_object_ids, start=len(rows) + 1):
-        rows.append(
-            PlaylistTrack(
-                playlist_id=playlist_id,
-                remote_object_id=object_id,
-                position=max_position + offset,
-                added_by_id=added_by_id,
-            )
-        )
-        added_remote.append(object_id)
-
+    rows = _playlist_track_rows(playlist_id, track_ids, episode_ids, remote_object_ids, max_position, added_by_id)
     if rows:
         session.add_all(rows)
         await session.flush()
 
-    return added_tracks, added_episodes, added_remote
+    return list(track_ids), list(episode_ids), list(remote_object_ids)
 
 
 async def add_playlist_tracks(
@@ -1857,6 +1851,28 @@ async def add_playlist_tracks(
         added_by_id=added_by_id,
     )
     return added
+
+
+async def _delete_playlist_rows(
+    session: AsyncSession,
+    rows: List[PlaylistTrack],
+) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, int]]:
+    """Delete the rows and count removals per entity id."""
+    removed_track_counts: Dict[str, int] = {}
+    removed_episode_counts: Dict[str, int] = {}
+    removed_remote_counts: Dict[str, int] = {}
+    for row in rows:
+        await session.delete(row)
+        if row.track_id is not None:
+            track_id = str(row.track_id)
+            removed_track_counts[track_id] = removed_track_counts.get(track_id, 0) + 1
+        if row.podcast_episode_id is not None:
+            episode_id = str(row.podcast_episode_id)
+            removed_episode_counts[episode_id] = removed_episode_counts.get(episode_id, 0) + 1
+        if row.remote_object_id is not None:
+            object_id = str(row.remote_object_id)
+            removed_remote_counts[object_id] = removed_remote_counts.get(object_id, 0) + 1
+    return removed_track_counts, removed_episode_counts, removed_remote_counts
 
 
 async def remove_playlist_items(
@@ -1890,37 +1906,12 @@ async def remove_playlist_items(
         )
     )
     rows = list(result.scalars().all())
-    removed_track_counts: Dict[str, int] = {}
-    removed_episode_counts: Dict[str, int] = {}
-    removed_remote_counts: Dict[str, int] = {}
-    for row in rows:
-        await session.delete(row)
-        if row.track_id is not None:
-            track_id = str(row.track_id)
-            removed_track_counts[track_id] = removed_track_counts.get(track_id, 0) + 1
-        if row.podcast_episode_id is not None:
-            episode_id = str(row.podcast_episode_id)
-            removed_episode_counts[episode_id] = removed_episode_counts.get(episode_id, 0) + 1
-        if row.remote_object_id is not None:
-            object_id = str(row.remote_object_id)
-            removed_remote_counts[object_id] = removed_remote_counts.get(object_id, 0) + 1
+    removed_track_counts, removed_episode_counts, removed_remote_counts = await _delete_playlist_rows(session, rows)
 
-    removed_track_ids: List[str] = []
-    removed_episode_ids: List[str] = []
-    removed_remote_ids: List[str] = []
     seen: Set[str] = set()
-    for track_id in track_ids:
-        if track_id in removed_track_counts and track_id not in seen:
-            seen.add(track_id)
-            removed_track_ids.append(track_id)
-    for episode_id in episode_ids:
-        if episode_id in removed_episode_counts and episode_id not in seen:
-            seen.add(episode_id)
-            removed_episode_ids.append(episode_id)
-    for object_id in remote_object_ids:
-        if object_id in removed_remote_counts and object_id not in seen:
-            seen.add(object_id)
-            removed_remote_ids.append(object_id)
+    removed_track_ids = _duplicate_ids(track_ids, set(removed_track_counts), seen)
+    removed_episode_ids = _duplicate_ids(episode_ids, set(removed_episode_counts), seen)
+    removed_remote_ids = _duplicate_ids(remote_object_ids, set(removed_remote_counts), seen)
 
     if rows:
         await session.flush()
@@ -2113,37 +2104,40 @@ def _playlist_items_stmt(playlist_id: str, user: Optional[User], query: Optional
             )
         )
     if query:
-        stmt = stmt.where(
-            or_(
-                and_(
-                    Track.id.isnot(None),
-                    or_(
-                        ilike_contains(Track.title, query),
-                        Track.artist.has(ilike_contains(Artist.name, query)),
-                        Track.album.has(ilike_contains(Album.title, query)),
-                        ilike_contains(Track.genre, query),
-                        Track.tags.any(ilike_contains(Tag.name, query)),
-                        Track.genres.any(ilike_contains(Genre.name, query)),
-                    ),
-                ),
-                and_(
-                    PodcastEpisode.id.isnot(None),
-                    or_(
-                        ilike_contains(PodcastEpisode.title, query),
-                        ilike_contains(Podcast.title, query),
-                        ilike_contains(Podcast.author, query),
-                    ),
-                ),
-                and_(
-                    RemoteObject.id.isnot(None),
-                    or_(
-                        ilike_contains(RemoteObject.name, query),
-                        ilike_contains(RemoteObject.summary, query),
-                    ),
-                ),
-            )
-        )
+        stmt = stmt.where(_playlist_items_query_clause(query))
     return stmt
+
+
+def _playlist_items_query_clause(query: str):
+    """Search tracks, podcast episodes and cached remote objects."""
+    return or_(
+        and_(
+            Track.id.isnot(None),
+            or_(
+                ilike_contains(Track.title, query),
+                Track.artist.has(ilike_contains(Artist.name, query)),
+                Track.album.has(ilike_contains(Album.title, query)),
+                ilike_contains(Track.genre, query),
+                Track.tags.any(ilike_contains(Tag.name, query)),
+                Track.genres.any(ilike_contains(Genre.name, query)),
+            ),
+        ),
+        and_(
+            PodcastEpisode.id.isnot(None),
+            or_(
+                ilike_contains(PodcastEpisode.title, query),
+                ilike_contains(Podcast.title, query),
+                ilike_contains(Podcast.author, query),
+            ),
+        ),
+        and_(
+            RemoteObject.id.isnot(None),
+            or_(
+                ilike_contains(RemoteObject.name, query),
+                ilike_contains(RemoteObject.summary, query),
+            ),
+        ),
+    )
 
 
 def _playlist_item_sort_clause(sort_by: str, sort_dir: str) -> Tuple[Any, ...]:
@@ -2187,21 +2181,18 @@ async def list_playlist_items(
     session: AsyncSession,
     playlist_id: str,
     user: Optional[User] = None,
-    limit: int = 20,
-    offset: int = 0,
-    include: Optional[Set[str]] = None,
-    sort_by: str = "position",
-    sort_dir: str = "asc",
-    query: Optional[str] = None,
+    **options: Any,
 ) -> List[PlaylistTrack]:
     """List a playlist's membership rows (tracks and podcast episodes) in order."""
-    stmt = _playlist_items_stmt(playlist_id, user, query).options(
-        selectinload(PlaylistTrack.track).options(*_track_selectin_options(include)),
+    stmt = _playlist_items_stmt(playlist_id, user, options.get("query")).options(
+        selectinload(PlaylistTrack.track).options(*_track_selectin_options(options.get("include"))),
         selectinload(PlaylistTrack.episode).selectinload(PodcastEpisode.podcast),
         selectinload(PlaylistTrack.remote_object),
     )
-    stmt = stmt.order_by(*_playlist_item_sort_clause(sort_by, sort_dir))
-    stmt = stmt.offset(offset).limit(limit)
+    stmt = stmt.order_by(
+        *_playlist_item_sort_clause(options.get("sort_by", "position"), options.get("sort_dir", "asc"))
+    )
+    stmt = stmt.offset(options.get("offset", 0)).limit(options.get("limit", 20))
     result = await session.execute(stmt)
     return list(result.scalars().all())
 

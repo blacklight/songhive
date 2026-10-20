@@ -24,14 +24,11 @@ table:
 import asyncio
 import logging
 import uuid
-from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
-from urllib.parse import urlparse
+from typing import Optional
 
-from fastapi import HTTPException
 from pubby import Follower, FollowRequest
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config.schema import SonghiveConfig
@@ -45,174 +42,24 @@ from . import federation as federation_service
 from . import moderation as moderation_service
 from . import remote_content
 from .auth import get_user_by_username
+from .follow_queries import (  # noqa: F401
+    actor_is_followed,
+    count_user_follows,
+    follow_states_for,
+    follows_count_map,
+    get_follow,
+    list_user_follows,
+    object_is_followed,
+)
+from .follow_targets import (  # noqa: F401
+    FollowError,
+    ResolvedTarget,
+    _remote_actor_snapshot,
+    _resolve_target,
+)
 from .remote_content import RemoteActorResult
 
 logger = logging.getLogger(__name__)
-
-
-class FollowError(HTTPException):
-    """A follow/unfollow operation failed with an HTTP status."""
-
-
-@dataclass
-class ResolvedTarget:
-    """A follow target resolved to a local user or remote actor."""
-
-    actor_url: str
-    local_user: Optional[User] = None
-    remote_actor: Optional[RemoteActorResult] = None
-
-    @property
-    def is_local(self) -> bool:
-        return self.local_user is not None
-
-
-def _remote_actor_snapshot(actor: RemoteActorResult) -> dict:
-    """Build a display-suitable actor document from a normalized remote actor."""
-    doc: dict = {
-        "id": actor.actor_url,
-        "type": "Person",
-        "preferredUsername": actor.username,
-        "name": actor.display_name or actor.username,
-        "url": actor.profile_url or actor.actor_url,
-        "inbox": actor.inbox_url,
-    }
-    if actor.avatar_url:
-        doc["icon"] = {"type": "Image", "url": actor.avatar_url}
-    return doc
-
-
-async def _resolve_target(session: AsyncSession, config: SonghiveConfig, raw: str) -> ResolvedTarget:
-    """
-    Resolve a follow target input to a local user or remote actor.
-
-    Accepts bare local usernames, ``@user@domain`` handles, actor/profile
-    URLs (local or remote). Local inputs resolve through the users table;
-    remote inputs through :func:`remote_content.lookup_remote_actor`,
-    which applies the domain allow/block rules and actor cache.
-    """
-    text = (raw or "").strip()
-    if not text:
-        raise FollowError(status_code=422, detail="Follow target is required")
-
-    username: Optional[str] = None
-    if not text.startswith(("http://", "https://")) and "@" not in text:
-        username = text
-    else:
-        target = remote_content.parse_remote_target(text, config)
-        if target.kind == remote_content.RemoteTargetKind.LOCAL:
-            if target.username:
-                username = target.username.lstrip("@")
-            elif target.url:
-                match = remote_content._ACTOR_PATH_RE.match(urlparse(target.url).path or "/")
-                if match:
-                    username = (match.group("name") or match.group("name2") or "").lstrip("@")
-            if not username:
-                raise FollowError(status_code=404, detail="User not found")
-        else:
-            actor = await remote_content.lookup_remote_actor(session, config, text)
-            if actor.unavailable:
-                raise FollowError(status_code=404, detail="Remote actor is no longer available")
-            return ResolvedTarget(actor_url=actor.actor_url, remote_actor=actor)
-
-    # ``no_autoflush`` keeps pending actor-provisioning mutations from
-    # flushing here — on SQLite a write transaction held by this session
-    # would block the sync pubby-storage writes that follow.
-    with session.no_autoflush:
-        local = await get_user_by_username(session, username)
-    if local is None:
-        raise FollowError(status_code=404, detail="User not found")
-    federation_service.ensure_user_actor(local, config)
-    if not local.actor_url:
-        raise FollowError(status_code=422, detail="Target user has no federation actor")
-    return ResolvedTarget(actor_url=local.actor_url, local_user=local)
-
-
-async def get_follow(session: AsyncSession, user_id: str, target_actor_url: str) -> Optional[Follow]:
-    """Return the follow row of ``user_id`` on ``target_actor_url``, if any."""
-    # ``no_autoflush`` keeps pending actor-provisioning mutations from
-    # flushing here — on SQLite a write transaction held by this session
-    # would block the sync pubby-storage writes that follow.
-    with session.no_autoflush:
-        return await session.scalar(
-            select(Follow).where(Follow.user_id == user_id, Follow.target_actor_url == target_actor_url)
-        )
-
-
-async def actor_is_followed(session: AsyncSession, actor_url: str) -> bool:
-    """Return whether any local user follows (or requested to follow) ``actor_url``."""
-    return await session.scalar(select(Follow.id).where(Follow.target_actor_url == actor_url).limit(1)) is not None
-
-
-async def object_is_followed(session: AsyncSession, object_urls: List[str]) -> bool:
-    """
-    Return whether any local user follows any of the given object URLs.
-
-    Object follows (e.g. a follow of a remote music library) record the
-    followed *object* URL in ``target_actor_url`` — this checks the same
-    column against a set of candidate URLs drawn from an inbound activity's
-    object fields.
-    """
-    urls = [u for u in object_urls if isinstance(u, str) and u]
-    if not urls:
-        return False
-    return await session.scalar(select(Follow.id).where(Follow.target_actor_url.in_(urls)).limit(1)) is not None
-
-
-async def follow_states_for(session: AsyncSession, user_id: str, actor_urls: List[str]) -> dict:
-    """Return ``{target_actor_url: state}`` for ``user_id``'s follows on ``actor_urls``."""
-    if not actor_urls:
-        return {}
-    return dict(
-        (
-            await session.execute(
-                select(Follow.target_actor_url, Follow.state).where(
-                    Follow.user_id == user_id, Follow.target_actor_url.in_(actor_urls)
-                )
-            )
-        ).all()  # type: ignore
-    )
-
-
-async def list_user_follows(
-    session: AsyncSession,
-    user_id: str,
-    *,
-    states: Optional[Tuple[str, ...]] = None,
-) -> List[Follow]:
-    """Return ``user_id``'s follow rows (newest first), optionally filtered by state."""
-    query = select(Follow).where(Follow.user_id == user_id).order_by(Follow.created_at.desc())
-    if states:
-        query = query.where(Follow.state.in_(states))
-    return list((await session.execute(query)).scalars())
-
-
-async def count_user_follows(
-    session: AsyncSession,
-    user_id: str,
-    *,
-    states: Optional[Tuple[str, ...]] = None,
-) -> int:
-    """Return the number of actors ``user_id`` follows, optionally filtered by state."""
-    query = select(func.count(Follow.id)).where(Follow.user_id == user_id)
-    if states:
-        query = query.where(Follow.state.in_(states))
-    return int(await session.scalar(query) or 0)
-
-
-async def follows_count_map(session: AsyncSession, user_ids: List[str]) -> dict:
-    """Return ``{user_id: accepted_follow_count}`` for the given users."""
-    if not user_ids:
-        return {}
-    return dict(
-        (
-            await session.execute(
-                select(Follow.user_id, func.count(Follow.id))
-                .where(Follow.user_id.in_(user_ids), Follow.state == FOLLOW_STATE_ACCEPTED)
-                .group_by(Follow.user_id)
-            )
-        ).all()  # type: ignore
-    )
 
 
 async def _local_actor_data(user: User, config: SonghiveConfig) -> dict:

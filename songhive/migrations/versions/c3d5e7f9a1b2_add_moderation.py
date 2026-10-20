@@ -43,65 +43,78 @@ def _timestamp_column(name: str) -> sa.Column:
     return sa.Column(name, sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()"))
 
 
+def _create_user_moderations() -> None:
+    if table_exists("user_moderations"):
+        return
+    op.create_table(
+        "user_moderations",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("user_id", sa.String(), nullable=False),
+        sa.Column("target_actor_url", sa.String(length=512), nullable=False),
+        sa.Column("target_user_id", sa.String(), nullable=True),
+        sa.Column("kind", sa.String(length=16), nullable=False),
+        sa.Column("actor_data", sa.JSON(), nullable=True),
+        _timestamp_column("created_at"),
+        _timestamp_column("updated_at"),
+        sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["target_user_id"], ["users.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("user_id", "target_actor_url", "kind", name="uq_user_moderations_user_target_kind"),
+        sa.CheckConstraint(_USER_MODERATION_CHECK, name="ck_user_moderations_kind"),
+    )
+    op.create_index("ix_user_moderations_user_id", "user_moderations", ["user_id"])
+    op.create_index("ix_user_moderations_target_user_id", "user_moderations", ["target_user_id"])
+    op.create_index("ix_user_moderations_target_actor_url", "user_moderations", ["target_actor_url"])
+
+
+def _create_admin_user_moderations() -> None:
+    if table_exists("admin_user_moderations"):
+        return
+    op.create_table(
+        "admin_user_moderations",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("target_actor_url", sa.String(length=512), nullable=False),
+        sa.Column("target_user_id", sa.String(), nullable=True),
+        sa.Column("action", sa.String(length=16), nullable=False),
+        sa.Column("reason", sa.Text(), nullable=True),
+        sa.Column("actor_data", sa.JSON(), nullable=True),
+        sa.Column("created_by", sa.String(), nullable=True),
+        _timestamp_column("created_at"),
+        _timestamp_column("updated_at"),
+        sa.ForeignKeyConstraint(["target_user_id"], ["users.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["created_by"], ["users.id"], ondelete="SET NULL"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("target_actor_url", name="uq_admin_user_moderations_target_actor_url"),
+        sa.CheckConstraint(_ADMIN_USER_ACTION_CHECK, name="ck_admin_user_moderations_action"),
+    )
+    op.create_index("ix_admin_user_moderations_target_user_id", "admin_user_moderations", ["target_user_id"])
+
+
+def _create_instance_moderations() -> None:
+    if table_exists("instance_moderations"):
+        return
+    op.create_table(
+        "instance_moderations",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("domain", sa.String(length=255), nullable=False),
+        sa.Column("action", sa.String(length=32), nullable=False),
+        sa.Column("reason", sa.Text(), nullable=True),
+        sa.Column("created_by", sa.String(), nullable=True),
+        _timestamp_column("created_at"),
+        _timestamp_column("updated_at"),
+        sa.ForeignKeyConstraint(["created_by"], ["users.id"], ondelete="SET NULL"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("domain", name="uq_instance_moderations_domain"),
+        sa.CheckConstraint(_INSTANCE_ACTION_CHECK, name="ck_instance_moderations_action"),
+    )
+    op.create_index("ix_instance_moderations_domain", "instance_moderations", ["domain"])
+
+
 def upgrade() -> None:
     """Create the moderation tables."""
-    if not table_exists("user_moderations"):
-        op.create_table(
-            "user_moderations",
-            sa.Column("id", sa.String(), nullable=False),
-            sa.Column("user_id", sa.String(), nullable=False),
-            sa.Column("target_actor_url", sa.String(length=512), nullable=False),
-            sa.Column("target_user_id", sa.String(), nullable=True),
-            sa.Column("kind", sa.String(length=16), nullable=False),
-            sa.Column("actor_data", sa.JSON(), nullable=True),
-            _timestamp_column("created_at"),
-            _timestamp_column("updated_at"),
-            sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
-            sa.ForeignKeyConstraint(["target_user_id"], ["users.id"], ondelete="CASCADE"),
-            sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("user_id", "target_actor_url", "kind", name="uq_user_moderations_user_target_kind"),
-            sa.CheckConstraint(_USER_MODERATION_CHECK, name="ck_user_moderations_kind"),
-        )
-        op.create_index("ix_user_moderations_user_id", "user_moderations", ["user_id"])
-        op.create_index("ix_user_moderations_target_user_id", "user_moderations", ["target_user_id"])
-        op.create_index("ix_user_moderations_target_actor_url", "user_moderations", ["target_actor_url"])
-
-    if not table_exists("admin_user_moderations"):
-        op.create_table(
-            "admin_user_moderations",
-            sa.Column("id", sa.String(), nullable=False),
-            sa.Column("target_actor_url", sa.String(length=512), nullable=False),
-            sa.Column("target_user_id", sa.String(), nullable=True),
-            sa.Column("action", sa.String(length=16), nullable=False),
-            sa.Column("reason", sa.Text(), nullable=True),
-            sa.Column("actor_data", sa.JSON(), nullable=True),
-            sa.Column("created_by", sa.String(), nullable=True),
-            _timestamp_column("created_at"),
-            _timestamp_column("updated_at"),
-            sa.ForeignKeyConstraint(["target_user_id"], ["users.id"], ondelete="CASCADE"),
-            sa.ForeignKeyConstraint(["created_by"], ["users.id"], ondelete="SET NULL"),
-            sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("target_actor_url", name="uq_admin_user_moderations_target_actor_url"),
-            sa.CheckConstraint(_ADMIN_USER_ACTION_CHECK, name="ck_admin_user_moderations_action"),
-        )
-        op.create_index("ix_admin_user_moderations_target_user_id", "admin_user_moderations", ["target_user_id"])
-
-    if not table_exists("instance_moderations"):
-        op.create_table(
-            "instance_moderations",
-            sa.Column("id", sa.String(), nullable=False),
-            sa.Column("domain", sa.String(length=255), nullable=False),
-            sa.Column("action", sa.String(length=32), nullable=False),
-            sa.Column("reason", sa.Text(), nullable=True),
-            sa.Column("created_by", sa.String(), nullable=True),
-            _timestamp_column("created_at"),
-            _timestamp_column("updated_at"),
-            sa.ForeignKeyConstraint(["created_by"], ["users.id"], ondelete="SET NULL"),
-            sa.PrimaryKeyConstraint("id"),
-            sa.UniqueConstraint("domain", name="uq_instance_moderations_domain"),
-            sa.CheckConstraint(_INSTANCE_ACTION_CHECK, name="ck_instance_moderations_action"),
-        )
-        op.create_index("ix_instance_moderations_domain", "instance_moderations", ["domain"])
+    _create_user_moderations()
+    _create_admin_user_moderations()
+    _create_instance_moderations()
 
 
 def downgrade() -> None:

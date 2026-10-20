@@ -1004,37 +1004,7 @@ async def begin_external_device_auth(
             detail=f"Provider does not support this auth flow: {body.provider_type}",
         )
 
-    config = dict(body.config or {})
-    if body.external_library_id:
-        external_library = await _load_external_library(db, body.external_library_id)
-        if external_library is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-        if external_library.provider_type != body.provider_type:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail="Provider type does not match the external library",
-            )
-        if external_library.scope == "admin" and not current_user.is_admin:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-        if (
-            external_library.scope == "user"
-            and external_library.created_by_id != current_user.id
-            and not current_user.is_admin
-        ):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
-        config = _merge_config_preserving_redacted(
-            config,
-            _decrypt_external_config(external_library.config),
-        )
-    elif not _provider_allowed_for_create(
-        body.provider_type,
-        current_user,
-        request.app.state.config,
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Provider type not allowed",
-        )
+    config = await _resolve_device_auth_config(db, body, current_user, request)
 
     try:
         result = await begin_device_auth_flow(
@@ -1051,6 +1021,69 @@ async def begin_external_device_auth(
             detail=str(exc),
         ) from exc
 
+    await _audit_device_auth_begin(db, request, body, current_user)
+    await db.commit()
+
+    return ExternalDeviceAuthBeginResponse(
+        state=result.state,
+        mode=result.mode,
+        user_code=result.user_code,
+        verification_uri=result.verification_uri,
+        verification_uri_complete=result.verification_uri_complete,
+        authorize_url=result.authorize_url,
+        expires_in=result.expires_in,
+        interval=result.interval,
+    )
+
+
+async def _resolve_device_auth_config(
+    db: AsyncSession,
+    body: ExternalDeviceAuthBeginRequest,
+    current_user: User,
+    request: Request,
+) -> dict:
+    """Merge the submitted config with a stored library's, after ACL checks."""
+    config = dict(body.config or {})
+    if not body.external_library_id:
+        if not _provider_allowed_for_create(
+            body.provider_type,
+            current_user,
+            request.app.state.config,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="Provider type not allowed",
+            )
+        return config
+
+    external_library = await _load_external_library(db, body.external_library_id)
+    if external_library is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    if external_library.provider_type != body.provider_type:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="Provider type does not match the external library",
+        )
+    if external_library.scope == "admin" and not current_user.is_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    if (
+        external_library.scope == "user"
+        and external_library.created_by_id != current_user.id
+        and not current_user.is_admin
+    ):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    return _merge_config_preserving_redacted(
+        config,
+        _decrypt_external_config(external_library.config),
+    )
+
+
+async def _audit_device_auth_begin(
+    db: AsyncSession,
+    request: Request,
+    body: ExternalDeviceAuthBeginRequest,
+    current_user: User,
+) -> None:
     await audit.log_action(
         db,
         actor_id=current_user.id,
@@ -1063,18 +1096,6 @@ async def begin_external_device_auth(
             "external_library_id": body.external_library_id,
         },
         ip_address=client_ip(request),
-    )
-    await db.commit()
-
-    return ExternalDeviceAuthBeginResponse(
-        state=result.state,
-        mode=result.mode,
-        user_code=result.user_code,
-        verification_uri=result.verification_uri,
-        verification_uri_complete=result.verification_uri_complete,
-        authorize_url=result.authorize_url,
-        expires_in=result.expires_in,
-        interval=result.interval,
     )
 
 
