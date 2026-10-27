@@ -426,6 +426,82 @@ def test_get_opensubsonic_extensions(client, regular_user):
     assert "apiKeyAuthentication" in names
 
 
+async def test_api_key_without_username(client, db_session, config, regular_user):
+    """apiKeyAuthentication: an ``apiKey`` alone identifies the user."""
+    _, raw_jwt = await issue_api_token(db_session, regular_user, config, "key-only", None)
+    await db_session.commit()
+
+    _ok(client.get("/rest/ping.view", params={"apiKey": raw_jwt, "f": "json"}))
+    body = _failed(client.get("/rest/ping.view", params={"apiKey": "bogus", "f": "json"}))
+    assert body["error"]["code"] == 40
+
+
+def test_token_info(client, regular_user):
+    body = _ok(client.get("/rest/tokenInfo.view", params=_creds(regular_user)))
+    assert body["tokenInfo"]["username"] == regular_user.username
+
+
+def test_get_user_self(client, regular_user):
+    body = _ok(client.get("/rest/getUser.view", params=_creds(regular_user, username=regular_user.username)))
+    user = body["user"]
+    assert user["username"] == regular_user.username
+    assert user["email"] == regular_user.email
+    assert user["folder"] == [0]
+    assert user["scrobblingEnabled"] is False
+    assert user["adminRole"] is False
+    assert user["streamRole"] is True
+    assert user["downloadRole"] is True
+    assert user["jukeboxRole"] is False
+
+
+def test_get_user_defaults_to_self(client, regular_user):
+    body = _ok(client.get("/rest/getUser.view", params=_creds(regular_user)))
+    assert body["user"]["username"] == regular_user.username
+
+
+def test_get_user_other_forbidden(client, regular_user, other_user):
+    body = _failed(client.get("/rest/getUser.view", params=_creds(regular_user, username=other_user.username)))
+    assert body["error"]["code"] == 50
+
+
+def test_get_user_admin_can_view_others(client, admin_user, regular_user):
+    body = _ok(client.get("/rest/getUser.view", params=_creds(admin_user, username=regular_user.username)))
+    assert body["user"]["username"] == regular_user.username
+
+
+def test_get_user_unknown_returns_70(client, admin_user):
+    body = _failed(client.get("/rest/getUser.view", params=_creds(admin_user, username="ghost")))
+    assert body["error"]["code"] == 70
+
+
+async def test_get_user_scrobbling_enabled(client, db_session, regular_user):
+    db_session.add(ScrobbleConfig(user_id=str(regular_user.id), service="lastfm", username="fmuser", session_key="enc"))
+    await db_session.commit()
+    body = _ok(client.get("/rest/getUser.view", params=_creds(regular_user)))
+    assert body["user"]["scrobblingEnabled"] is True
+
+
+def test_get_user_xml_folder_ids(client, regular_user):
+    """XML responses render folder grants as ``<folder id="N"/>``."""
+    response = client.get("/rest/getUser.view", params=_creds(regular_user, fmt=None))
+    assert response.status_code == 200
+    root = ET.fromstring(response.content)
+    ns = "{http://subsonic.org/restapi}"
+    folders = root.find(f"{ns}user").findall(f"{ns}folder")
+    assert [f.get("id") for f in folders] == ["0"]
+
+
+def test_get_users_requires_admin(client, regular_user):
+    body = _failed(client.get("/rest/getUsers.view", params=_creds(regular_user)))
+    assert body["error"]["code"] == 50
+
+
+def test_get_users_admin_lists_all(client, admin_user, regular_user):
+    body = _ok(client.get("/rest/getUsers.view", params=_creds(admin_user)))
+    names = {u["username"] for u in body["users"]["user"]}
+    assert {admin_user.username, regular_user.username} <= names
+
+
 def test_get_music_folders(client, library, regular_user):
     body = _ok(client.get("/rest/getMusicFolders.view", params=_creds(regular_user)))
     folders = body["musicFolders"]["musicFolder"]

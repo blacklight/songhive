@@ -19,6 +19,7 @@ from ...models.album import Album
 from ...models.artist import Artist
 from ...models.playlist import Playlist
 from ...models.track import Track
+from ...models.user import User
 from .responses import iso
 
 #: Prefix → entity kind used by ``coverArt`` ids and ``getCoverArt``.
@@ -269,6 +270,36 @@ def artist_dict(artist: Artist, *, album_count: Optional[int] = None) -> Dict[st
         "coverArt": cover_art_id("ar", artist.id) if has_art else None,
         "albumCount": album_count,
         "artistImageUrl": artist.image_url,
+    }
+    return {key: value for key, value in out.items() if value is not None}
+
+
+def user_dict(user: User, *, scrobbling_enabled: bool = False) -> Dict[str, Any]:
+    """Serialize a User to a Subsonic ``user`` dict (roles + folder grants)."""
+    out: Dict[str, Any] = {
+        "username": user.username,
+        "email": user.email or None,
+        "scrobblingEnabled": scrobbling_enabled,
+        "maxBitRate": 0,
+        "adminRole": user.is_admin,
+        "settingsRole": True,
+        "downloadRole": True,
+        "streamRole": True,
+        "playlistRole": True,
+        # Roles gating client features this adapter does not implement
+        # (uploads, cover-art edits, comments, podcasts, jukebox, shares,
+        # video conversion) stay false so apps hide them outright.
+        "uploadRole": False,
+        "coverArtRole": False,
+        "commentRole": False,
+        "podcastRole": False,
+        "jukeboxRole": False,
+        "shareRole": False,
+        "videoConversionRole": False,
+        # Strict clients decode ``folder`` as a list of ints, so only the
+        # root folder id can be advertised here — library ids are UUIDs.
+        # The root folder already spans everything the user can access.
+        "folder": [0],
     }
     return {key: value for key, value in out.items() if value is not None}
 

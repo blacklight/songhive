@@ -43,6 +43,7 @@ from ...models.artist import Artist
 from ...models.audit_log import AuditTargetType
 from ...models.favorite import Favorite
 from ...models.playlist import Playlist, PlaylistTrack
+from ...models.scrobble import ScrobbleConfig
 from ...models.track import Track
 from ...models.user import User
 from ...services import acl, audit, deletion, music, scrobbler
@@ -355,6 +356,40 @@ async def _open_subsonic_extensions(ctx: _Ctx) -> Dict[str, Any]:
             "extension": [{"name": name, "version": versions} for name, versions in _OPEN_SUBSONIC_EXTENSIONS.items()]
         }
     }
+
+
+@_endpoint("tokenInfo")
+async def _token_info(ctx: _Ctx) -> Dict[str, Any]:
+    """apiKeyAuthentication extension endpoint: report the key's user."""
+    return {"tokenInfo": {"username": ctx.user.username}}
+
+
+# ---------------------------------------------------------------------------
+# User management
+# ---------------------------------------------------------------------------
+
+
+@_endpoint("getUser")
+async def _get_user(ctx: _Ctx) -> Dict[str, Any]:
+    username = ctx.params.get("username") or ctx.user.username
+    if username != ctx.user.username and not ctx.user.is_admin:
+        raise SubsonicError(NOT_AUTHORIZED, "Not authorized to view other users")
+    target = ctx.user if username == ctx.user.username else await get_user_by_username(ctx.db, username)
+    if target is None:
+        raise SubsonicError(NOT_FOUND, "User not found")
+    enabled = await scrobbler.has_active_config(ctx.db, str(target.id))
+    return {"user": sz.user_dict(target, scrobbling_enabled=enabled)}
+
+
+@_endpoint("getUsers")
+async def _get_users(ctx: _Ctx) -> Dict[str, Any]:
+    if not ctx.user.is_admin:
+        raise SubsonicError(NOT_AUTHORIZED, "Not authorized to list users")
+    result = await ctx.db.execute(select(User).order_by(User.username))
+    users = list(result.scalars().all())
+    result = await ctx.db.execute(select(ScrobbleConfig.user_id).where(ScrobbleConfig.enabled.is_(True)))
+    scrobbling_ids = set(result.scalars().all())
+    return {"users": {"user": [sz.user_dict(u, scrobbling_enabled=str(u.id) in scrobbling_ids) for u in users]}}
 
 
 # ---------------------------------------------------------------------------

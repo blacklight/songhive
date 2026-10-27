@@ -6,8 +6,10 @@ Clients authenticate every request with query (or form) parameters:
 * ``u`` + ``p`` — username plus password, either plain or hex-encoded via
   the ``enc:`` prefix. Songhive API tokens are also accepted here, which
   lets users keep their real password out of third-party apps.
-* ``u`` + ``apiKey`` — OpenSubsonic API-key authentication; the key is a
-  Songhive API token (``/api/v1/api-tokens``).
+* ``apiKey`` — OpenSubsonic API-key authentication; the key is a
+  Songhive API token (``/api/v1/api-tokens``). Per the extension spec the
+  key alone identifies the user, so ``u`` may be omitted; when both are
+  sent they must resolve to the same account.
 * ``u`` + ``t`` + ``s`` — salted-token auth, ``token = md5(password + salt)``.
   Verifying it requires the plaintext password, which is incompatible with
   bcrypt-only storage — so it works when the client password is a Songhive
@@ -124,7 +126,15 @@ async def authenticate_subsonic(
     is a Songhive API token; the real password only works via ``p``.
     """
     username = params.get("u")
+    api_key = params.get("apiKey")
+
     if not username:
+        if api_key is not None:
+            # apiKeyAuthentication: the key alone authenticates the user.
+            token_user = await _user_for_api_token(db, str(api_key), secret_key, redis)
+            if token_user is not None:
+                return token_user
+            raise SubsonicError(WRONG_CREDENTIALS, "Wrong username or password")
         raise SubsonicError(MISSING_PARAMETER, "Required parameter is missing: u")
 
     token = params.get("t")
@@ -140,7 +150,6 @@ async def authenticate_subsonic(
         raise SubsonicError(WRONG_CREDENTIALS, "Wrong username or password")
 
     password = params.get("p")
-    api_key = params.get("apiKey")
     if password is None and api_key is None:
         raise SubsonicError(MISSING_PARAMETER, _MISSING_CREDENTIALS)
 

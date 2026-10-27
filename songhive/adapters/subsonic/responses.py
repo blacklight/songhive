@@ -91,7 +91,12 @@ def _build_element(parent: ET.Element, tag: str, value: Any) -> None:
             _build_element(parent, tag, item)
     elif value is not None:
         element = ET.SubElement(parent, tag)
-        element.text = _scalar(value)
+        if tag == "folder":
+            # ``user`` folder grants are ``<folder id="N"/>`` in XML while
+            # JSON keeps the plain integer list.
+            element.set("id", _scalar(value))
+        else:
+            element.text = _scalar(value)
 
 
 def _apply_field(element: ET.Element, key: str, value: Any) -> None:

@@ -554,6 +554,12 @@
   `/rest/{method}.view` catch-all is registered last via
   `routes.register_fallback_route()` (called from `SubsonicAdapter.router()`
   after `media.py` registers its binary endpoints on the same router).
+  Per the advertised `apiKeyAuthentication` extension an `apiKey` alone
+  (no `u`) also authenticates, and `tokenInfo` must exist alongside it.
+  In `serializers.user_dict` the `folder` grant list must stay int-shaped
+  (`[0]` root only): strict clients (e.g. Navic's zt64 lib) decode it as
+  `List<Int>` and library ids are UUIDs — `responses._build_element`
+  special-cases `<folder id="N"/>` so XML stays spec-shaped too.
 
 ## Project Structure
 
