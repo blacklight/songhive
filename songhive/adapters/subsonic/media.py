@@ -230,11 +230,13 @@ async def _serve_external_stream(ctx: _Ctx, stream: ExternalStream, *, download:
     )
 
 
+@router.api_route("/rest/stream", methods=["GET", "POST"], include_in_schema=False)
 @router.api_route("/rest/stream.view", methods=["GET", "POST"], include_in_schema=False)
 async def stream_view(request: Request, db: AsyncSession = Depends(get_db)) -> Response:
     return await _dispatch_binary(request, db, lambda ctx: _stream(ctx, download=False))
 
 
+@router.api_route("/rest/download", methods=["GET", "POST"], include_in_schema=False)
 @router.api_route("/rest/download.view", methods=["GET", "POST"], include_in_schema=False)
 async def download_view(request: Request, db: AsyncSession = Depends(get_db)) -> Response:
     return await _dispatch_binary(request, db, lambda ctx: _stream(ctx, download=True))
@@ -326,6 +328,7 @@ async def _cover_for_kind(ctx: _Ctx, kind: str, entity_id: str) -> Tuple[Optiona
     return await resolver(ctx, entity_id)
 
 
+@router.api_route("/rest/getCoverArt", methods=["GET", "POST"], include_in_schema=False)
 @router.api_route("/rest/getCoverArt.view", methods=["GET", "POST"], include_in_schema=False)
 async def cover_art_view(request: Request, db: AsyncSession = Depends(get_db)) -> Response:
     async def _handler(ctx: _Ctx) -> Response:
@@ -345,6 +348,7 @@ async def cover_art_view(request: Request, db: AsyncSession = Depends(get_db)) -
     return await _dispatch_binary(request, db, _handler)
 
 
+@router.api_route("/rest/getAvatar", methods=["GET", "POST"], include_in_schema=False)
 @router.api_route("/rest/getAvatar.view", methods=["GET", "POST"], include_in_schema=False)
 async def avatar_view(request: Request, db: AsyncSession = Depends(get_db)) -> Response:
     async def _handler(ctx: _Ctx) -> Response:

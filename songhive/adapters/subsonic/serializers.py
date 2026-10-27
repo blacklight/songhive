@@ -30,6 +30,10 @@ COVER_ART_PREFIXES = {
     "pl": "playlist",
 }
 
+#: Timestamp emitted for required ``created``/``changed`` fields when the
+#: entity has no usable value — strict clients require the key.
+EPOCH_ISO = "1970-01-01T00:00:00+00:00"
+
 _MIME_SUFFIX = {
     "audio/mpeg": "mp3",
     "audio/mp3": "mp3",
@@ -209,8 +213,9 @@ def song_dict(track: Track, *, starred_at: Optional[Any] = None) -> Dict[str, An
         "albumId": str(track.album_id) if track.album_id else None,
         "artistId": str(track.artist_id) if track.artist_id else None,
         "type": "music",
+        "mediaType": "song",
         "isVideo": False,
-        "created": iso(track.created_at),
+        "created": iso(track.created_at) or EPOCH_ISO,
         "playCount": track.play_count,
         "starred": iso(starred_at),
     }
@@ -237,9 +242,10 @@ def album_dict(
         "songCount": song_count,
         "duration": int(duration) if duration is not None else None,
         "playCount": play_count,
-        "created": iso(album.created_at),
+        "created": iso(album.created_at) or EPOCH_ISO,
         "year": album.release_year,
         "genre": album.genre,
+        "mediaType": "album",
     }
     return {key: value for key, value in out.items() if value is not None}
 
@@ -257,6 +263,8 @@ def album_dir_dict(album: Album) -> Dict[str, Any]:
         "year": album.release_year,
         "genre": album.genre,
         "coverArt": cover_art_id("al", album.id) if (album.cover_file_id or album.cover_url) else None,
+        "created": iso(album.created_at) or EPOCH_ISO,
+        "mediaType": "album",
     }
     return {key: value for key, value in out.items() if value is not None}
 
@@ -270,6 +278,7 @@ def artist_dict(artist: Artist, *, album_count: Optional[int] = None) -> Dict[st
         "coverArt": cover_art_id("ar", artist.id) if has_art else None,
         "albumCount": album_count,
         "artistImageUrl": artist.image_url,
+        "mediaType": "artist",
     }
     return {key: value for key, value in out.items() if value is not None}
 
@@ -322,9 +331,11 @@ def playlist_dict(
         "owner": owner_name or (owner.username if owner is not None else None),
         "public": playlist.visibility == Visibility.PUBLIC.value,
         "songCount": song_count,
-        "duration": int(duration) if duration is not None else None,
-        "created": iso(playlist.created_at),
-        "changed": iso(playlist.updated_at),
+        # ``duration``/``created``/``changed`` are required non-nullable in
+        # strict client models — always emit a value.
+        "duration": int(duration) if duration is not None else 0,
+        "created": iso(playlist.created_at) or EPOCH_ISO,
+        "changed": iso(playlist.updated_at) or EPOCH_ISO,
         "coverArt": cover_art_id("pl", playlist.id) if has_art else None,
     }
     if songs is not None:

@@ -17,6 +17,7 @@ so ``Params`` keeps every occurrence.
 import logging
 import random
 import time
+import zlib
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -218,7 +219,7 @@ async def _dispatch(request: Request, db: AsyncSession, handler: _Handler) -> Re
 
 
 def _endpoint(name: str):
-    """Register ``/rest/{name}.view`` for GET and POST."""
+    """Register ``/rest/{name}.view`` plus the bare ``/rest/{name}`` alias."""
 
     def decorator(fn: _Handler):
         async def _route(request: Request, db: AsyncSession = Depends(get_db)) -> Response:
@@ -226,9 +227,22 @@ def _endpoint(name: str):
 
         _route.__name__ = f"{name}_view"
         router.api_route(f"/rest/{name}.view", methods=["GET", "POST"], include_in_schema=False)(_route)
+        router.api_route(f"/rest/{name}", methods=["GET", "POST"], include_in_schema=False)(_route)
         return fn
 
     return decorator
+
+
+def _library_folder_id(library_id: Any) -> int:
+    """Stable int music-folder id for a library.
+
+    ``MusicFolder.id`` is an int in the Subsonic API — strict clients decode
+    it as one and UUIDs crash their parsers. The crc is deterministic so the
+    same library keeps the same id across requests and restarts; ``musicFol-
+    derId`` reverses it by enumerating the visible libraries (never 0 — that
+    id is the root folder).
+    """
+    return zlib.crc32(str(library_id).encode("utf-8")) or 1
 
 
 async def _music_folder_library_id(ctx: _Ctx) -> Optional[str]:
@@ -236,6 +250,14 @@ async def _music_folder_library_id(ctx: _Ctx) -> Optional[str]:
     folder = ctx.params.get("musicFolderId")
     if not folder or folder in {ROOT_MUSIC_FOLDER_ID, "-1"}:
         return None
+    if folder.isdigit():
+        wanted = int(folder)
+        libraries = await music.list_libraries(ctx.db, user=ctx.user, include_external=True, limit=500)
+        for lib in libraries:
+            if _library_folder_id(lib.id) == wanted:
+                return str(lib.id)
+        raise SubsonicError(NOT_FOUND, "Music folder not found")
+    # Lenient fallback: some clients round-trip a raw library id.
     if not await acl.can_access(ctx.db, ctx.user, "library", folder):
         raise SubsonicError(NOT_FOUND, "Music folder not found")
     return folder
@@ -399,9 +421,9 @@ async def _get_users(ctx: _Ctx) -> Dict[str, Any]:
 
 @_endpoint("getMusicFolders")
 async def _music_folders(ctx: _Ctx) -> Dict[str, Any]:
-    folders: List[Dict[str, Any]] = [{"id": ROOT_MUSIC_FOLDER_ID, "name": "Songhive"}]
+    folders: List[Dict[str, Any]] = [{"id": int(ROOT_MUSIC_FOLDER_ID), "name": "Songhive"}]
     libraries = await music.list_libraries(ctx.db, user=ctx.user, include_external=True, limit=500)
-    folders.extend({"id": str(lib.id), "name": lib.name} for lib in libraries)
+    folders.extend({"id": _library_folder_id(lib.id), "name": lib.name} for lib in libraries)
     return {"musicFolders": {"musicFolder": folders}}
 
 
@@ -451,7 +473,10 @@ async def _music_directory(ctx: _Ctx) -> Dict[str, Any]:
             "directory": {
                 "id": dir_id,
                 "name": artist.name,
+                # ``child`` is the spec key; ``entry`` is what strict
+                # polymorphic decoders (e.g. zt64) read instead.
                 "child": children,
+                "entry": children,
             }
         }
 
@@ -463,12 +488,14 @@ async def _music_directory(ctx: _Ctx) -> Dict[str, Any]:
         limit=10000,
         include={"artist", "album"},
     )
+    children = await _songs_payload(ctx, tracks)
     return {
         "directory": {
             "id": dir_id,
             "name": album.title,
             "parent": str(album.artist_id),
-            "child": await _songs_payload(ctx, tracks),
+            "child": children,
+            "entry": children,
         }
     }
 
@@ -535,9 +562,11 @@ async def _artist_info_payload(ctx: _Ctx) -> Dict[str, Any]:
     info: Dict[str, Any] = {
         "biography": artist.bio or "",
         "musicBrainzId": artist.musicbrainz_id,
-        "smallImageUrl": image_url,
-        "mediumImageUrl": image_url,
-        "largeImageUrl": image_url,
+        # Image URLs are non-nullable in strict client models — emit ""
+        # rather than dropping the keys when the artist has no image.
+        "smallImageUrl": image_url or "",
+        "mediumImageUrl": image_url or "",
+        "largeImageUrl": image_url or "",
         "similarArtist": [],
     }
     return {k: v for k, v in info.items() if v is not None}
@@ -650,6 +679,7 @@ async def _now_playing(ctx: _Ctx) -> Dict[str, Any]:
         song = sz.song_dict(track, starred_at=stars.get(entry.track_id))
         song["username"] = entry.username
         song["minutesAgo"] = now_playing.minutes_ago(entry)
+        song["playerId"] = 0
         if entry.player:
             song["playerName"] = entry.player
         payload.append(song)
@@ -1150,7 +1180,26 @@ async def _save_play_queue(ctx: _Ctx) -> Dict[str, Any]:
 
 @_endpoint("getPlayQueue")
 async def _get_play_queue(ctx: _Ctx) -> Dict[str, Any]:
-    return {"playQueue": {}}
+    # Fields strict decoders require (``current`` is the spec name;
+    # ``currentId`` is what the zt64 model reads).
+    return {
+        "playQueue": {
+            "current": "",
+            "currentId": "",
+            "position": 0,
+            "username": ctx.user.username,
+            "changed": sz.EPOCH_ISO,
+            "changedBy": "songhive",
+            "entry": [],
+        }
+    }
+
+
+@_endpoint("getScanStatus")
+@_endpoint("startScan")
+async def _scan_status(ctx: _Ctx) -> Dict[str, Any]:
+    # Songhive imports are task-driven; there is no manual scan to report.
+    return {"scanStatus": {"scanning": False, "count": 0}}
 
 
 @_endpoint("getVideos")
@@ -1164,9 +1213,14 @@ async def _get_bookmarks(ctx: _Ctx) -> Dict[str, Any]:
 
 
 @_endpoint("getLyrics")
-@_endpoint("getLyricsBySongId")
 async def _get_lyrics(ctx: _Ctx) -> Dict[str, Any]:
-    return {"lyrics": {}}
+    # ``artist``/``title``/``value`` are non-nullable in strict client models.
+    return {"lyrics": {"artist": "", "title": "", "value": ""}}
+
+
+@_endpoint("getLyricsBySongId")
+async def _get_lyrics_by_song_id(ctx: _Ctx) -> Dict[str, Any]:
+    return {"lyricsList": {"structuredLyrics": []}}
 
 
 # ---------------------------------------------------------------------------
@@ -1176,16 +1230,17 @@ async def _get_lyrics(ctx: _Ctx) -> Dict[str, Any]:
 
 async def _unimplemented_view(request: Request, method: str, db: AsyncSession = Depends(get_db)) -> Response:
     """Return a protocol-level error for ``.view`` methods we do not implement."""
+    name = method[:-5] if method.endswith(".view") else method
 
     async def _fail(ctx: _Ctx) -> Dict[str, Any]:
-        raise SubsonicError(GENERIC_ERROR, f"Method '{method}' is not implemented")
+        raise SubsonicError(GENERIC_ERROR, f"Method '{name}' is not implemented")
 
     return await _dispatch(request, db, _fail)
 
 
 def register_fallback_route() -> None:
     """
-    Register the ``/rest/{method}.view`` catch-all.
+    Register the ``/rest/{method}.view`` and ``/rest/{method}`` catch-alls.
 
     FastAPI matches routes in registration order, so this must run *after*
     every concrete ``.view`` route — including the media endpoints in
@@ -1193,3 +1248,4 @@ def register_fallback_route() -> None:
     shadow them. ``adapter.router()`` invokes it once imports are complete.
     """
     router.api_route("/rest/{method}.view", methods=["GET", "POST"], include_in_schema=False)(_unimplemented_view)
+    router.api_route("/rest/{method}", methods=["GET", "POST"], include_in_schema=False)(_unimplemented_view)

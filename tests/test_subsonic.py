@@ -219,8 +219,8 @@ class TestAdapterRegistry:
     def test_tornado_routes_collected_for_enabled_adapter(self, config):
         routes = adapter_registry.adapter_tornado_routes(config)
         patterns = [pattern for pattern, _ in routes]
-        assert r"/rest/stream\.view" in patterns
-        assert r"/rest/download\.view" in patterns
+        assert r"/rest/stream(?:\.view)?" in patterns
+        assert r"/rest/download(?:\.view)?" in patterns
 
     def test_tornado_routes_empty_when_disabled(self, config):
         config.subsonic.enabled = False
@@ -410,6 +410,18 @@ def test_unimplemented_view_returns_generic_error(client, regular_user):
     assert body["error"]["code"] == 0
 
 
+def test_bare_path_alias(client, regular_user):
+    """Clients that omit the ``.view`` suffix (e.g. Resonance) still work."""
+    body = _ok(client.get("/rest/ping", params=_creds(regular_user)))
+    assert body["status"] == "ok"
+
+
+def test_unimplemented_bare_path_returns_generic_error(client, regular_user):
+    body = _failed(client.get("/rest/getInternetRadioStations", params=_creds(regular_user)))
+    assert body["error"]["code"] == 0
+    assert "getInternetRadioStations" in body["error"]["message"]
+
+
 # ---------------------------------------------------------------------------
 # System + browsing
 # ---------------------------------------------------------------------------
@@ -505,7 +517,28 @@ def test_get_users_admin_lists_all(client, admin_user, regular_user):
 def test_get_music_folders(client, library, regular_user):
     body = _ok(client.get("/rest/getMusicFolders.view", params=_creds(regular_user)))
     folders = body["musicFolders"]["musicFolder"]
-    assert any(f["id"] == "0" for f in folders)
+    # Folder ids must be ints — strict clients (Navic/zt64) decode them so.
+    assert all(isinstance(f["id"], int) for f in folders)
+    assert any(f["id"] == 0 for f in folders)
+
+
+async def test_music_folder_id_resolves_to_library(client, db_session, config, library, regular_user):
+    """The int folder id advertised by getMusicFolders selects the library."""
+    from songhive.adapters.subsonic.routes import _library_folder_id
+
+    lib = Library(name="Sub Folder", owner_id=str(regular_user.id), visibility=Visibility.PUBLIC.value)
+    db_session.add(lib)
+    await db_session.commit()
+
+    body = _ok(client.get("/rest/getMusicFolders.view", params=_creds(regular_user)))
+    ids = {f["id"] for f in body["musicFolders"]["musicFolder"]}
+    assert _library_folder_id(lib.id) in ids
+
+    _ok(client.get("/rest/getArtists.view", params=_creds(regular_user, musicFolderId=_library_folder_id(lib.id))))
+
+    missing_id = next(i for i in range(2, 10) if i not in ids)
+    missing = _failed(client.get("/rest/getArtists.view", params=_creds(regular_user, musicFolderId=missing_id)))
+    assert missing["error"]["code"] == 70
 
 
 def test_get_artists_and_indexes(client, library, regular_user):
@@ -544,6 +577,9 @@ def test_get_song(client, library, regular_user):
     assert song["album"] == "Adapter Album"
     assert song["artist"] == "Adapter Artist"
     assert song["coverArt"] == f"tr-{song_id}"
+    # Required by strict OpenSubsonic decoders (Navic/zt64).
+    assert song["mediaType"] == "song"
+    assert song["created"]
 
 
 def test_get_song_private_denied(client, library, other_user):
@@ -555,6 +591,9 @@ def test_get_music_directory(client, library, regular_user):
     artist_id = str(library["artist"].id)
     body = _ok(client.get("/rest/getMusicDirectory.view", params=_creds(regular_user, id=artist_id)))
     assert body["directory"]["child"][0]["title"] == "Adapter Album"
+    # ``entry`` mirrors ``child`` for strict polymorphic decoders.
+    assert body["directory"]["entry"][0]["mediaType"] == "album"
+    assert body["directory"]["entry"][0]["created"]
 
     album_id = str(library["album"].id)
     body = _ok(client.get("/rest/getMusicDirectory.view", params=_creds(regular_user, id=album_id)))
@@ -596,6 +635,10 @@ def test_get_album_list(client, library, regular_user):
     body = _ok(client.get("/rest/getAlbumList2.view", params=_creds(regular_user, type="newest")))
     names = [a["name"] for a in body["albumList2"]["album"]]
     assert "Adapter Album" in names
+    # Directory-shape albums must carry ``created`` — required non-nullable
+    # in strict clients (this is what broke Navic's getAlbums).
+    dir_body = _ok(client.get("/rest/getAlbumList.view", params=_creds(regular_user, type="newest")))
+    assert all(a["created"] for a in dir_body["albumList"]["album"])
 
     body = _ok(
         client.get(
@@ -789,6 +832,35 @@ def test_scrobble_now_playing_and_get_now_playing(client, library, regular_user)
     entry = body["nowPlaying"]["entry"][0]
     assert entry["id"] == song_id
     assert entry["username"] == regular_user.username
+
+
+def test_get_play_queue_shape(client, regular_user):
+    """Required non-nullable fields must be present for strict decoders."""
+    body = _ok(client.get("/rest/getPlayQueue.view", params=_creds(regular_user)))
+    queue = body["playQueue"]
+    for key in ("current", "currentId", "position", "username", "changed", "changedBy", "entry"):
+        assert key in queue
+
+
+def test_scan_status(client, regular_user):
+    body = _ok(client.get("/rest/getScanStatus.view", params=_creds(regular_user)))
+    assert body["scanStatus"]["scanning"] is False
+    _ok(client.get("/rest/startScan.view", params=_creds(regular_user)))
+
+
+def test_lyrics_shapes(client, library, regular_user):
+    body = _ok(client.get("/rest/getLyrics.view", params=_creds(regular_user)))
+    assert {"artist", "title", "value"} <= body["lyrics"].keys()
+    body = _ok(client.get("/rest/getLyricsBySongId.view", params=_creds(regular_user, id=str(library["song"].id))))
+    assert body["lyricsList"]["structuredLyrics"] == []
+
+
+def test_artist_info_image_urls_present(client, library, regular_user):
+    """getArtistInfo emits empty image URLs instead of dropping the keys."""
+    body = _ok(client.get("/rest/getArtistInfo.view", params=_creds(regular_user, id=str(library["artist"].id))))
+    info = body["artistInfo"]
+    for key in ("smallImageUrl", "mediumImageUrl", "largeImageUrl"):
+        assert key in info
 
 
 def _enqueued(send_task, name):

@@ -46,6 +46,6 @@ class SubsonicAdapter(APIAdapter):
         from .handlers import SubsonicDownloadHandler, SubsonicStreamHandler
 
         return [
-            (r"/rest/stream\.view", SubsonicStreamHandler),
-            (r"/rest/download\.view", SubsonicDownloadHandler),
+            (r"/rest/stream(?:\.view)?", SubsonicStreamHandler),
+            (r"/rest/download(?:\.view)?", SubsonicDownloadHandler),
         ]
