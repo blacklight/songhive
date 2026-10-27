@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `subsonic`: Accept bare `/rest/<method>` endpoints (no `.view`
+  suffix) and always emit fields strict decoders require — music
+  folder ids are stable ints, album/song/playlist payloads always
+  carry `created`/`changed`/`duration`, directory children emit
+  `mediaType` and an `entry` mirror, and `getPlayQueue`/`getLyrics`/
+  `getArtistInfo`/`getScanStatus` return complete objects — fixing
+  login and browsing crashes in clients like Resonance and Navic.
+  ([`806e485`](https://git.platypush.tech/blacklight/songhive/commit/806e48586fa6d29f41bf87a926bca2647fa36835)).
+
 ## 0.4.19
 
 ### Added
