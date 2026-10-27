@@ -2,6 +2,38 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `subsonic`: Add apiKey-only authentication and user endpoints.
+  ([`68c0fcb`](https://git.platypush.tech/blacklight/songhive/commit/68c0fcb2378f72dd7b9126c17d566d02f0066651).
+- Add a per-page selector for track lists — the page size control
+  supports custom values and propagates through list composables and
+  remote entity paging.
+  ([`1fa7364`](https://git.platypush.tech/blacklight/songhive/commit/1fa7364b798d72b33255240d57ee8bca8aac7984)).
+
+### Fixed
+
+- `share`: Public share pages for external-library tracks now render an
+  inline audio player — streamable external refs are resolved per
+  requester policy and capabilities and played through the stream
+  endpoint, while policy-denied viewers still see metadata only.
+  ([`8b35724`](https://git.platypush.tech/blacklight/songhive/commit/8b3572498f944da3a86737a83d57edda85857fbe)).
+- `external`: Prefer local file sources over cloud providers — a track's
+  external refs are evaluated in preference order (file-backed first,
+  entity providers last) so an inactive, disabled or policy-denied ref
+  no longer masks a servable one, and `dedup_musicbrainz` now matches
+  tracks by `musicbrainz_id`, attaching provider items to locally backed
+  rows without clobbering their metadata.
+  ([`6e2d9c3`](https://git.platypush.tech/blacklight/songhive/commit/6e2d9c3b74a39fca0faece66b46ad9b20cd7d454).
+- `scrobbler`: Allow MD5 signature hashing in FIPS mode.
+  ([`b1e4d0b`](https://git.platypush.tech/blacklight/songhive/commit/b1e4d0b444038758719b6c0efc0d36fbbc6242834e)).
+- `api`: Disable sha1 security enforcement for ETag hashing.
+  ([`c854f3c`](https://git.platypush.tech/blacklight/songhive/commit/c854f3cd353cd884e7f567e4d0bf0ada1d071958)).
+- `frontend`: Fixed a missing type on actionHandlers.
+  ([`12b84a8`](https://git.platypush.tech/blacklight/songhive/commit/12b84a8dfbfb3df5a3bdf305eeb6f1acf74f2dc8).
+
 ## 0.4.18
 
 ### Added
