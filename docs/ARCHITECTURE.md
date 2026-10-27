@@ -1404,7 +1404,7 @@ A Jellyfin external library stores the following adapter config:
 | `include_playlists`  | no       | `true`  | Import `Playlist` items as provider-owned playlists.                     |
 | `sync_metadata`      | no       | `false` | Run Songhive-side MusicBrainz enrichment on imported tracks.             |
 | `sync_cover_art`     | no       | `true`  | Reference Jellyfin image URLs as artwork (never downloaded).             |
-| `dedup_musicbrainz`  | no       | `false` | Match artists/albums by MusicBrainz id before name matching (DB-only).   |
+| `dedup_musicbrainz`  | no       | `false` | Match tracks/artists/albums by MusicBrainz id; locally backed tracks win (DB-only). |
 
 *Exactly one auth path is required: `api_key` (preferred) or
 `username`+`password`.

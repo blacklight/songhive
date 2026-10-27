@@ -1246,6 +1246,10 @@
                 "flac": "FLAC",
                 "aac": "AAC (M4A)"
               }
+            },
+            "dedup_musicbrainz": {
+              "label": "Deduplicate by MusicBrainz id",
+              "description": "Match imported tracks to existing rows by MusicBrainz id before creating new ones. Locally backed tracks (uploads, filesystem libraries) are preferred and keep their local metadata. Never calls the MusicBrainz API."
             }
           }
         },
@@ -1296,6 +1300,10 @@
             "sync_metadata": {
               "label": "Enrich metadata",
               "description": "Also run Songhive-side MusicBrainz enrichment on imported videos. Off by default — provider metadata is authoritative."
+            },
+            "dedup_musicbrainz": {
+              "label": "Deduplicate by MusicBrainz id",
+              "description": "Match imported tracks to existing rows by MusicBrainz id before creating new ones. Locally backed tracks (uploads, filesystem libraries) are preferred and keep their local metadata. Never calls the MusicBrainz API."
             }
           }
         },

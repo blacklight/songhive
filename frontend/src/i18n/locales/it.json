@@ -1246,6 +1246,10 @@
                 "flac": "FLAC",
                 "aac": "AAC (M4A)"
               }
+            },
+            "dedup_musicbrainz": {
+              "label": "Deduplica per ID MusicBrainz",
+              "description": "Abbina i brani importati alle righe esistenti tramite ID MusicBrainz prima di crearne di nuovi. Le tracce con copia locale (upload, librerie filesystem) hanno la priorità e mantengono i metadati locali. Non chiama mai l'API di MusicBrainz."
             }
           }
         },
@@ -1296,6 +1300,10 @@
             "sync_metadata": {
               "label": "Arricchisci metadati",
               "description": "Esegue anche l'arricchimento MusicBrainz sui video importati. Disattivato di default — i metadati del provider fanno fede."
+            },
+            "dedup_musicbrainz": {
+              "label": "Deduplica per ID MusicBrainz",
+              "description": "Abbina i brani importati alle righe esistenti tramite ID MusicBrainz prima di crearne di nuovi. Le tracce con copia locale (upload, librerie filesystem) hanno la priorità e mantengono i metadati locali. Non chiama mai l'API di MusicBrainz."
             }
           }
         },

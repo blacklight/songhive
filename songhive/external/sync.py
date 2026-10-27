@@ -492,6 +492,13 @@ async def _process_item(
         return
 
     track = await _load_existing_track(session, external_track)
+    if track is None and config.get("dedup_musicbrainz") and metadata.musicbrainz_id:
+        # A local file for a recording already materialized from a provider
+        # links to that track instead of creating a duplicate row — the
+        # local file wins playback for every requester afterwards.
+        track = await _find_track_by_musicbrainz(session, metadata.musicbrainz_id)
+        if track is not None:
+            external_track.track_id = str(track.id)
     decision = await _apply_metadata(
         session,
         track,
@@ -800,6 +807,54 @@ async def backfill_artist_images(
     await _store_artist_images(session, provider_type, images, fetched, catalog_ttl)
 
 
+async def _find_track_by_musicbrainz(
+    session: AsyncSession,
+    musicbrainz_id: str,
+) -> Optional[Track]:
+    """Match an existing track by MusicBrainz id, preferring locally backed rows.
+
+    A track is "locally backed" when its bytes live on this instance — a
+    stored file (``audio_file_id``) or an active file-backed
+    ``ExternalTrack``. Local copies always win over provider-only rows so an
+    incoming reference attaches to the local recording instead of creating a
+    parallel cloud-backed track.
+    """
+    local_stmt = (
+        _lean(select(Track))
+        .where(
+            Track.musicbrainz_id == musicbrainz_id,
+            or_(
+                Track.audio_file_id.isnot(None),
+                Track.id.in_(
+                    select(ExternalTrack.track_id).where(
+                        ExternalTrack.track_id.isnot(None),
+                        ExternalTrack.state == "active",
+                    )
+                ),
+            ),
+        )
+        .order_by(Track.created_at)
+        .limit(1)
+    )
+    track = (await session.execute(local_stmt)).scalar_one_or_none()
+    if track is not None:
+        return track
+    result = await session.execute(
+        _lean(select(Track)).where(Track.musicbrainz_id == musicbrainz_id).order_by(Track.created_at).limit(1)
+    )
+    return result.scalar_one_or_none()
+
+
+async def _track_has_local_backing(session: AsyncSession, track: Track) -> bool:
+    """Return True when the track's bytes are served from a local file."""
+    if track.audio_file_id:
+        return True
+    result = await session.execute(
+        select(ExternalTrack.id).where(ExternalTrack.track_id == track.id, ExternalTrack.state == "active").limit(1)
+    )
+    return result.scalar_one_or_none() is not None
+
+
 async def _find_entity_artist(
     session: AsyncSession,
     name: str,
@@ -986,6 +1041,7 @@ async def _apply_entity_track(
         # puts it under MediaSources).
         raw_track_metadata["Size"] = item.size
 
+    matched_local = False
     if track is None and config.get("dedup_isrc"):
         isrc = (metadata.provider_ids or {}).get("isrc")
         if isrc:
@@ -993,6 +1049,11 @@ async def _apply_entity_track(
                 _lean(select(Track)).where(Track.raw_metadata["isrc"].astext == isrc).limit(1)
             )
             track = result.scalar_one_or_none()
+
+    if track is None and match_musicbrainz and metadata.musicbrainz_id:
+        track = await _find_track_by_musicbrainz(session, metadata.musicbrainz_id)
+        if track is not None:
+            matched_local = await _track_has_local_backing(session, track)
 
     if track is None:
         artist = await _find_entity_artist(
@@ -1048,9 +1109,10 @@ async def _apply_entity_track(
         await session.flush()
         await set_track_artist(session, track, artist, extra_artists)
         _entity_bump(counters, "tracks_created")
-    elif immutable:
-        # ISRC-dedup link on an immutable provider: attach the provider
-        # reference without rewriting the existing local metadata.
+    elif immutable or matched_local:
+        # ISRC/MusicBrainz-dedup link onto an immutable provider or a locally
+        # backed track: attach the provider reference without rewriting the
+        # existing local metadata — local files stay authoritative.
         await _fill_album_cover(session, track.album_id, metadata.cover_url)
         _queue_artist_image(counters, track.artist_id, metadata.artist_provider_key)
     else:

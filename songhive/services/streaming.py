@@ -8,7 +8,7 @@ import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any, AsyncIterator, Optional, Union, cast
+from typing import AsyncIterator, Optional, Union, cast
 
 import aiofiles
 import httpx
@@ -376,6 +376,78 @@ async def external_stream_allowed(
     return allowed
 
 
+_TERMINAL_EXTERNAL_STATES = ("shadowed", "tombstoned", "missing", "error")
+
+
+def _external_ref_priority(ref: Union[ExternalTrack, ExternalItem]) -> tuple:
+    """Sort key ordering a track's external refs from most to least local.
+
+    File-backed ``ExternalTrack`` rows (``local``, ``sftp``, ``webdav``,
+    ``s3``, ``gdrive``, ``dropbox``) come first — they serve real bytes with
+    no provider account involved. Within that tier ``local`` wins (no remote
+    I/O at all), then the most recently seen. Entity-backed
+    ``ExternalItem`` rows (``tidal``, ``youtube``, ``jellyfin``…) follow.
+    """
+    library = ref.external_library
+    provider_type = library.provider_type if library is not None else ""
+    last_seen = ref.last_seen_at.timestamp() if ref.last_seen_at is not None else 0.0
+    return (1 if isinstance(ref, ExternalItem) else 0, 0 if provider_type == "local" else 1, -last_seen)
+
+
+def preferred_external_ref(track) -> Optional[Union[ExternalTrack, ExternalItem]]:
+    """Return the track's best loaded external ref: file-backed first, active preferred.
+
+    Each ``uselist=False`` relationship resolves at most one row; this picks
+    an *active* ref, preferring the file-backed one, and falls back to
+    whichever row exists otherwise. Evaluating every ref across libraries
+    (several ``ExternalTrack``/``ExternalItem`` rows) needs queries — see
+    ``_external_refs_by_track``.
+    """
+    ext_track = getattr(track, "external_track", None)
+    ext_item = getattr(track, "external_item", None)
+    for ref in (ext_track, ext_item):
+        if ref is not None and ref.state == "active":
+            return ref
+    return ext_track or ext_item
+
+
+async def _external_refs_by_track(
+    session: AsyncSession,
+    track_ids: list,
+) -> dict:
+    """Batch-load every external ref for ``track_ids``, grouped by track id."""
+    refs: dict = {}
+    if not track_ids:
+        return refs
+    ext_tracks = (
+        (
+            await session.execute(
+                select(ExternalTrack)
+                .where(ExternalTrack.track_id.in_(track_ids))
+                .options(raiseload("*"), selectinload(ExternalTrack.external_library))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    ext_items = (
+        (
+            await session.execute(
+                select(ExternalItem)
+                .where(ExternalItem.track_id.in_(track_ids), ExternalItem.kind == "track")
+                .options(raiseload("*"), selectinload(ExternalItem.external_library))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for ref in (*ext_tracks, *ext_items):
+        refs.setdefault(str(ref.track_id), []).append(ref)
+    for track_refs in refs.values():
+        track_refs.sort(key=_external_ref_priority)
+    return refs
+
+
 async def streamable_external_track_ids(
     session: AsyncSession,
     tracks,
@@ -383,30 +455,33 @@ async def streamable_external_track_ids(
 ) -> set:
     """Return the ids of externally backed tracks ``user`` may stream.
 
-    A track qualifies when it has no local backing file, an ``active``
-    external reference whose library is enabled and advertises byte or URL
-    streaming, and the provider's stream policy admits the requester —
-    anonymous included where the policy allows. Used by share-page
-    rendering, where a share token authorizes ACL access but provider
-    policies still apply per-requester.
+    A track qualifies when it has no local backing file and at least one
+    ``active`` external reference whose library is enabled and advertises
+    byte or URL streaming, and the provider's stream policy admits the
+    requester — anonymous included where the policy allows. Every external
+    ref is tried in preference order (local file-backed before cloud
+    entities), so an unusable primary ref never masks a servable one. Used
+    by share-page rendering, where a share token authorizes ACL access but
+    provider policies still apply per-requester.
     """
+    candidates = [t for t in tracks if t is not None and not t.audio_file_id]
+    refs_by_track = await _external_refs_by_track(session, [str(t.id) for t in candidates])
     ids = set()
     cache: dict = {}
-    for track in tracks:
-        if track.audio_file_id:
-            continue
-        external_ref = getattr(track, "external_track", None) or getattr(track, "external_item", None)
-        if external_ref is None or external_ref.state != "active":
-            continue
-        external_library = external_ref.external_library
-        if external_library is None or not external_library.enabled:
-            continue
-        capabilities = external_library.capabilities or {}
-        if not (capabilities.get("read_bytes") or capabilities.get("stream_url")):
-            continue
-        if not await external_stream_allowed(session, external_library, user, cache=cache):
-            continue
-        ids.add(str(track.id))
+    for track in candidates:
+        for external_ref in refs_by_track.get(str(track.id), []):
+            if external_ref.state != "active":
+                continue
+            external_library = external_ref.external_library
+            if external_library is None or not external_library.enabled:
+                continue
+            capabilities = external_library.capabilities or {}
+            if not (capabilities.get("read_bytes") or capabilities.get("stream_url")):
+                continue
+            if not await external_stream_allowed(session, external_library, user, cache=cache):
+                continue
+            ids.add(str(track.id))
+            break
     return ids
 
 
@@ -442,72 +517,83 @@ async def _load_external_stream_request(
     *,
     user=None,
     variant: str = "audio",
-) -> Optional[tuple[Track, Union[ExternalTrack, ExternalItem], dict, Any, ExternalItemRef, Optional[tuple[int, int]]]]:
-    """Load the track, external reference, adapter, and optional byte range.
+) -> Optional[tuple[Track, list]]:
+    """Load the track and evaluate its external refs in preference order.
+
+    Returns ``(track, candidates)`` where ``candidates`` is a list of
+    ``(external_ref, config, adapter, item, range_tuple)`` tuples ordered
+    by :func:`_external_ref_priority` — file-backed (local) refs first,
+    entity-backed (cloud) refs last — ready for the caller to try in turn.
 
     ``user`` is the requesting local user; provider stream policies
-    (``external_libraries.<provider>.stream_policy``) are enforced against it.
-    ``variant`` selects the rendition for multi-rendition providers
-    (``audio`` default; ``video`` asks for video+audio).
+    (``external_libraries.<provider>.stream_policy``) are enforced against
+    it per ref — a denied ref falls through to the next candidate rather
+    than failing the request outright. ``variant`` selects the rendition
+    for multi-rendition providers (``audio`` default; ``video`` asks for
+    video+audio). Raises ``ExternalPermissionDenied`` when every candidate
+    was policy-denied, ``ExternalItemNotFound`` when nothing is servable.
     """
-    track = await _load_track_with_external(session, track_id)
+    result = await session.execute(select(Track).where(Track.id == track_id).options(raiseload("*")))
+    track = cast(Optional[Track], result.scalar_one_or_none())
     if track is None:
         return None
 
     # File-backed providers reference the track via ``ExternalTrack``;
-    # entity-backed providers via ``ExternalItem(kind="track")``.
-    external_ref: Union[ExternalTrack, ExternalItem, None] = track.external_track or track.external_item
-    if external_ref is None:
+    # entity-backed providers via ``ExternalItem(kind="track")``. A track
+    # may carry several refs of both kinds (e.g. a local file deduped onto
+    # a provider track by MusicBrainz id), so all are evaluated.
+    refs = (await _external_refs_by_track(session, [track_id])).get(track_id, [])
+    if not refs:
         return None
 
-    if external_ref.state in ("shadowed", "tombstoned", "missing", "error"):
-        raise ExternalItemNotFound(
-            f"External track {track_id} is not available",
-            provider_key=external_ref.provider_key,
-        )
+    candidates: list = []
+    denied: Optional[ExternalPermissionDenied] = None
+    missing: Optional[ExternalItemNotFound] = None
+    for external_ref in refs:
+        if external_ref.state in _TERMINAL_EXTERNAL_STATES:
+            missing = missing or ExternalItemNotFound(
+                f"External track {track_id} is not available",
+                provider_key=external_ref.provider_key,
+            )
+            continue
 
-    external_library = external_ref.external_library
-    if external_library is None or not external_library.enabled:
-        raise ExternalItemNotFound(
-            f"External library for track {track_id} is not available",
-            provider_key=external_ref.provider_key,
-        )
+        external_library = external_ref.external_library
+        if external_library is None or not external_library.enabled:
+            missing = missing or ExternalItemNotFound(
+                f"External library for track {track_id} is not available",
+                provider_key=external_ref.provider_key,
+            )
+            continue
 
-    config = _external_library_config(track_id, external_ref, external_library)
-    adapter = get_external_adapter(external_library.provider_type)()
+        config = _external_library_config(track_id, external_ref, external_library)
+        adapter = get_external_adapter(external_library.provider_type)()
 
-    # Per-provider stream policy (e.g. TIDAL): may swap ``config`` for the
-    # listener's own account or raise ``ExternalPermissionDenied``.
-    config = await _enforce_stream_policy(session, external_library, config, user)
-
-    item = _external_item_ref(track, external_ref, variant)
-
-    capabilities = external_library.capabilities or {}
-    range_tuple: Optional[tuple[int, int]] = None
-    if capabilities.get("range_read") is not False and range_header:
+        # Per-provider stream policy (e.g. TIDAL): may swap ``config`` for
+        # the listener's own account or raise ``ExternalPermissionDenied``.
         try:
-            range_tuple = _parse_external_range_header(range_header, item.size)
-        except ValueError:
-            range_tuple = None
+            config = await _enforce_stream_policy(session, external_library, config, user)
+        except ExternalPermissionDenied as exc:
+            denied = denied or exc
+            continue
 
-    return track, external_ref, config, adapter, item, range_tuple
+        item = _external_item_ref(track, external_ref, variant)
 
+        capabilities = external_library.capabilities or {}
+        range_tuple: Optional[tuple[int, int]] = None
+        if capabilities.get("range_read") is not False and range_header:
+            try:
+                range_tuple = _parse_external_range_header(range_header, item.size)
+            except ValueError:
+                range_tuple = None
 
-async def _load_track_with_external(session: AsyncSession, track_id: str) -> Optional[Track]:
-    result = await session.execute(
-        select(Track)
-        .where(Track.id == track_id)
-        .options(
-            raiseload("*"),
-            selectinload(Track.external_track)
-            .selectinload(ExternalTrack.external_library)
-            .selectinload(ExternalLibrary.library),
-            selectinload(Track.external_item)
-            .selectinload(ExternalItem.external_library)
-            .selectinload(ExternalLibrary.library),
-        )
-    )
-    return cast(Optional[Track], result.scalar_one_or_none())
+        candidates.append((external_ref, config, adapter, item, range_tuple))
+
+    if not candidates:
+        if denied is not None:
+            raise denied
+        raise missing or ExternalItemNotFound(f"External track {track_id} is not available")
+
+    return track, candidates
 
 
 def _external_library_config(track_id: str, external_ref, external_library) -> dict:
@@ -565,18 +651,33 @@ async def resolve_external_stream(
     user=None,
     variant: str = "audio",
 ) -> Optional[ExternalStream]:
-    """Resolve an external byte stream for the given track, or return None."""
+    """Resolve an external byte stream for the given track, or return None.
+
+    Candidate refs are tried in preference order (local file-backed first,
+    cloud entities last); a candidate that reports itself gone is marked
+    unavailable and the next one is attempted.
+    """
     loaded = await _load_external_stream_request(session, track_id, range_header, user=user, variant=variant)
     if loaded is None:
         return None
-    track, external_ref, config, adapter, item, range_tuple = loaded
-    try:
-        stream = await adapter.open_stream(config, item, range=range_tuple)
-    except ExternalItemNotFound as exc:
-        await _mark_unavailable(session, external_ref.external_library, external_ref, exc)
-        raise
+    track, candidates = loaded
+
+    stream: Optional[ExternalStream] = None
+    for external_ref, config, adapter, item, range_tuple in candidates:
+        try:
+            stream = await adapter.open_stream(config, item, range=range_tuple)
+        except ExternalItemNotFound as exc:
+            await _mark_unavailable(session, external_ref.external_library, external_ref, exc)
+            continue
+        if stream is not None:
+            break
+    else:
+        stream = None
+    if stream is None:
+        raise ExternalItemNotFound(f"External track {track_id} is not available")
+
     # Adopt the provider-reported content type the first time we see it.
-    if stream is not None and stream.content_type and not track.audio_mime_type and variant == "audio":
+    if stream.content_type and not track.audio_mime_type and variant == "audio":
         try:
             async with session.begin_nested():
                 track.audio_mime_type = stream.content_type
@@ -592,29 +693,40 @@ async def resolve_external_download_stream(
     *,
     user=None,
 ) -> Optional[ExternalStream]:
-    """Resolve an external download stream, preferring ``download`` over ``open_stream``."""
+    """Resolve an external download stream, preferring ``download`` over ``open_stream``.
+
+    Candidate refs are tried in preference order (local file-backed first,
+    cloud entities last); a candidate that reports itself gone is marked
+    unavailable and the next one is attempted.
+    """
     loaded = await _load_external_stream_request(session, track_id, range_header, user=user)
     if loaded is None:
         return None
-    track, external_ref, config, adapter, item, range_tuple = loaded
+    _, candidates = loaded
 
-    try:
-        return await adapter.download(config, item)
-    except UnsupportedExternalOperation:
-        pass
-    except ExternalItemNotFound as exc:
-        await _mark_unavailable(session, external_ref.external_library, external_ref, exc)
-        raise
+    for external_ref, config, adapter, item, range_tuple in candidates:
+        try:
+            stream = await adapter.download(config, item)
+        except UnsupportedExternalOperation:
+            stream = None
+        except ExternalItemNotFound as exc:
+            await _mark_unavailable(session, external_ref.external_library, external_ref, exc)
+            continue
 
-    capabilities = (external_ref.external_library.capabilities or {}) if external_ref.external_library else {}
-    if not (capabilities.get("read_bytes") or capabilities.get("stream_url")):
-        raise UnsupportedExternalOperation("download is not supported by this adapter")
+        if stream is None:
+            capabilities = (external_ref.external_library.capabilities or {}) if external_ref.external_library else {}
+            if not (capabilities.get("read_bytes") or capabilities.get("stream_url")):
+                continue
+            try:
+                stream = await adapter.open_stream(config, item, range=range_tuple)
+            except ExternalItemNotFound as exc:
+                await _mark_unavailable(session, external_ref.external_library, external_ref, exc)
+                continue
 
-    try:
-        return await adapter.open_stream(config, item, range=range_tuple)
-    except ExternalItemNotFound as exc:
-        await _mark_unavailable(session, external_ref.external_library, external_ref, exc)
-        raise
+        if stream is not None:
+            return stream
+
+    raise ExternalItemNotFound(f"External track {track_id} is not available")
 
 
 async def _ensure_stream_temp_dir(config: SonghiveConfig) -> Path:

@@ -1246,6 +1246,10 @@
                 "flac": "FLAC",
                 "aac": "AAC (M4A)"
               }
+            },
+            "dedup_musicbrainz": {
+              "label": "Desduplicar por ID de MusicBrainz",
+              "description": "Compara las pistas importadas con filas existentes por ID de MusicBrainz antes de crear nuevas. Las pistas con copia local (subidas, bibliotecas de archivos) tienen prioridad y conservan sus metadatos. Nunca llama a la API de MusicBrainz."
             }
           }
         },
@@ -1296,6 +1300,10 @@
             "sync_metadata": {
               "label": "Enriquecer metadatos",
               "description": "Ejecuta también el enriquecimiento de MusicBrainz sobre los vídeos importados. Desactivado por defecto — los metadatos del proveedor son la referencia."
+            },
+            "dedup_musicbrainz": {
+              "label": "Desduplicar por ID de MusicBrainz",
+              "description": "Compara las pistas importadas con filas existentes por ID de MusicBrainz antes de crear nuevas. Las pistas con copia local (subidas, bibliotecas de archivos) tienen prioridad y conservan sus metadatos. Nunca llama a la API de MusicBrainz."
             }
           }
         },

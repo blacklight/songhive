@@ -502,6 +502,15 @@ export const providerTemplates: Record<string, ProviderTemplate> = {
         default: false,
       },
       {
+        name: "dedup_musicbrainz",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.dedup_musicbrainz.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.tidal.fields.dedup_musicbrainz.description",
+        default: false,
+      },
+      {
         name: "download_format",
         type: "enum",
         labelI18nKey:
@@ -636,6 +645,15 @@ export const providerTemplates: Record<string, ProviderTemplate> = {
           "pages.externalLibraries.providers.youtube.fields.sync_metadata.label",
         descriptionI18nKey:
           "pages.externalLibraries.providers.youtube.fields.sync_metadata.description",
+        default: false,
+      },
+      {
+        name: "dedup_musicbrainz",
+        type: "boolean",
+        labelI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.dedup_musicbrainz.label",
+        descriptionI18nKey:
+          "pages.externalLibraries.providers.youtube.fields.dedup_musicbrainz.description",
         default: false,
       },
     ],

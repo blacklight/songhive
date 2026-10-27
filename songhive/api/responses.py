@@ -324,7 +324,9 @@ async def build_track_summary(
     if track.audio_file_id and _is_loaded(track, "audio_file") and track.audio_file:
         audio_url = await storage.get_url(track.audio_file)
     else:
-        external_ref = getattr(track, "external_track", None) or getattr(track, "external_item", None)
+        from ..services.streaming import preferred_external_ref
+
+        external_ref = preferred_external_ref(track)
         if external_ref is not None and external_ref.state == "active":
             audio_url = f"/api/v1/tracks/{track.id}/download"
             external_library = getattr(external_ref, "external_library", None)

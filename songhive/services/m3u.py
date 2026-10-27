@@ -166,7 +166,7 @@ async def _track_playable(session: AsyncSession, track: Track, policy_cache: dic
     """
     if track.audio_file_id is not None:
         return True
-    external_ref = getattr(track, "external_track", None) or getattr(track, "external_item", None)
+    external_ref = streaming.preferred_external_ref(track)
     if external_ref is None or external_ref.state != "active":
         return False
     external_library = getattr(external_ref, "external_library", None)

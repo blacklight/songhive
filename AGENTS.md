@@ -473,7 +473,22 @@
   `/api/v1/stream/{id}?token=` URLs only when the external ref is `active`,
   its library is enabled and byte/stream-url capable, and the provider's
   `stream_policy` admits the requester — anonymous share viewers get no
-  player under `owner`/`anyone`/`listener_account` policies.
+  player under `owner`/`anyone`/`listener_account` policies. A track can
+  carry several external refs (`ExternalTrack` file-backed + `ExternalItem`
+  entity-backed); everywhere a ref is picked for playback or display it must
+  go through `services.streaming.preferred_external_ref` (single loaded row
+  per relationship) or `_external_refs_by_track`/`_load_external_stream_request`
+  (all refs, ordered file-backed first — `local` provider before other
+  filesystem providers, entity providers last, `last_seen_at` descending —
+  with per-ref state/enabled/capability/policy checks and fallback to the
+  next candidate). Never hand-roll `track.external_track or
+  track.external_item` — it masks servable fallbacks and ignores the
+  local-over-cloud priority. `dedup_musicbrainz` on a library config now
+  also matches *tracks* by `musicbrainz_id` (both directions: entity items
+  attach to an existing locally backed row without rewriting its metadata;
+  file-backed items link their `ExternalTrack` to an existing track), so a
+  recording present as a local file stays the playback source when the same
+  mb_id arrives from Tidal/YouTube.
 - Outbound follows (a local user following a local or remote actor) live in
   the `follows` table (`models/follow.py`) — pubby's
   `federation_followers`/`federation_follow_requests` tables only track the

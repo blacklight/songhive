@@ -59,6 +59,7 @@ from ...services.secrets import decrypt_json
 from ...services.storage import StorageService
 from ...services.streaming import (
     collect_external_stream,
+    preferred_external_ref,
     resolve_external_download_stream,
     resolve_track_file,
 )
@@ -710,7 +711,7 @@ async def _build_track_response(
     # A track is external when referenced by a file-backed ``ExternalTrack``
     # or by an entity-backed ``ExternalItem(kind="track")``; both expose the
     # same provider fields to the client.
-    external_ref = getattr(track, "external_track", None) or getattr(track, "external_item", None)
+    external_ref = preferred_external_ref(track)
     if external_ref is not None and external_ref.state == "active":
         is_external = True
         external_library_id = str(external_ref.external_library_id)

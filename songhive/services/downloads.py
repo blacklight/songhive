@@ -53,6 +53,7 @@ from . import acl, music, remote_content
 from .storage import StorageService
 from .streaming import (
     collect_external_stream,
+    preferred_external_ref,
     resolve_external_download_stream,
     resolve_track_file,
 )
@@ -484,7 +485,7 @@ async def _materialize_track(
         )
     external_ref = None
     if track is not None:
-        external_ref = track.external_track or track.external_item
+        external_ref = preferred_external_ref(track)
     name_hint = external_ref.provider_key if external_ref is not None else None
     mime_hint = track.audio_mime_type if track else None
 
