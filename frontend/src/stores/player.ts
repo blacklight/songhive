@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, ref, watch, type Ref } from "vue";
+import { storageGet, storageRemove, storageSet } from "@/utils/storage";
 import type {
   QueueTrack,
   RepeatMode,
@@ -17,22 +18,22 @@ const STORAGE_VOLUME = "songhive.player.volume";
 const STORAGE_MUTED = "songhive.player.muted";
 
 function readJson<T>(key: string): T | null {
-  const raw = localStorage.getItem(key);
+  const raw = storageGet(key);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as T;
   } catch {
-    localStorage.removeItem(key);
+    storageRemove(key);
     return null;
   }
 }
 
 function readNumber(key: string, fallback: number): number {
-  const raw = localStorage.getItem(key);
+  const raw = storageGet(key);
   if (!raw) return fallback;
   const value = Number(raw);
   if (Number.isNaN(value)) {
-    localStorage.removeItem(key);
+    storageRemove(key);
     return fallback;
   }
   return value;
@@ -43,19 +44,19 @@ function readString<T extends string>(
   allowed: T[],
   fallback: T,
 ): T {
-  const raw = localStorage.getItem(key);
+  const raw = storageGet(key);
   if (!raw) return fallback;
   if (allowed.includes(raw as T)) return raw as T;
-  localStorage.removeItem(key);
+  storageRemove(key);
   return fallback;
 }
 
 function readBoolean(key: string, fallback: boolean): boolean {
-  const raw = localStorage.getItem(key);
+  const raw = storageGet(key);
   if (raw === null) return fallback;
   if (raw === "true") return true;
   if (raw === "false") return false;
-  localStorage.removeItem(key);
+  storageRemove(key);
   return fallback;
 }
 
@@ -103,7 +104,7 @@ export const usePlayerStore = defineStore("player", () => {
     index.value = queue.value.length > 0 ? restoredIndex : -1;
   }
 
-  const rawPosition = localStorage.getItem(STORAGE_POSITION);
+  const rawPosition = storageGet(STORAGE_POSITION);
   const parsedPosition = rawPosition === null ? NaN : Number(rawPosition);
   const restoredPosition = ref<number | null>(
     Number.isNaN(parsedPosition) ? null : parsedPosition,
@@ -772,13 +773,13 @@ export const usePlayerStore = defineStore("player", () => {
     // mode skip writes so the stored local queue survives the detour.
     if (sessionMode.value) return;
     try {
-      localStorage.setItem(STORAGE_QUEUE, JSON.stringify(queue.value));
-      localStorage.setItem(STORAGE_INDEX, String(index.value));
-      localStorage.setItem(STORAGE_POSITION, String(currentTime.value));
-      localStorage.setItem(STORAGE_SHUFFLE, String(shuffle.value));
-      localStorage.setItem(STORAGE_REPEAT, repeat.value);
-      localStorage.setItem(STORAGE_VOLUME, String(volume.value));
-      localStorage.setItem(STORAGE_MUTED, String(muted.value));
+      storageSet(STORAGE_QUEUE, JSON.stringify(queue.value));
+      storageSet(STORAGE_INDEX, String(index.value));
+      storageSet(STORAGE_POSITION, String(currentTime.value));
+      storageSet(STORAGE_SHUFFLE, String(shuffle.value));
+      storageSet(STORAGE_REPEAT, repeat.value);
+      storageSet(STORAGE_VOLUME, String(volume.value));
+      storageSet(STORAGE_MUTED, String(muted.value));
     } catch {
       // Storage may be unavailable (restricted mode or teardown).
     }

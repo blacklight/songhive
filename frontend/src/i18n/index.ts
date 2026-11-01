@@ -1,4 +1,5 @@
 import { createI18n } from "vue-i18n";
+import { storageGet, storageRemove, storageSet } from "@/utils/storage";
 import en from "./locales/en.json";
 
 const STORAGE_LOCALE_KEY = "songhive.locale";
@@ -46,15 +47,15 @@ export function getSupportedLocales(): string[] {
 }
 
 export function getStoredLocale(): string | null {
-  return localStorage.getItem(STORAGE_LOCALE_KEY) || null;
+  return storageGet(STORAGE_LOCALE_KEY) || null;
 }
 
 export function setStoredLocale(locale: string) {
-  localStorage.setItem(STORAGE_LOCALE_KEY, locale);
+  storageSet(STORAGE_LOCALE_KEY, locale);
 }
 
 export function clearStoredLocale() {
-  localStorage.removeItem(STORAGE_LOCALE_KEY);
+  storageRemove(STORAGE_LOCALE_KEY);
 }
 
 export function resolveLocale(

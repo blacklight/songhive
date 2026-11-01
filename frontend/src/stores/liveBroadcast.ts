@@ -1,6 +1,7 @@
 import { computed, ref, watch, type Ref } from "vue";
 import { defineStore } from "pinia";
 import { buildUrl } from "@/api/config";
+import { storageGet, storageRemove, storageSet } from "@/utils/storage";
 import { LIVE_MIME_CANDIDATES, LIVE_WS_CLOSE } from "@/api/streams";
 import type { StreamResponse } from "@/api/streams";
 import { useAuthStore } from "@/stores/auth";
@@ -122,9 +123,7 @@ export const useLiveBroadcastStore = defineStore("liveBroadcast", () => {
   const status: Ref<LiveBroadcastStatus> = ref("idle");
   const permission: Ref<LivePermission> = ref("prompt");
   const devices: Ref<MediaDeviceInfo[]> = ref([]);
-  const deviceId: Ref<string> = ref(
-    localStorage.getItem(DEVICE_STORAGE_KEY) ?? "",
-  );
+  const deviceId: Ref<string> = ref(storageGet(DEVICE_STORAGE_KEY) ?? "");
   const voiceMode = ref(false);
   const outputId: Ref<string | null> = ref(null);
   const mount: Ref<string | null> = ref(null);
@@ -246,7 +245,7 @@ export const useLiveBroadcastStore = defineStore("liveBroadcast", () => {
         !devices.value.some((d) => d.deviceId === deviceId.value)
       ) {
         deviceId.value = "";
-        localStorage.removeItem(DEVICE_STORAGE_KEY);
+        storageRemove(DEVICE_STORAGE_KEY);
       }
     } catch {
       devices.value = [];
@@ -309,8 +308,8 @@ export const useLiveBroadcastStore = defineStore("liveBroadcast", () => {
   /** Persisted device choice; reopens the preview unless broadcasting. */
   async function selectDevice(id: string): Promise<void> {
     deviceId.value = id;
-    if (id) localStorage.setItem(DEVICE_STORAGE_KEY, id);
-    else localStorage.removeItem(DEVICE_STORAGE_KEY);
+    if (id) storageSet(DEVICE_STORAGE_KEY, id);
+    else storageRemove(DEVICE_STORAGE_KEY);
     if (!isActive.value && permission.value === "granted") {
       await openPreview();
     }

@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `frontend`: Boot the SPA without Web Storage — under Firefox ETP /
+  Tor Browser third-party storage blocking (e.g. `/embed/{type}/{id}`
+  iframes), every `localStorage`/`sessionStorage`/`document.cookie`
+  access threw a `SecurityError` that killed startup at module import.
+  All storage access now goes through no-throw helpers
+  (`frontend/src/utils/storage.ts`) so embeds and the app itself render
+  anonymously when persistence is unavailable.
+
 ## 0.4.20
 
 ### Fixed

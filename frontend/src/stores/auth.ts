@@ -6,6 +6,12 @@ import * as usersApi from "@/api/users";
 import { ApiError, setLogoutHandler, setRefreshHandler } from "@/api/client";
 import type { UserResponse } from "@/api/users";
 import { credentialToJson, requestOptionsFromJson } from "@/utils/webauthn";
+import {
+  documentCookie,
+  storageGet,
+  storageRemove,
+  storageSet,
+} from "@/utils/storage";
 
 // Only non-sensitive session state is persisted. The access and refresh
 // tokens live in server-managed HttpOnly cookies, so JavaScript can never
@@ -20,16 +26,20 @@ for (const key of [
   "songhive.auth.refresh",
   "songhive.auth.expiresAt",
 ]) {
-  localStorage.removeItem(key);
+  storageRemove(key);
 }
 
 // Older builds also mirrored the access token into a JavaScript-readable
 // cookie. Delete it only when it is visible: an HttpOnly cookie of the same
 // name (the new server-managed session) never appears in document.cookie, so
 // this cannot clobber it.
-if (/(?:^|;\s*)access_token=/.test(document.cookie)) {
-  document.cookie =
-    "access_token=; Path=/; SameSite=Lax; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+if (/(?:^|;\s*)access_token=/.test(documentCookie())) {
+  try {
+    document.cookie =
+      "access_token=; Path=/; SameSite=Lax; Expires=Thu, 01 Jan 1970 00:00:00 GMT";
+  } catch {
+    /* cookies unavailable — nothing to clean up */
+  }
 }
 
 export type AuthStatus =
@@ -61,9 +71,8 @@ export const useAuthStore = defineStore("auth", () => {
   const isAdmin = computed(() => role.value === "admin");
 
   function persist() {
-    if (user.value)
-      localStorage.setItem(STORAGE_USER, JSON.stringify(user.value));
-    else localStorage.removeItem(STORAGE_USER);
+    if (user.value) storageSet(STORAGE_USER, JSON.stringify(user.value));
+    else storageRemove(STORAGE_USER);
   }
 
   async function fetchProfile() {
@@ -222,7 +231,7 @@ export const useAuthStore = defineStore("auth", () => {
 });
 
 function readJson<T>(key: string): T | null {
-  const raw = localStorage.getItem(key);
+  const raw = storageGet(key);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as T;

@@ -1,5 +1,6 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from "vue";
 import { defineStore } from "pinia";
+import { storageGet, storageSet } from "@/utils/storage";
 
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -28,13 +29,13 @@ const DEFAULT_ACCENT = ACCENT_PRESETS.filter(
 )[0].value;
 
 function readStoredMode(): ThemeMode {
-  const raw = localStorage.getItem(STORAGE_MODE_KEY);
+  const raw = storageGet(STORAGE_MODE_KEY);
   if (raw === "light" || raw === "dark" || raw === "system") return raw;
   return "system";
 }
 
 function readStoredAccent(): string {
-  return localStorage.getItem(STORAGE_ACCENT_KEY) || DEFAULT_ACCENT;
+  return storageGet(STORAGE_ACCENT_KEY) || DEFAULT_ACCENT;
 }
 
 export const useThemeStore = defineStore("theme", () => {
@@ -59,13 +60,13 @@ export const useThemeStore = defineStore("theme", () => {
 
   function setMode(value: ThemeMode) {
     mode.value = value;
-    localStorage.setItem(STORAGE_MODE_KEY, value);
+    storageSet(STORAGE_MODE_KEY, value);
     apply();
   }
 
   function setAccent(value: string) {
     accent.value = value;
-    localStorage.setItem(STORAGE_ACCENT_KEY, value);
+    storageSet(STORAGE_ACCENT_KEY, value);
     apply();
   }
 

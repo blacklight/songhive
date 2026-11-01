@@ -8,6 +8,8 @@
  * backend carries client credentials inside the claimed config fragment.
  */
 
+import { sessionGet, sessionRemove, sessionSet } from "./storage";
+
 const STASH_PREFIX = "songhive:external-oauth:";
 
 /** Matches config keys that look secret-bearing (mirrors services/secrets.py). */
@@ -49,14 +51,14 @@ export function stashExternalOAuthForm(
   state: string,
   form: Record<string, unknown>,
 ): void {
-  sessionStorage.setItem(STASH_PREFIX + state, JSON.stringify(form));
+  sessionSet(STASH_PREFIX + state, JSON.stringify(form));
 }
 
 export function popExternalOAuthForm(
   state: string,
 ): Record<string, unknown> | null {
-  const raw = sessionStorage.getItem(STASH_PREFIX + state);
-  sessionStorage.removeItem(STASH_PREFIX + state);
+  const raw = sessionGet(STASH_PREFIX + state);
+  sessionRemove(STASH_PREFIX + state);
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);

@@ -1,4 +1,5 @@
 import { API_PREFIX, buildUrl } from "./config";
+import { documentCookie } from "@/utils/storage";
 
 type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -79,7 +80,7 @@ const CSRF_SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 /** Read the non-HttpOnly double-submit CSRF cookie, if a session exists. */
 export function getCsrfToken(): string | null {
   if (typeof document === "undefined") return null;
-  const match = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]*)/);
+  const match = documentCookie().match(/(?:^|;\s*)csrf_token=([^;]*)/);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
