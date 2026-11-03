@@ -904,7 +904,7 @@ def test_render_verified_link_rejects_non_http_schemes():
 def test_render_bio_html_linkifies_urls():
     """http(s) URLs in the bio become anchors with scheme-less link text."""
     bio = "Find me at https://blog.example.com or http://old.example.net/page."
-    assert render_bio_html(bio) == (
+    assert render_bio_html(bio, partial(get_tag_url, "music.example.com")).html == (
         'Find me at <a href="https://blog.example.com">blog.example.com</a> '
         'or <a href="http://old.example.net/page">old.example.net/page</a>.'
     )
@@ -913,25 +913,28 @@ def test_render_bio_html_linkifies_urls():
 def test_render_bio_html_escapes_non_url_text():
     """Bio text is HTML-escaped; angle brackets cannot inject markup."""
     bio = '<b>not bold</b> see https://a.example/?q="x"'
-    assert render_bio_html(bio) == (
+    assert render_bio_html(bio, partial(get_tag_url, "music.example.com")).html == (
         "&lt;b&gt;not bold&lt;/b&gt; see " '<a href="https://a.example/?q=">a.example/?q=</a>&quot;x&quot;'
     )
 
 
 def test_render_bio_html_strips_wrapping_punctuation():
     """Sentence punctuation around a URL stays outside the anchor."""
-    assert render_bio_html("(see https://example.com/path)") == (
+    assert render_bio_html("(see https://example.com/path)", partial(get_tag_url, "music.example.com")).html == (
         '(see <a href="https://example.com/path">example.com/path</a>)'
     )
     # Balanced brackets inside the URL are kept.
-    assert render_bio_html("https://example.com/a_(b)") == ('<a href="https://example.com/a_(b)">example.com/a_(b)</a>')
+    assert render_bio_html("https://example.com/a_(b)", partial(get_tag_url, "music.example.com")).html == (
+        '<a href="https://example.com/a_(b)">example.com/a_(b)</a>'
+    )
 
 
 def test_render_bio_html_leaves_invalid_urls_as_text():
     """URL-looking text without a host is emitted as escaped text."""
-    assert render_bio_html("visit https:// now") == "visit https:// now"
-    assert render_bio_html("plain text") == "plain text"
-    assert render_bio_html("") == ""
+    tag_url = partial(get_tag_url, "music.example.com")
+    assert render_bio_html("visit https:// now", tag_url).html == "visit https:// now"
+    assert render_bio_html("plain text", tag_url).html == "plain text"
+    assert render_bio_html("", tag_url).html == ""
 
 
 def test_user_to_actor_document_linkifies_bio():

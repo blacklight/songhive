@@ -11,15 +11,16 @@ delivered to follower inboxes.
 import asyncio
 import logging
 from datetime import datetime, timezone
+from functools import partial
 from typing import Any, Optional
 
-from pubby.content import property_value_attachment, render_bio_html
+from pubby.content import build_hashtag_tags, property_value_attachment, render_bio_html
 
 from ..config.schema import SonghiveConfig
 from ..models.user import FollowersApproval, User
 from ..services.federation import ensure_user_actor, publish_actor_update
 from . import doc_cache
-from ._common import get_actor_url, get_inbox_url, get_outbox_url
+from ._common import get_actor_url, get_inbox_url, get_outbox_url, get_tag_url
 from .storage import get_federation_storage  # noqa: F401  (re-exported)
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ def user_to_actor_document(user: User, domain: str) -> dict:
     that are expected to stay in sync with the local profile.
     """
     actor_url = get_actor_url(domain, user.username)
+    bio = render_bio_html(user.bio or "", partial(get_tag_url, domain))
     document: dict[str, Any] = {
         "@context": [
             "https://www.w3.org/ns/activitystreams",
@@ -54,7 +56,7 @@ def user_to_actor_document(user: User, domain: str) -> dict:
         "type": "Person",
         "preferredUsername": user.username,
         "name": user.display_name or user.username,
-        "summary": render_bio_html(user.bio or ""),
+        "summary": bio.html,
         "manuallyApprovesFollowers": user.followers_approval == FollowersApproval.MANUAL.value,
         "published": (user.created_at.isoformat() if user.created_at else datetime.now(timezone.utc).isoformat()),
         "inbox": get_inbox_url(domain, user.username),
@@ -81,6 +83,11 @@ def user_to_actor_document(user: User, domain: str) -> dict:
     attachment = _build_attachment(user)
     if attachment:
         document["attachment"] = attachment
+
+    # Bio hashtags join the actor ``tag`` array so remote servers (Mastodon
+    # indexes them there) can resolve the rel="tag" links in ``summary``.
+    if bio.hashtags:
+        document["tag"] = build_hashtag_tags(bio.hashtags, partial(get_tag_url, domain))
 
     return document
 
