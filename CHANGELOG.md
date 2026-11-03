@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `federation`: Render actor bios through pubby's hashtag-aware
+  `render_bio_html` — bio `#hashtags` become absolute `rel="tag"` links
+  and are advertised as `Hashtag` entries in the actor's `tag` array so
+  remote servers can index them.
+  ([`3e1c409`](https://git.platypush.tech/blacklight/songhive/commit/3e1c4090adba9961cf9293d3a5d8a5c10a92b383)).
+
 ## 0.4.21
 
 ### Fixed
