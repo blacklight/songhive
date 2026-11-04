@@ -524,7 +524,13 @@ async def test_get_object_returns_stored_activity_payload(fed_client, db_session
     assert ACTIVITY_JSON in response.headers["content-type"]
 
     data = response.json()
-    assert data == payload
+    for key, value in payload.items():
+        assert data[key] == value
+    # The served document also advertises the object's interaction
+    # collections — remote servers use them to discover its interactions.
+    for coll in ("replies", "likes", "shares", "quotes"):
+        assert data[coll]["id"] == f"{payload['id']}/{coll}"
+        assert data[coll]["type"] == "OrderedCollection"
 
 
 async def test_get_object_serves_create_payload_object(fed_client, db_session, regular_user):

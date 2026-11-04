@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `federation`: Served object documents now advertise `replies`,
+  `likes`, `shares` and `quotes` collection references, each backed by a
+  new paged `OrderedCollection` endpoint
+  (`GET /users/{username}/objects/{object_id}/{collection}`). Items merge
+  local `Activity` rows with confirmed remote interactions from pubby's
+  storage (deduplicated, public-addressing only) so remote servers can
+  discover the interactions an object received — previously they were
+  only visible through the local API.
+
 ## 0.4.22
 
 ### Fixed

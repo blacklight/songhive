@@ -2,11 +2,14 @@
 Shared helpers for the federation route modules.
 """
 
+import asyncio
+import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from fastapi import HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
+from pubby import InteractionType
 from pubby.collections import (
     ordered_collection,
     ordered_collection_index,
@@ -23,9 +26,11 @@ from ...federation.activities import (
     build_activity_object,
     build_tombstone_object,
 )
+from ...federation.notification_helpers import _object_is_public
 from ...federation.serializers import (
     track_to_audio_object,
 )
+from ...federation.storage import get_federation_storage
 from ...models import Activity, Track, Visibility
 from ...models.base import get_session
 from ...models.moderation import ADMIN_ACTION_SUSPEND, AdminUserModeration
@@ -38,6 +43,30 @@ from .profile_pages import _federating_user_or_none
 ACTIVITY_JSON = "application/activity+json"
 JRD_JSON = "application/jrd+json"
 AP_CONTEXT = "https://www.w3.org/ns/activitystreams"
+
+logger = logging.getLogger(__name__)
+
+#: Interaction collections served under ``/objects/{id}/<collection>``.
+INTERACTION_COLLECTIONS = ("replies", "likes", "shares", "quotes")
+
+#: ``orderedItems`` per served interaction collection page.
+INTERACTION_COLLECTION_PAGE_SIZE = 100
+
+#: ``activities.activity_type`` behind each served collection.
+_LOCAL_INTERACTION_TYPES = {
+    "replies": "reply",
+    "likes": "like",
+    "shares": "announce",
+    "quotes": "quote",
+}
+
+#: Pubby ``InteractionType`` behind each served collection.
+_REMOTE_INTERACTION_TYPES = {
+    "replies": InteractionType.REPLY,
+    "likes": InteractionType.LIKE,
+    "shares": InteractionType.BOOST,
+    "quotes": InteractionType.QUOTE,
+}
 
 
 def _federation_config(request: Request) -> SonghiveConfig:
@@ -71,6 +100,129 @@ def _page_number(request: Request) -> Optional[int]:
         return max(1, int(page))
     except ValueError:
         return 1
+
+
+def _collection_ref_stub(collection_id: str, total_items: int) -> dict:
+    """Collection reference embedded on an object doc — mirrors the served index."""
+    last_page = max(1, -(-total_items // INTERACTION_COLLECTION_PAGE_SIZE)) if total_items else 1
+    return {
+        "id": collection_id,
+        "type": "OrderedCollection",
+        "totalItems": total_items,
+        "first": f"{collection_id}?page=1",
+        "last": f"{collection_id}?page={last_page}",
+    }
+
+
+def _with_collection_refs(document: Optional[dict], items: dict, config: SonghiveConfig) -> Optional[dict]:
+    """
+    Attach ``replies``/``likes``/``shares``/``quotes`` collection
+    references to a served object document — the mechanism remote
+    servers use to discover the interactions an object received.
+
+    Only local documents get refs: a remote-materialized document is
+    owned by its origin instance, which advertises its own collections.
+    Tombstones carry no collections either — a deleted object has no
+    discoverable interactions.
+    """
+    if not document or document.get("type") == "Tombstone":
+        return document
+    object_id = document.get("id")
+    domain = config.federation.instance_domain
+    if not isinstance(object_id, str) or not object_id or not object_id.startswith(f"https://{domain}/"):
+        return document
+    base = object_id.split("?", 1)[0]
+    for coll in INTERACTION_COLLECTIONS:
+        document.setdefault(
+            coll,
+            _collection_ref_stub(f"{base}/{coll}", len(items.get(coll, ()))),
+        )
+    return document
+
+
+def _embedded_interaction(source_id: str, actor: str, collection: str, object_url: str) -> dict:
+    """Minimal ``Like``/``Announce`` activity for a collection item."""
+    activity = {
+        "type": "Like" if collection == "likes" else "Announce",
+        "actor": actor,
+        "object": object_url,
+    }
+    if source_id:
+        activity = {"id": source_id, **activity}
+    return activity
+
+
+async def object_interaction_items(
+    db: AsyncSession,
+    config: SonghiveConfig,
+    *,
+    object_url: str,
+    activity: Optional[Activity],
+    collection: str,
+) -> list:
+    """
+    Build the ``orderedItems`` payload of one interaction collection.
+
+    Local likes/boosts/replies/quotes live as ``Activity`` rows keyed by
+    ``in_reply_to_activity_id``; remote ones are pubby
+    ``federation_interactions`` records keyed by the object's AP id.
+    Remote items already materialized into local rows are deduplicated,
+    and only publicly-addressed remote interactions are exposed — the
+    same rules the interaction summaries apply.
+    """
+    items: list = []
+    seen_ids: set = set()
+
+    if activity is not None:
+        rows = (
+            (
+                await db.execute(
+                    select(Activity)
+                    .where(
+                        Activity.in_reply_to_activity_id == str(activity.id),
+                        Activity.activity_type == _LOCAL_INTERACTION_TYPES[collection],
+                        Activity.deleted_at.is_(None),
+                        Activity.visibility.in_(_FEDERATING_VISIBILITIES),
+                    )
+                    .order_by(Activity.published_at.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for a in rows:
+            seen_ids.add(a.source_id)
+            if collection in ("replies", "quotes"):
+                items.append(a.source_id)
+            else:
+                items.append(_embedded_interaction(a.source_id, a.source_actor, collection, object_url))
+
+    remote_type = _REMOTE_INTERACTION_TYPES[collection]
+    try:
+        storage = await asyncio.to_thread(get_federation_storage, config.database)
+        remote = await asyncio.to_thread(storage.get_interactions, object_url, remote_type)
+    except Exception:
+        logger.exception("Failed to fetch remote interactions for %s", object_url)
+        remote = []
+
+    for interaction in remote:
+        raw = getattr(interaction, "metadata", None) or {}
+        if not _object_is_public(raw.get("raw_object")):
+            continue
+        if collection in ("replies", "quotes"):
+            oid = getattr(interaction, "object_id", "") or ""
+            if not oid or oid in seen_ids:
+                continue
+            seen_ids.add(oid)
+            items.append(oid)
+        else:
+            aid = getattr(interaction, "activity_id", "") or ""
+            if aid and aid in seen_ids:
+                continue
+            if aid:
+                seen_ids.add(aid)
+            items.append(_embedded_interaction(aid, interaction.source_actor_id, collection, object_url))
+    return items
 
 
 _FEDERATING_VISIBILITIES = [v.value for v in Visibility if Visibility.federates(v)]
@@ -252,21 +404,42 @@ async def _render_object_document(
             )
         )
         track = result.scalar_one_or_none()
+        document: Optional[dict] = None
+        activity: Optional[Activity] = None
         if track is not None:
-            return await _track_object_document(db, track, user, config)
-
-        activity_result = await db.execute(
-            select(Activity)
-            .options(selectinload(Activity.in_reply_to_activity))
-            .where(
-                or_(
-                    Activity.local_object_id == object_id,
-                    Activity.source_id == object_id,
-                ),
-                Activity.owner_user_id == str(user.id),
+            document = await _track_object_document(db, track, user, config)
+        else:
+            activity_result = await db.execute(
+                select(Activity)
+                .options(selectinload(Activity.in_reply_to_activity))
+                .where(
+                    or_(
+                        Activity.local_object_id == object_id,
+                        Activity.source_id == object_id,
+                    ),
+                    Activity.owner_user_id == str(user.id),
+                )
             )
-        )
-        activity = activity_result.scalar_one_or_none()
-        if activity is None:
-            return None
-        return _activity_object_document(activity)
+            activity = activity_result.scalar_one_or_none()
+            if activity is None:
+                return None
+            document = _activity_object_document(activity)
+
+        # Advertise the object's interaction collections so remote
+        # servers can discover its replies/likes/boosts/quotes —
+        # skipped for remote-owned and tombstone documents.
+        if document and document.get("type") != "Tombstone":
+            doc_id = document.get("id")
+            if isinstance(doc_id, str) and doc_id.startswith(f"https://{config.federation.instance_domain}/"):
+                items = {
+                    coll: await object_interaction_items(
+                        db,
+                        config,
+                        object_url=doc_id,
+                        activity=activity,
+                        collection=coll,
+                    )
+                    for coll in INTERACTION_COLLECTIONS
+                }
+                document = _with_collection_refs(document, items, config)
+        return document

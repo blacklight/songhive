@@ -22,17 +22,23 @@ from ...services.storage import StorageService
 from ..deps import get_current_user_optional, get_db, get_storage_service
 from ..semantic_meta import entity_head_tags
 from .federation_common import (
+    INTERACTION_COLLECTION_PAGE_SIZE,
+    INTERACTION_COLLECTIONS,
     _activity_object_document,
     _document_ttl,
     _earliest_track_post,
     _federating_user_or_none,
     _federation_config,
     _ordered_collection,
+    _page_number,
+    _paged_collection_index,
+    _paged_collection_page,
     _render_object_document,
     _Rendered,
     _serve_cached_document,
     _track_object_document,
     _visibility_federates,
+    object_interaction_items,
 )
 from .profile_pages import _accepts_activitypub, _accepts_html, _get_federating_user, _spa_response
 
@@ -183,6 +189,83 @@ async def get_object_followers(
 
     document = await doc_cache.get_or_render(("obj", username, object_id, "followers"), ttl, _render)
     return _serve_cached_document(request, ("obj", username, object_id, "followers"), ttl, document)
+
+
+@router.get("/users/{username}/objects/{object_id}/{collection}")
+async def get_object_interaction_collection(
+    username: str,
+    object_id: str,
+    collection: str,
+    request: Request,
+):
+    """
+    Return a paged ``OrderedCollection`` of an object's interactions.
+
+    Serves the ``replies``/``likes``/``shares``/``quotes`` collections
+    advertised on the object document — remote servers use them to
+    discover the interactions an object received elsewhere. Without
+    ``?page`` the collection index is returned; ``?page=N`` serves an
+    ``OrderedCollectionPage``. Only objects that ``get_object`` would
+    serve answer — the collection follows the object's own
+    dereferenceability.
+    """
+    if collection not in INTERACTION_COLLECTIONS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
+    config = _federation_config(request)
+    ttl = _document_ttl(config)
+    page = _page_number(request) or 0
+
+    async def _render() -> Optional[dict]:
+        async with get_session() as db:
+            user = await _federating_user_or_none(db, username)
+            if user is None:
+                return None
+            ensure_user_actor(user, config)
+            object_url = f"{user.actor_url}/objects/{object_id}"
+            track_id = await db.scalar(
+                select(Track.id).where(
+                    Track.federation_object_id == object_id,
+                    Track.owner_id == str(user.id),
+                    Track.visibility == Visibility.PUBLIC.value,
+                )
+            )
+            activity = None
+            if track_id is None:
+                activity = await db.scalar(
+                    select(Activity).where(
+                        or_(
+                            Activity.local_object_id == object_id,
+                            Activity.source_id == object_id,
+                        ),
+                        Activity.owner_user_id == str(user.id),
+                        Activity.deleted_at.is_(None),
+                        Activity.visibility.in_([v.value for v in Visibility if Visibility.federates(v)]),
+                    )
+                )
+                if activity is None:
+                    return None
+
+            items = await object_interaction_items(
+                db,
+                config,
+                object_url=object_url,
+                activity=activity,
+                collection=collection,
+            )
+            coll_url = f"{object_url}/{collection}"
+            if not page:
+                return _paged_collection_index(coll_url, len(items), INTERACTION_COLLECTION_PAGE_SIZE)
+            return _paged_collection_page(
+                coll_url,
+                page,
+                len(items),
+                items[(page - 1) * INTERACTION_COLLECTION_PAGE_SIZE : page * INTERACTION_COLLECTION_PAGE_SIZE],
+                INTERACTION_COLLECTION_PAGE_SIZE,
+            )
+
+    key = ("coll", username, object_id, collection, page)
+    document = await doc_cache.get_or_render(key, ttl, _render)
+    return _serve_cached_document(request, key, ttl, document)
 
 
 @router.get("/users/{username}/quote_authorizations/{auth_id:path}")
