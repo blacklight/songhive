@@ -3,6 +3,7 @@ Shared test fixtures.
 """
 
 import asyncio
+import shutil
 from typing import Optional
 from unittest.mock import MagicMock
 
@@ -193,17 +194,69 @@ def config(tmp_path):
     )
 
 
+@pytest.fixture(scope="session")
+def _db_template(tmp_path_factory):
+    """Build a pristine SQLite schema file once per xdist worker.
+
+    Every test receives a private database file under ``tmp_path``; copying
+    a pre-built schema (~1ms) replaces a ``create_all`` over ~78 tables
+    (~0.2s) on every test.
+    """
+    from sqlalchemy import create_engine as create_sync_engine
+
+    path = tmp_path_factory.mktemp("db_template") / "songhive.db"
+    template_engine = create_sync_engine(f"sqlite:///{path}")
+    Base.metadata.create_all(template_engine)
+    template_engine.dispose()
+    return path
+
+
 @pytest.fixture
-def engine(tmp_path):
+def engine(tmp_path, _db_template, monkeypatch):
     """Create an async SQLAlchemy engine backed by a fresh SQLite database."""
     url = f"sqlite+aiosqlite:///{tmp_path / 'songhive.db'}"
+    shutil.copyfile(_db_template, tmp_path / "songhive.db")
     engine = create_async_engine(url, poolclass=NullPool)
 
-    async def _create_tables():
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
+    # Route the synchronous federation/webmention storages to sibling
+    # files: sharing ``songhive.db`` between the async session and a sync
+    # storage serializes writers on the file lock, so mid-transaction
+    # storage calls stall on the ~5s pysqlite busy timeout and fail with
+    # "database is locked". Every storage entry point funnels through the
+    # module globals patched here, covering app code and test-side callers
+    # alike — nothing joins federation_*/webmentions tables through the
+    # async engine.
+    from songhive.federation import storage as _fed_storage
+    from songhive.webmentions import storage as _wm_storage
 
-    asyncio.run(_create_tables())
+    songhive_db = str(tmp_path / "songhive.db")
+    fed_url = f"sqlite+aiosqlite:///{tmp_path / 'federation.db'}"
+    wm_url = f"sqlite:///{tmp_path / 'webmentions.db'}"
+
+    def _isolated(db_url, isolated_url):
+        return isolated_url if songhive_db in str(db_url) else db_url
+
+    real_get_db_storage = _fed_storage.get_db_storage
+    real_init_db_storage = _fed_storage.init_db_storage
+    real_wm_init_db_storage = _wm_storage.init_db_storage
+
+    monkeypatch.setattr(
+        _fed_storage,
+        "get_db_storage",
+        lambda db_url, *a, **kw: real_get_db_storage(_isolated(db_url, fed_url), *a, **kw),
+    )
+    monkeypatch.setattr(
+        _fed_storage,
+        "init_db_storage",
+        lambda db_url, *a, **kw: real_init_db_storage(_isolated(db_url, fed_url), *a, **kw),
+    )
+    monkeypatch.setattr(
+        _wm_storage,
+        "init_db_storage",
+        lambda db_url, *a, **kw: real_wm_init_db_storage(_isolated(db_url, wm_url), *a, **kw),
+    )
+    _fed_storage.get_federation_storage(url)
+
     yield engine
     asyncio.run(engine.dispose())
     reset_db()

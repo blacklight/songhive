@@ -138,6 +138,14 @@
   renders run on independent sessions that can't see the fixture's
   uncommitted data; `_clear_federation_caches` resets `doc_cache` and the
   pubby storage cache between tests.
+- The `engine` fixture copies a per-worker `_db_template` schema file
+  instead of running `create_all` per test, and redirects the sync
+  pubby/webmentions storages (`get_db_storage`/`init_db_storage`) to
+  sibling `federation.db`/`webmentions.db` files: sharing `songhive.db`
+  between the async session and a sync storage serializes writers on the
+  file lock, stalling each affected test on the ~5s pysqlite busy
+  timeout. Keep storage calls on the `get_federation_storage` /
+  `create_*_storage` helpers so the redirect covers them.
 - Every remote HTTP fetch on the Webmention path (incoming source parsing,
   outgoing endpoint discovery, outgoing delivery, outgoing source reads)
   goes through the library's guarded fetch
