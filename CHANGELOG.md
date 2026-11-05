@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `meta`: Emit `rel="me"` link tags for each user link in profile
+  page head tags so external services can verify the profile owner's
+  identities.
+  ([`1cabb44`](https://git.platypush.tech/blacklight/songhive/commit/1cabb44b55eeabe5b187704c39d206d2dfc1ff30)).
+
 ## 0.4.23
 
 ### Added
