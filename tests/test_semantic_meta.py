@@ -14,6 +14,7 @@ from songhive.models.playlist import Playlist
 from songhive.models.podcast import Podcast
 from songhive.models.stored_file import StoredFile
 from songhive.models.track import Track
+from songhive.models.user_link import UserLink
 from songhive.services.tags import add_tags_to_entity
 
 
@@ -280,6 +281,16 @@ async def test_user_profile_page_injects_og_tags(client, db_session, regular_use
     assert '<meta property="og:type" content="profile">' in text
     assert '<meta property="og:url" content="http://testserver/@regular">' in text
     assert '<meta property="og:image" content="https://img.example.com/avatar.png">' in text
+
+
+async def test_user_profile_page_injects_rel_me_links(client, db_session, regular_user):
+    db_session.add(UserLink(user_id=regular_user.id, name="Blog", url="https://blog.example.com"))
+    db_session.add(UserLink(user_id=regular_user.id, name="Mastodon", url="https://mastodon.example/@regular"))
+    await db_session.commit()
+    response = client.get("/@regular")
+    text = response.text
+    assert '<link rel="me" href="https://blog.example.com">' in text
+    assert '<link rel="me" href="https://mastodon.example/@regular">' in text
 
 
 async def test_user_subpage_injects_og_tags(client, db_session, regular_user):

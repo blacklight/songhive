@@ -445,6 +445,10 @@ async def _podcast_tags(
 def user_head_tags(user: User, base_url: str, site_name: str) -> list[str]:
     """Build the OpenGraph tags for a user profile page."""
     description = user.bio.strip() if user.bio else None
+    # ``rel="me"`` link tags let crawlers verify the profile's outbound
+    # links without executing the SPA (the rendered anchors carry the
+    # same relation for JS-capable visitors).
+    rel_me = [void_tag("link", {"rel": "me", "href": link.url}) for link in user.links or ()]
     return _og_tags(
         title=user.display_name or user.username,
         description=description,
@@ -452,7 +456,10 @@ def user_head_tags(user: User, base_url: str, site_name: str) -> list[str]:
         site_name=site_name,
         og_type=_OG_TYPES["user"],
         image=_absolute(base_url, user.avatar_url),
-        extra=[void_tag("meta", {"property": "profile:username", "content": user.username})],
+        extra=[
+            void_tag("meta", {"property": "profile:username", "content": user.username}),
+            *rel_me,
+        ],
     )
 
 
