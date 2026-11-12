@@ -715,6 +715,10 @@ def test_process_incoming_quote_request_shared_inbox(engine, tmp_path, monkeypat
         }
         process_incoming(activity, username=None)
 
+    # The processor must run under the quoted object's owner so the
+    # QuoteAuthorization pubby issues is attributed to them (FEP-044f).
+    assert mock_processor.call_args.kwargs["actor_id"] == user.actor_url
+
     rows = _notifications_for(engine, user.id)
     assert [r.type for r in rows] == ["quote"]
 

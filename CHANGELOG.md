@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `federation`: Shared-inbox `QuoteRequest` deliveries are now processed
+  under the quoted object's owning actor instead of the instance actor,
+  so the issued `QuoteAuthorization` is attributed to the post's author
+  as FEP-044f requires — quotes of user posts no longer stay pending on
+  Mastodon.
+
 ## 0.4.24
 
 ### Added

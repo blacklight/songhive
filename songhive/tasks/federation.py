@@ -82,19 +82,23 @@ def _follow_policy_for_target(target_actor_id: str, requester_actor_id: str) -> 
     return asyncio.run(_load())
 
 
-def _object_follow_owner_username(config, activity: dict) -> Optional[str]:
+def _local_object_owner_username(config, activity: dict) -> Optional[str]:
     """
-    Resolve the local owner username of an object-scoped inbound ``Follow``.
+    Resolve the local owner username of an object-scoped inbound activity.
 
     Shared-inbox deliveries arrive with ``username=None``, which would make
-    pubby answer the ``Accept(Follow)`` as the instance actor. Remote music
+    pubby answer the ``Accept`` as the instance actor. Remote music
     servers — Funkwhale in particular — only honor an ``Accept`` whose
     actor is the followed object's owning actor (``library.actor``), so a
     ``Follow`` of ``/libraries/{id}`` or ``/users/{u}/library`` must be
-    processed under the owner's actor. Returns ``None`` for non-Follow
-    activities, non-local targets and objects with no resolvable owner.
+    processed under the owner's actor. A ``QuoteRequest`` needs the same
+    treatment: FEP-044f requires the ``QuoteAuthorization`` to be
+    attributed to the quoted post's author, so the request must run under
+    the quoted object's owning actor rather than the instance actor.
+    Returns ``None`` for other activity types, non-local targets and
+    objects with no resolvable owner.
     """
-    if activity.get("type") != "Follow":
+    if activity.get("type") not in ("Follow", "QuoteRequest"):
         return None
     target = activity.get("object")
     if isinstance(target, dict):
@@ -284,7 +288,7 @@ def _incoming_actor_context(config, activity: dict, username: Optional[str], dom
     matches ``Accept.actor`` against ``library.actor`` — so the owner's
     actor context is resolved before falling back to the instance actor.
     """
-    object_owner = _object_follow_owner_username(config, activity) if username is None else None
+    object_owner = _local_object_owner_username(config, activity) if username is None else None
     if username is None and object_owner is None:
         private_key_path = get_or_create_private_key(config.federation.private_key_path)
         return f"https://{domain}/ap/actor", private_key_path.read_text(encoding="utf-8")
