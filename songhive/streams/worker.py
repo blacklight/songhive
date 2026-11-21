@@ -271,6 +271,12 @@ class SessionDriver:
     _ADVANCE_RETRY_DELAY_S = 1.0
     _ADVANCE_MAX_RETRIES = 5
 
+    # A track that resolves to no playable source (e.g. an external
+    # provider refusing the stream) is skipped like a normal advance so
+    # the queue never parks on dead air; the bound keeps a systemic
+    # outage from burning through the whole queue.
+    _UNRESOLVABLE_SKIP_LIMIT = 10
+
     def __init__(
         self,
         worker: StreamWorker,
@@ -479,6 +485,7 @@ class SessionDriver:
                 await self.driver.set_volume(session.volume)
                 if session.state == "playing":
                     source, metadata = await self._resolve_source(db, session)
+                    source, metadata = await self._skip_unresolvable(db, session, source, metadata)
                     if source is not None:
                         metadata = metadata or TrackMeta(track_id="", title="", artist="")
                         await self.driver.set_source(
@@ -638,6 +645,7 @@ class SessionDriver:
                     await db.flush()
                     await self._publish_state(await session_state_dict(db, session))
                 source, metadata = await self._resolve_source(db, session)
+                source, metadata = await self._skip_unresolvable(db, session, source, metadata)
         except Exception:
             logger.exception("Failed to resync session %s after live", self.session_id)
             return
@@ -831,6 +839,7 @@ class SessionDriver:
                 await self._publish_state(state)
 
                 source, metadata = await self._resolve_source(db, session)
+                source, metadata = await self._skip_unresolvable(db, session, source, metadata)
         except Exception:
             logger.exception("Commands %s failed for session %s", commands, self.session_id)
             return None
@@ -1121,7 +1130,43 @@ class SessionDriver:
                 await self._publish_state(state)
 
             source, metadata = await self._resolve_source(db, session)
+            source, metadata = await self._skip_unresolvable(db, session, source, metadata)
         return session, source, metadata
+
+    async def _skip_unresolvable(
+        self,
+        db,
+        session: PlaybackSession,
+        source: Optional[AudioSource],
+        metadata: Optional[TrackMeta],
+    ) -> tuple[Optional[AudioSource], Optional[TrackMeta]]:
+        """Advance past tracks that resolve to no playable source.
+
+        Called wherever a ``(source, metadata)`` pair comes back empty
+        while the session is playing: the queue moves on to the next
+        track instead of parking the driver on silence. Skipped tracks
+        were never played, so no listen is recorded for them.
+        """
+        skipped = 0
+        while source is None and session.state == "playing" and skipped < self._UNRESOLVABLE_SKIP_LIMIT:
+            skipped_id = _current_track_id(session)
+            skipped_title = metadata.title if metadata else ""
+            await self._advance_index(session, direction="next")
+            await db.flush()
+            await self._publish_state(await session_state_dict(db, session))
+            # repeat=one, or repeat=all wrapping back onto the same track,
+            # cannot make progress — stop rather than re-resolve it.
+            if session.state != "playing" or _current_track_id(session) == skipped_id:
+                break
+            source, metadata = await self._resolve_source(db, session)
+            skipped += 1
+            logger.warning(
+                "Skipped unresolvable track %s (%s) for session %s",
+                skipped_id,
+                skipped_title,
+                self.session_id,
+            )
+        return source, metadata
 
     async def _resolve_metadata(self, db, session: PlaybackSession) -> Optional[TrackMeta]:
         """Resolve the current queue track to a TrackMeta without touching audio."""

@@ -788,6 +788,14 @@ async def update_library(
   The lock is refreshed on every main-loop iteration and released on shutdown.
 - Worker tests live in `tests/test_streams_worker.py`; output/playback tests in
   `tests/test_api_outputs.py` and `tests/test_api_playback.py`.
+- A queue track that resolves to no playable source (missing file AND failed
+  external resolution, e.g. a provider 401) is auto-skipped by
+  `SessionDriver._skip_unresolvable` at every `_resolve_source` call site —
+  the queue advances like a normal track change (no listen is recorded for the
+  skipped track) instead of parking the driver on silence. Skips are bounded
+  by `_UNRESOLVABLE_SKIP_LIMIT` consecutive tracks and stop early when the
+  index can't move (repeat=one) or the queue ends, so a systemic provider
+  outage can't burn through the whole queue.
 - The `http` provider (`songhive/streams/http.py`) serves Icecast-style
   mountpoints without an external server. The worker's encoder writes encoded
   chunks to the capped Redis stream `songhive:stream:data:{mount}`; the Tornado

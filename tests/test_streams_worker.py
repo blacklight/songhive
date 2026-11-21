@@ -1358,3 +1358,182 @@ async def test_scan_live_ignores_ineligible_outputs(
 
     await worker._scan_live()
     assert worker._tasks == {}
+
+
+def _queue_of(*ids: str) -> list[dict]:
+    """Build a queue of fake tracks from bare ids."""
+    return [{"id": i, "title": f"Track {i}", "artist": "Artist", "duration": 100} for i in ids]
+
+
+def _resolver_skipping(bad_ids: set[str]):
+    """A ``_resolve_source`` stand-in that returns no source for ``bad_ids``."""
+
+    async def _resolve(self, db, session: PlaybackSession):
+        track = (
+            session.queue[session.current_index]
+            if session.queue and 0 <= session.current_index < len(session.queue)
+            else None
+        )
+        if track is None:
+            return None, None
+        metadata = TrackMeta(
+            track_id=track["id"],
+            title=track["title"],
+            artist=track["artist"],
+            duration=track.get("duration"),
+        )
+        if track["id"] in bad_ids:
+            return None, metadata
+        return AudioSource(kind="url", url=f"http://test/{track['id']}.mp3"), metadata
+
+    return _resolve
+
+
+@pytest.mark.asyncio
+async def test_source_ended_skips_unresolvable_track(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """A track that resolves to no source is skipped instead of parking the stream."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _resolver_skipping({"t2"}))
+
+    session, output = await make_session_output(_queue_of("t1", "t2", "t3"), state="playing")
+    session.position_seconds = 45.0
+    await db_session.commit()
+
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    fake.trigger_source_ended()
+    assert await _wait_until(lambda: len(_set_source_commands(fake)) >= 2)
+
+    await _stop_driver_task(driver, task)
+
+    # t2 never reached the driver; playback landed on t3.
+    assert len(_set_source_commands(fake)) == 2
+    assert _set_source_commands(fake)[-1][3].track_id == "t3"
+    async with get_session() as db:
+        refreshed = await db.get(PlaybackSession, session.id)
+        assert refreshed is not None
+        assert refreshed.current_index == 2
+    # Only the actually-played t1 recorded a listen; the skipped t2 did not.
+    assert await _listen_count(str(session.user_id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_source_ended_skip_reaches_queue_end(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """Skipping past the last track ends the queue and pauses the driver."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _resolver_skipping({"t2"}))
+
+    session, output = await make_session_output(_queue_of("t1", "t2"), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    fake.trigger_source_ended()
+    assert await _wait_until(lambda: _find_command(fake, "pause") is not None)
+
+    await _stop_driver_task(driver, task)
+
+    assert _set_source_commands(fake)[-1][3].track_id == "t1"
+    assert await _wait_for_session_field(session.id, "state", "idle")
+
+
+@pytest.mark.asyncio
+async def test_source_ended_skip_is_bounded(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """Consecutive unresolvable tracks stop being skipped after the limit."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _resolver_skipping({"b1", "b2", "b3"}))
+    monkeypatch.setattr(SessionDriver, "_UNRESOLVABLE_SKIP_LIMIT", 2)
+
+    session, output = await make_session_output(_queue_of("t1", "b1", "b2", "b3"), state="playing")
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    fake.trigger_source_ended()
+    assert await _wait_until(lambda: _find_command(fake, "pause") is not None)
+
+    await _stop_driver_task(driver, task)
+
+    # t1 -> b1 (advance) -> b2, b3 (two skips) -> give up on b3.
+    async with get_session() as db:
+        refreshed = await db.get(PlaybackSession, session.id)
+        assert refreshed is not None
+        assert refreshed.current_index == 3
+    assert len(_set_source_commands(fake)) == 1
+
+
+@pytest.mark.asyncio
+async def test_unresolvable_track_does_not_skip_under_repeat_one(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """repeat=one cannot advance, so an unresolvable track just pauses."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _resolver_skipping({"bad"}))
+
+    session, output = await make_session_output(_queue_of("bad"), state="playing")
+    session.repeat = "one"
+    session.current_index = 0
+    await db_session.commit()
+
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+
+    # Startup sync already refuses to park: no source is ever set.
+    fake.trigger_source_ended()
+    assert await _wait_until(lambda: _find_command(fake, "pause") is not None)
+
+    await _stop_driver_task(driver, task)
+
+    assert _set_source_commands(fake) == []
+    assert await _wait_for_session_field(session.id, "current_index", 0)
+
+
+@pytest.mark.asyncio
+async def test_play_command_skips_unresolvable_track(
+    engine, db_session, worker_config, make_session_output, make_worker, monkeypatch, capture_driver
+):
+    """Pressing play on a session parked on a bad track skips to the next one."""
+    init_db(engine=engine, force=True)
+    monkeypatch.setattr(SessionDriver, "_resolve_source", _resolver_skipping({"bad"}))
+
+    session, output = await make_session_output(_queue_of("t1", "bad", "t2"), state="paused")
+    session.current_index = 1
+    await db_session.commit()
+
+    worker = make_worker()
+    driver = SessionDriver(worker, session.id, output.id, session.user_id)
+
+    task = asyncio.create_task(driver.run())
+    fake = await capture_driver.wait_for()
+
+    await _send_command(worker, session.id, "play")
+    assert await _wait_until(lambda: _find_command(fake, "set_source") is not None)
+
+    await _stop_driver_task(driver, task)
+
+    set_sources = _set_source_commands(fake)
+    assert set_sources[-1][3].track_id == "t2"
+    async with get_session() as db:
+        refreshed = await db.get(PlaybackSession, session.id)
+        assert refreshed is not None
+        assert refreshed.current_index == 2
