@@ -547,9 +547,13 @@ async def _apply_extra_artists(db: AsyncSession, track: Track, body: "TrackUpdat
 
     # ``extra_artists`` is the name-only legacy shape of the credit list:
     # writing it replaces the extra (non-primary) credits with
-    # name-resolved artists — the primary credit is untouched.
-    if track.artist is not None:
-        await music.set_track_artist(db, track, track.artist, extra_names=names)
+    # name-resolved artists — the primary credit is untouched. Resolve the
+    # primary from ``artist_id`` rather than the ``artist`` relationship,
+    # which still points at the previous artist when ``artist_name`` was
+    # applied earlier in the same request.
+    primary_artist = await db.get(Artist, track.artist_id) if track.artist_id else None
+    if primary_artist is not None:
+        await music.set_track_artist(db, track, primary_artist, extra_names=names)
     else:
         track.extra_artists = names or None
     track.metadata_updated_at = datetime.now(timezone.utc)
@@ -1064,7 +1068,7 @@ async def _apply_track_fields(db, storage, track, body: TrackUpdate, previous_ar
 
 async def _cleanup_renamed_entities(db, storage, track, body, previous_artist_id, previous_album_id, album):
     """Flush renames, drop empty entities, resync album genres."""
-    if body.artist_name is not None or body.album_title is not None:
+    if body.artist_name is not None or body.album_title is not None or "artist_credits" in body.model_fields_set:
         await db.flush()
         await db.refresh(track, ["artist", "album"])
         await deletion.cleanup_empty_artist_and_album(

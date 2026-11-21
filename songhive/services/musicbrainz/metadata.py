@@ -5,8 +5,10 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
+from ...config.constants import AUDIO_EXTENSIONS
 from ...models.album import Album
 from ...models.artist import Artist
+from ...services.metadata import is_placeholder_album_name, is_placeholder_artist_name
 
 if TYPE_CHECKING:
     from ...models.track import Track
@@ -414,9 +416,19 @@ def _is_logo_relation(relation: Dict[str, Any]) -> bool:
 
 
 def _is_missing_title(track: Track) -> bool:
-    """Return ``True`` when the track title is missing or derived from the filename."""
+    """Return ``True`` when the track title is missing or a storage placeholder."""
     if not track.title or not track.title.strip():
         return True
+
+    title = track.title.strip()
+    raw = track.raw_metadata if isinstance(track.raw_metadata, dict) else {}
+    display_path = raw.get("display_path")
+    if display_path and title == str(display_path).strip():
+        return True
+    if "/" in title:
+        suffix = f".{title.rsplit('.', 1)[-1].lower()}" if "." in title else ""
+        if suffix in AUDIO_EXTENSIONS:
+            return True
 
     if track.audio_file and track.audio_file.original_filename:
         return track.title == Path(track.audio_file.original_filename).stem
@@ -429,7 +441,7 @@ def _is_missing_artist(artist: Optional[Artist]) -> bool:
     if artist is None:
         return True
     name = (artist.name or "").strip()
-    return not name or name == "Unknown Artist"
+    return not name or is_placeholder_artist_name(name)
 
 
 def _is_missing_album(album: Optional[Album]) -> bool:
@@ -437,7 +449,7 @@ def _is_missing_album(album: Optional[Album]) -> bool:
     if album is None:
         return True
     title = (album.title or "").strip()
-    return not title or title == "Unknown Album"
+    return not title or is_placeholder_album_name(title)
 
 
 def _normalize_name(name: Optional[str]) -> str:

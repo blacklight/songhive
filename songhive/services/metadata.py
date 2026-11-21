@@ -6,7 +6,7 @@ import base64
 import re
 from dataclasses import dataclass, field
 from logging import getLogger
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Optional
 
 import mutagen
@@ -40,6 +40,125 @@ class AudioMetadata:
     cover_art: Optional[bytes] = None
     cover_art_mime: Optional[str] = None
     raw_tags: dict = field(default_factory=dict)
+
+
+@dataclass
+class PathMetadata:
+    """Best-effort metadata parsed from an audio file's path."""
+
+    title: Optional[str] = None
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    track_number: Optional[int] = None
+    disc_number: Optional[int] = None
+
+
+_PLACEHOLDER_ARTIST_NAMES = {"unknown artist"}
+_PLACEHOLDER_ALBUM_NAMES = {"unknown album"}
+
+# "CD1", "Disc 2", "disk-3" directory or filename components.
+_DISC_COMPONENT_RE = re.compile(r"^(?:cd|disc|disk|dvd)\s*[-_. ]?\s*(\d{1,2})$", re.IGNORECASE)
+_DISC_PREFIX_RE = re.compile(
+    r"^\(?\s*(?:cd|disc|disk|dvd)\s*[-_. ]?\s*(\d{1,2})\s*\)?\s*[-_. ]*",
+    re.IGNORECASE,
+)
+# Leading track number: "01 - Title", "04 Title", "1. Title", "02_Title", "3) Title".
+_TRACK_PREFIX_RE = re.compile(r"^(\d{1,3})(?:\s*[-._)\s]\s*|\s+)(?=\S)")
+# "Artist - Title" separator (spaces required so hyphenated titles survive).
+_ARTIST_SEP_RE = re.compile(r"\s+[-–—]\s+")
+
+
+def is_placeholder_artist_name(name: Optional[str]) -> bool:
+    """Return ``True`` for generic artist placeholders like ``Unknown Artist``."""
+    normalized = re.sub(r"[\[\]()]", "", name or "").strip().lower()
+    return normalized in _PLACEHOLDER_ARTIST_NAMES
+
+
+def is_placeholder_album_name(name: Optional[str]) -> bool:
+    """Return ``True`` for generic album placeholders like ``Unknown Album``."""
+    normalized = re.sub(r"[\[\]()]", "", name or "").strip().lower()
+    return normalized in _PLACEHOLDER_ALBUM_NAMES
+
+
+def parse_audio_path(path: str) -> PathMetadata:
+    """
+    Parse artist/album/title/track/disc hints from a relative audio path.
+
+    Assumes the common ``Artist/Album/[disc folder]/[NN - ][Artist - ]Title.ext``
+    layout: the two deepest directories are the artist and album folders, disc
+    folders (``CD1``, ``Disc 2``) set ``disc_number``, a leading track number
+    sets ``track_number``, and an ``Artist - Title`` filename split is trusted
+    only when the artist candidate matches a directory component (or the path
+    has no directories at all) — this keeps titles like ``Song - Live`` from
+    being misread as artist/title pairs. A single directory is used only when
+    the filename corroborates its role; otherwise directory names are ignored
+    rather than guessed.
+    """
+    parts = [part for part in PurePosixPath(str(path).replace("\\", "/")).parts if part not in ("", ".", "/")]
+    if not parts:
+        return PathMetadata()
+
+    filename = parts[-1]
+    dirs = parts[:-1]
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+
+    disc_number: Optional[int] = None
+    content_dirs: list[str] = []
+    for directory in reversed(dirs):
+        match = _DISC_COMPONENT_RE.fullmatch(directory.strip())
+        if match and disc_number is None:
+            disc_number = int(match.group(1))
+            continue
+        content_dirs.append(directory)
+    content_dirs.reverse()
+
+    rest = stem.strip()
+    match = _DISC_PREFIX_RE.match(rest)
+    if match:
+        if disc_number is None:
+            disc_number = int(match.group(1))
+        rest = rest[match.end() :].strip()
+
+    track_number: Optional[int] = None
+    match = _TRACK_PREFIX_RE.match(rest)
+    if match:
+        track_number = int(match.group(1))
+        rest = rest[match.end() :].strip()
+
+    hint: Optional[str] = None
+    tail: Optional[str] = None
+    sep = _ARTIST_SEP_RE.search(rest)
+    if sep:
+        candidate = rest[: sep.start()].strip()
+        remainder = rest[sep.end() :].strip()
+        if candidate and remainder:
+            hint, tail = candidate, remainder
+
+    hint_lower = hint.lower() if hint else None
+    trusted_split = hint_lower is not None and (
+        not content_dirs or any(hint_lower == directory.strip().lower() for directory in content_dirs)
+    )
+
+    artist: Optional[str] = None
+    album: Optional[str] = None
+    title = tail if trusted_split else (rest or stem.strip() or None)
+
+    if len(content_dirs) >= 2:
+        artist = content_dirs[-2].strip() or None
+        album = content_dirs[-1].strip() or None
+    elif trusted_split and hint is not None:
+        # A lone directory is corroborated by the filename's artist credit.
+        artist = hint
+        if content_dirs and hint.lower() == content_dirs[0].strip().lower():
+            artist = content_dirs[0].strip()
+
+    return PathMetadata(
+        title=title,
+        artist=artist,
+        album=album,
+        track_number=track_number,
+        disc_number=disc_number,
+    )
 
 
 @dataclass

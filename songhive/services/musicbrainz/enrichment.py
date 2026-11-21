@@ -18,6 +18,7 @@ if TYPE_CHECKING:
 
 import logging
 
+from ..metadata import PathMetadata, parse_audio_path
 from .metadata import (
     _is_missing_album,
     _is_missing_artist,
@@ -137,6 +138,19 @@ class _TrackEnrichment:
 
         return track, track.artist, track.album
 
+    @staticmethod
+    def _path_metadata(track: Track) -> Optional[PathMetadata]:
+        """Return path-parsed metadata for tracks whose title is a storage path."""
+        raw = track.raw_metadata if isinstance(track.raw_metadata, dict) else {}
+        display_path = raw.get("display_path")
+        candidate = display_path or (track.title if track.title and "/" in track.title else None)
+        if not candidate:
+            return None
+        parsed = parse_audio_path(str(candidate))
+        if not any((parsed.title, parsed.artist, parsed.album)):
+            return None
+        return parsed
+
     async def _find_best_recording(
         self,
         track: Track,
@@ -144,10 +158,26 @@ class _TrackEnrichment:
         album: Optional[Album],
     ) -> Optional[Dict[str, Any]]:
         """Search MusicBrainz and return the best matching recording."""
+        query_artist = artist.name if artist else None
+        query_title = track.title
+        query_release = album.title if album else None
+
+        # Untagged external files are stored under their path as the title
+        # with placeholder artist/album — query with the path-derived hints
+        # instead so MusicBrainz can actually match them.
+        path_meta = self._path_metadata(track)
+        if path_meta is not None:
+            if path_meta.title and _is_missing_title(track):
+                query_title = path_meta.title
+            if _is_missing_artist(artist) and path_meta.artist:
+                query_artist = path_meta.artist
+            if _is_missing_album(album) and path_meta.album:
+                query_release = path_meta.album
+
         results = await self.search_recordings(
-            artist=artist.name if artist else None,
-            title=track.title,
-            release=album.title if album else None,
+            artist=query_artist,
+            title=query_title,
+            release=query_release,
             limit=5,
         )
         recordings = results.get("recording-list", [])

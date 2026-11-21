@@ -202,6 +202,48 @@ def test_update_track_extra_artists(client, sample_tracks, regular_user, auth_he
     assert response.json()["extra_artists"] == []
 
 
+@pytest.mark.asyncio
+async def test_update_track_artist_name_with_extra_artists(
+    client,
+    db_session,
+    regular_user,
+    auth_headers,
+):
+    """artist_name combined with extra_artists keeps the new primary artist.
+
+    Regression: ``extra_artists`` used to rewrite the credits from the stale
+    ``track.artist`` relationship, reverting ``artist_name`` to the previous
+    artist within the same request.
+    """
+    artist = Artist(name="Old Artist")
+    db_session.add(artist)
+    await db_session.flush()
+    track = Track(
+        title="Some Track",
+        artist_id=artist.id,
+        owner_id=str(regular_user.id),
+        visibility=Visibility.PRIVATE.value,
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    response = client.patch(
+        f"/api/v1/tracks/{track.id}",
+        json={"artist_name": "New Artist", "extra_artists": []},
+        headers=auth_headers(regular_user),
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    new_artist = await db_session.scalar(select(Artist).where(Artist.name == "New Artist"))
+    assert new_artist is not None
+    assert data["artist_id"] == str(new_artist.id)
+    assert data["artist_credits"][0]["artist_name"] == "New Artist"
+
+    reloaded = await db_session.get(Track, track.id)
+    assert str(reloaded.artist_id) == str(new_artist.id)
+
+
 def test_update_track_extra_artists_validated(client, sample_tracks, regular_user, auth_headers):
     """extra_artists rejects oversized lists and overlong names."""
     track = next(t for t in sample_tracks if t.visibility == Visibility.PRIVATE.value)

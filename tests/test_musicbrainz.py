@@ -147,6 +147,58 @@ async def test_enrich_fills_missing_only(
 
 
 @pytest.mark.asyncio
+async def test_enrich_path_titled_track_uses_path_hints(
+    db_session,
+    musicbrainz_config,
+    mock_client,
+    recording_result,
+    recording_details,
+    monkeypatch,
+):
+    """Tracks titled by their storage path are enriched via path-derived hints."""
+    display_path = "Test Artist/Test Album/01 - Test Artist - Test Song.mp3"
+    artist = Artist(name="Unknown Artist")
+    db_session.add(artist)
+    await db_session.flush()
+
+    track = Track(
+        title=display_path,
+        artist_id=artist.id,
+        raw_metadata={"display_path": display_path},
+    )
+    db_session.add(track)
+    await db_session.flush()
+
+    service = MusicBrainzService(musicbrainz_config, client=mock_client)
+
+    search = Mock(return_value=recording_result)
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.search_recordings",
+        search,
+    )
+    monkeypatch.setattr(
+        "songhive.services.musicbrainz.musicbrainzngs.get_recording_by_id",
+        lambda *_: recording_details,
+    )
+
+    result = await service.enrich_track(db_session, str(track.id))
+
+    assert result is True
+    assert track.title == "Test Song"
+    assert track.artist_id != str(artist.id)
+    new_artist = await db_session.get(Artist, track.artist_id)
+    assert new_artist.name == "Test Artist"
+    assert track.album_id is not None
+    album = await db_session.get(Album, track.album_id)
+    assert album.title == "Test Album"
+    # The search query used the path-derived title/artist, not the raw path.
+    query = search.call_args.kwargs["query"]
+    assert "Test Song" in query
+    assert "Test Artist" in query
+    assert display_path not in query
+
+
+@pytest.mark.asyncio
 async def test_enrich_fetches_cover_art_when_missing(
     db_session,
     musicbrainz_config,

@@ -548,3 +548,130 @@ def test_extract_raw_tags_vorbis(tagged_flac):
     tags = _extract_raw_tags(flac)
     assert "title" in tags
     assert "artist" in tags
+
+
+def test_parse_audio_path_artist_album_layout():
+    """Artist/Album/NN - Title paths yield full metadata."""
+    from songhive.services.metadata import parse_audio_path
+
+    meta = parse_audio_path("Chris Spheeris/Best of Chris Spheeris 1990-2000/01 - Chris Spheeris - The Arrow.m4a")
+    assert meta.artist == "Chris Spheeris"
+    assert meta.album == "Best of Chris Spheeris 1990-2000"
+    assert meta.title == "The Arrow"
+    assert meta.track_number == 1
+
+
+def test_parse_audio_path_plain_filename():
+    """Filenames without a track prefix still yield a title."""
+    from songhive.services.metadata import parse_audio_path
+
+    meta = parse_audio_path("Santi & Tuğçe/Ganymede's Ocean/Ganymede's Ocean.m4a")
+    assert meta.artist == "Santi & Tuğçe"
+    assert meta.album == "Ganymede's Ocean"
+    assert meta.title == "Ganymede's Ocean"
+    assert meta.track_number is None
+
+
+def test_parse_audio_path_track_number_without_dash():
+    """'NN Title.ext' filenames yield a track number and title."""
+    from songhive.services.metadata import parse_audio_path
+
+    meta = parse_audio_path("Gaudi/No Prisoners/04 Back to Baiai.mp3")
+    assert meta.track_number == 4
+    assert meta.title == "Back to Baiai"
+    assert meta.artist == "Gaudi"
+    assert meta.album == "No Prisoners"
+
+
+def test_parse_audio_path_disc_folder():
+    """Disc folders set disc_number without becoming the album."""
+    from songhive.services.metadata import parse_audio_path
+
+    meta = parse_audio_path("Artist/Album/CD1/03 - Title.flac")
+    assert meta.artist == "Artist"
+    assert meta.album == "Album"
+    assert meta.disc_number == 1
+    assert meta.track_number == 3
+    assert meta.title == "Title"
+
+
+def test_parse_audio_path_ignores_untrusted_artist_split():
+    """'Song - Live' titles are not split when dirs don't corroborate."""
+    from songhive.services.metadata import parse_audio_path
+
+    meta = parse_audio_path("Artist/Album/03 - Song - Live at Wembley.mp3")
+    assert meta.title == "Song - Live at Wembley"
+    assert meta.artist == "Artist"
+
+
+def test_parse_audio_path_single_directory_requires_corroboration():
+    """A lone directory is used only when the filename confirms its role."""
+    from songhive.services.metadata import parse_audio_path
+
+    meta = parse_audio_path("sub/track2.flac")
+    assert meta.artist is None
+    assert meta.album is None
+    assert meta.title == "track2"
+
+
+def test_parse_audio_path_root_file():
+    """Root-level files still parse filename hints."""
+    from songhive.services.metadata import parse_audio_path
+
+    meta = parse_audio_path("01 - Some Artist - Song Title.mp3")
+    assert meta.artist == "Some Artist"
+    assert meta.title == "Song Title"
+    assert meta.track_number == 1
+
+
+def test_is_placeholder_artist_name():
+    """Placeholder artist names are recognized in their common forms."""
+    from songhive.services.metadata import is_placeholder_artist_name
+
+    assert is_placeholder_artist_name("Unknown Artist")
+    assert is_placeholder_artist_name("[unknown artist]")
+    assert is_placeholder_artist_name("(Unknown Artist)")
+    assert not is_placeholder_artist_name("Real Artist")
+    assert not is_placeholder_artist_name("")
+    assert not is_placeholder_artist_name(None)
+
+
+def test_track_metadata_from_file_falls_back_to_path(monkeypatch, tmp_path):
+    """Untagged files derive artist/album/title from the display path."""
+    from songhive.external._audio import track_metadata_from_file
+    from songhive.services import metadata as metadata_module
+
+    monkeypatch.setattr(metadata_module, "extract_metadata", lambda _p: AudioMetadata())
+
+    meta = track_metadata_from_file(
+        tmp_path / "x.m4a",
+        "Chris Spheeris/Best of Chris Spheeris 1990-2000/01 - Chris Spheeris - The Arrow.m4a",
+    )
+    assert meta.title == "The Arrow"
+    assert meta.artist == "Chris Spheeris"
+    assert meta.album == "Best of Chris Spheeris 1990-2000"
+    assert meta.track_number == 1
+
+
+def test_track_metadata_from_file_replaces_placeholder_artist(monkeypatch, tmp_path):
+    """A literal 'Unknown Artist' tag falls back to the path artist."""
+    from songhive.external._audio import track_metadata_from_file
+    from songhive.services import metadata as metadata_module
+
+    monkeypatch.setattr(
+        metadata_module,
+        "extract_metadata",
+        lambda _p: AudioMetadata(
+            title="Ganymede's Ocean",
+            artist="Unknown Artist",
+            album="Ganymede's Ocean",
+        ),
+    )
+
+    meta = track_metadata_from_file(
+        tmp_path / "x.m4a",
+        "Santi & Tuğçe/Ganymede's Ocean/Ganymede's Ocean.m4a",
+    )
+    assert meta.artist == "Santi & Tuğçe"
+    assert meta.album == "Ganymede's Ocean"
+    assert meta.title == "Ganymede's Ocean"
