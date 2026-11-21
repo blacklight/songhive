@@ -456,3 +456,24 @@ async def test_download_external_mp4_audio_rewrites_ftyp_brand(client, db_sessio
     assert response.content[8:12] == b"M4A "
     assert response.content[12:] == mp4_data[12:]
     assert "audio/mp4" in response.headers.get("content-type", "")
+
+
+async def test_download_track_releases_db_before_serving_bytes(client, local_track, db_session, monkeypatch):
+    """The pooled DB connection is released before FileResponse streams bytes."""
+    from songhive.storage.local import LocalStorage
+
+    track, data = local_track
+    seen = []
+    original_retrieve = LocalStorage.retrieve
+
+    async def _retrieve(self, path):
+        seen.append(db_session.in_transaction())
+        return await original_retrieve(self, path)
+
+    monkeypatch.setattr(LocalStorage, "retrieve", _retrieve)
+
+    response = client.get(f"/api/v1/tracks/{track.id}/download")
+
+    assert response.status_code == 200
+    assert response.content == data
+    assert seen == [False]

@@ -101,7 +101,13 @@ from ..routes.files import (
     apply_audio_import,
     plan_audio_import,
 )
-from ._common import AudioImportOptions, GenreListRequest, TagListRequest, enforce_editable_fields
+from ._common import (
+    AudioImportOptions,
+    GenreListRequest,
+    TagListRequest,
+    commit_and_release_db,
+    enforce_editable_fields,
+)
 from ._images import remove_entity_image, upload_entity_image
 
 router = APIRouter(prefix="/tracks")
@@ -854,6 +860,7 @@ async def download_track(
 
     stored_file = await resolve_track_file(db, track_id)
     if stored_file is not None:
+        await commit_and_release_db(db)
         return await _download_stored_file_response(stored_file, disposition, storage)
 
     try:
@@ -867,6 +874,8 @@ async def download_track(
 
     if stream is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    await commit_and_release_db(db)
 
     content_type = stream.content_type or "application/octet-stream"
 

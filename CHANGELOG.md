@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `streams`: Playback now skips tracks that resolve to no playable
+  source instead of stalling — the queue advances past them (bounded)
+  and skipped tracks no longer record listens.
+  ([`571756a`](https://git.platypush.tech/blacklight/songhive/commit/571756ae30a338c167210600a8e6278d33c4fced)).
+
 ## 0.4.26
 
 ### Fixed

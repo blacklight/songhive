@@ -63,7 +63,7 @@ from ..deps import (
 )
 from ..middleware.rate_limit import rate_limit, rate_limit_account, rate_limit_file_download
 from ..responses import TrackResponse, TrackSummary, build_track_summary
-from ._common import AudioImportOptions, HasOwnerId, redact_owner
+from ._common import AudioImportOptions, HasOwnerId, commit_and_release_db, redact_owner
 from .external_libraries import (
     ExternalDuplicateResolutionRequest,
     ExternalDuplicateWarning,
@@ -923,6 +923,7 @@ async def download_file(
 
     if not await payment_access.file_download_access(db, file_id, user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    await commit_and_release_db(db)
     return await _download_stored_file_response(stored_file, disposition, storage)
 
 

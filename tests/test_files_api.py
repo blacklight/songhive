@@ -120,6 +120,32 @@ def test_download_file(files_client, regular_user, auth_headers, upload_txt):
     assert 'filename="test.txt"' in response.headers["Content-Disposition"]
 
 
+async def test_download_file_releases_db_before_serving_bytes(
+    files_client, regular_user, auth_headers, upload_txt, db_session, monkeypatch
+):
+    """The pooled DB connection is released before FileResponse streams bytes."""
+    from songhive.storage.local import LocalStorage
+
+    data, content = upload_txt
+    seen = []
+    original_retrieve = LocalStorage.retrieve
+
+    async def _retrieve(self, path):
+        seen.append(db_session.in_transaction())
+        return await original_retrieve(self, path)
+
+    monkeypatch.setattr(LocalStorage, "retrieve", _retrieve)
+
+    response = files_client.get(
+        f"/api/v1/files/{data['id']}/download",
+        headers=auth_headers(regular_user),
+    )
+
+    assert response.status_code == 200
+    assert response.content == content
+    assert seen == [False]
+
+
 def test_download_file_cache_headers_private(files_client, regular_user, auth_headers, upload_txt):
     """Non-public files are served with a private immutable Cache-Control header."""
     data, _ = upload_txt

@@ -70,6 +70,11 @@ def validate_item_type(value: str) -> str:
     return value
 
 
+async def commit_and_release_db(db: AsyncSession) -> None:
+    """Commit pending work so the pooled connection returns before streaming bytes."""
+    await db.commit()
+
+
 async def load_and_authorize(
     db: AsyncSession,
     current_user: User,
