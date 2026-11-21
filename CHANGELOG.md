@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- `metadata`: Untagged audio files in external libraries no longer
+  import under "Unknown Artist" with their full path as the title —
+  artist, album, title and track/disc numbers are now derived from the
+  file's `Artist/Album/NN - Title.ext` path when embedded tags are
+  missing or hold placeholders, and MusicBrainz enrichment queries with
+  those hints instead of the raw path. Track edits also keep a new
+  `artist_name` when `extra_artists` is sent in the same request.
+  ([`1f2031c`](https://git.platypush.tech/blacklight/songhive/commit/1f2031c16d2e24a3999e9a1d8760510d1bd0173b)).
+
 ## 0.4.25
 
 ### Fixed
