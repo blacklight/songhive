@@ -10,6 +10,11 @@ All notable changes to this project will be documented in this file.
   source instead of stalling — the queue advances past them (bounded)
   and skipped tracks no longer record listens.
   ([`571756a`](https://git.platypush.tech/blacklight/songhive/commit/571756ae30a338c167210600a8e6278d33c4fced)).
+- `api`: File and track downloads now finish database work before
+  streaming bytes, preventing bursts of media fetches (e.g. Fediverse
+  crawlers) from exhausting the connection pool and making the instance
+  unavailable.
+  ([`c744fd6`](https://git.platypush.tech/blacklight/songhive/commit/c744fd64eec72150981ca769591c58b023d31ed5)).
 
 ## 0.4.26
 
